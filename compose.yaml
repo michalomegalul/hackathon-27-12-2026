@@ -1,4 +1,4 @@
-# Placeholder app: replace with the real service, keep it published on port 3000.
+# placeholder
 services:
   web:
     image: nginx:alpine
