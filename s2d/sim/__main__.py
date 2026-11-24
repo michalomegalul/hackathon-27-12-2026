@@ -2,6 +2,7 @@
 
     python -m s2d.sim run examples/a.yaml --seed 42 --out data/a/
     python -m s2d.sim run examples/a.yaml --out data/a/ --check   # + no-story twin and churn report
+    python -m s2d.sim run examples/a.yaml --out data/a_nostory/ --no-story
 """
 
 import argparse
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--seed", type=int, default=None, help="overrides meta.seed")
     run.add_argument("--out", required=True)
     run.add_argument("--n-customers", type=int, default=None, help="overrides entities.customers.n")
+    run.add_argument("--no-story", action="store_true", help="drop all events (the no-story twin)")
     run.add_argument("--strict", action="store_true", help="fail on events that are not implemented yet")
     run.add_argument("--check", action="store_true", help="also run the no-story twin and print target vs realized")
     args = parser.parse_args(argv)
@@ -30,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     spec = load_spec(args.spec)
     if args.n_customers:
         spec.entities.customers.n = args.n_customers
+    if args.no_story:
+        spec = without_story(spec)
 
     t0 = time.perf_counter()
     world = simulate(spec, seed=args.seed, strict=args.strict)

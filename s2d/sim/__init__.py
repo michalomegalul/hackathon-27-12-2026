@@ -61,7 +61,7 @@ def simulate(spec: StorySpec, seed: int | None = None, strict: bool = False) -> 
 
     start = np.datetime64(cal.dates[0], "D")
     churned = result.churn_day >= 0
-    churn_date = np.where(churned, start + result.churn_day.astype("timedelta64[D]"), np.datetime64("NaT"))
+    churn_date = np.where(churned, start + result.churn_day.astype("timedelta64[D]"), np.datetime64("NaT", "D"))
     truth = {
         "answer_key": story.answer_key,
         "decoys": story.decoys,
