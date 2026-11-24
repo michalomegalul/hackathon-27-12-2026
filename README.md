@@ -99,6 +99,7 @@ uv run python -m s2d.compiler examples/stories/pekarna.yaml --out spec.yaml   # 
 uv run python -m s2d.texts generate examples/a.yaml                           # text pools, ~2.5 h on 26b
 uv run python -m s2d.texts generate --generic                                 # generic pool
 uv run python -m s2d.texts stats data/text_pools/prazirna_zrnko.json
-uv run pytest                                                                 # tests
-uv run pytest -m integration                                                  # + real Ollama
+uv run pytest                                  # all tests; integration ones skip if Ollama is down
+uv run pytest -m "not integration"             # offline only
+uv run pytest -m integration -s                # only the real-Ollama tests, with timings
 ```

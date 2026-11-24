@@ -1,0 +1,172 @@
+version: 1
+meta:
+  seed: 8822
+  start: '2025-01-01'
+  days: 730
+  currency: CZK
+  locale: cs_CZ
+  difficulty: medium
+company:
+  name: Bylinka Box
+  legal_form: s.r.o.
+  industry: subscription
+  channels:
+  - channel: eshop
+    weight: 0.6
+  - channel: app
+    weight: 0.4
+  cities:
+  - name: Praha
+    weight: 0.4
+    has_store: false
+  - name: Brno
+    weight: 0.3
+    has_store: false
+  - name: Ostrava
+    weight: 0.2
+    has_store: false
+  - name: Plzeň
+    weight: 0.1
+    has_store: false
+  description: Předplatné přírodní kosmetiky zasílané po celé ČR.
+entities:
+  customers:
+    n: 9000
+    growth_per_year: 0.15
+    segments:
+    - id: maminky
+      share: 0.5
+      base_orders_per_month: 1.0
+      price_sensitivity: 1.1
+      base_churn_per_month: 0.03
+    - id: studentky
+      share: 0.3
+      base_orders_per_month: 1.2
+      price_sensitivity: 1.8
+      base_churn_per_month: 0.05
+    - id: darkovi_kupujici
+      share: 0.2
+      base_orders_per_month: 0.5
+      price_sensitivity: 1.0
+      base_churn_per_month: 0.02
+  products:
+    categories:
+    - id: kremy
+      n_skus: 15
+      price_min: 350.0
+      price_max: 850.0
+      supplier: S_VAL
+      zipf_s: 1.1
+    - id: mydla
+      n_skus: 25
+      price_min: 120.0
+      price_max: 280.0
+      supplier: S_VAL
+      zipf_s: 1.2
+    - id: obal
+      n_skus: 5
+      price_min: 10.0
+      price_max: 50.0
+      supplier: S_POL
+      zipf_s: 1.0
+  suppliers:
+  - id: S_VAL
+    name: Valašská příroda
+    lead_time_days: 7
+    reliability: 0.98
+  - id: S_POL
+    name: EcoPack Poland
+    lead_time_days: 14
+    reliability: 0.92
+  stores:
+    per_city_with_store: 0
+  employees:
+    support_agents: 3
+    tickets_per_agent_day: 20.0
+baseline:
+  seasonality:
+    weekly:
+    - 0.9
+    - 0.9
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.1
+    - 0.8
+    profile: retail_cz
+    black_friday: true
+    christmas: true
+    cz_holidays_closed: true
+  payment_failure_rate: 0.02
+  return_rate: 0.03
+  review_rate: 0.15
+  ticket_rate_per_order: 0.04
+events:
+- id: E1
+  type: campaign
+  start: '2026-03-01'
+  target:
+    segment:
+    - studentky
+  params:
+    budget_czk: 150000.0
+  effects:
+  - metric: acquisition_rate
+    size: 1.2
+    lag_days: 0
+    ramp_days: 7
+    duration_days: 30
+    decay_halflife_days: 14
+  - metric: purchase_rate
+    size: 0.3
+    lag_days: 0
+    ramp_days: 7
+    duration_days: 30
+    decay_halflife_days: 14
+  narrative_cs: Influencerská kampaň zaměřená na studentky.
+- id: E2
+  type: churn_shock
+  start: '2026-05-01'
+  target:
+    segment:
+    - studentky
+  params:
+    churn_pct: 25.0
+    churn_window_days: 30
+  effects:
+  - metric: churn_hazard
+    size: 2.5
+    lag_days: 0
+    ramp_days: 14
+    duration_days: 30
+    decay_halflife_days: 15
+  caused_by: E1
+  narrative_cs: Čtvrtina nových studentek po kampani odejde.
+- id: E3
+  type: supplier_delay
+  start: '2026-07-01'
+  target:
+    category:
+    - obal
+    supplier:
+    - S_POL
+  params:
+    lead_time_multiplier: 2.0
+    delivery_delay_days: 7.0
+  effects:
+  - metric: ticket_rate
+    size: 2.0
+    lag_days: 0
+    ramp_days: 3
+    duration_days: 14
+    decay_halflife_days: 7
+  narrative_cs: Výpadek polského dodavatele obalů způsobuje zpoždění a stížnosti.
+decoys:
+- type: seasonal_peak
+  date: '2025-12-15'
+  target:
+    segment:
+    - darkovi_kupujici
+  size: 2.0
+noise:
+  messiness: light
