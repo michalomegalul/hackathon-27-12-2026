@@ -1,0 +1,28 @@
+[project]
+name = "story2data"
+version = "0.1.0"
+description = "Story2Data: turn a company description + story into a linked relational dataset"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy==2.5.5",
+    "pandas==3.1.1",
+    "pyarrow==26.0.1",
+    "duckdb==2.0.1",
+    "pydantic==2.14.4",
+    "pyyaml==6.0.4",
+    "faker==40.63.0",
+    "holidays==0.109",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+    "matplotlib==3.11.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

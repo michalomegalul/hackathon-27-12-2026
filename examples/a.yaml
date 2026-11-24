@@ -1,0 +1,90 @@
+version: 1
+meta: {seed: 20261127, start: 2025-01-01, days: 670, currency: CZK, locale: cs_CZ, difficulty: medium}
+company:
+  name: Pražírna Zrnko
+  legal_form: s.r.o.
+  industry: cafe_chain
+  description: Výběrová káva, e-shop s předplatným a 4 kavárny.
+  channels: [{eshop: 0.55}, {store: 0.45}]
+  cities:
+    - {name: Praha,   weight: 0.45, has_store: true}
+    - {name: Brno,    weight: 0.25, has_store: true}
+    - {name: Ostrava, weight: 0.15, has_store: true}
+    - {name: Plzeň,   weight: 0.15, has_store: true}
+entities:
+  customers:
+    n: 12000
+    growth_per_year: 0.20
+    segments:
+      - {id: student,     share: 0.25, base_orders_per_month: 1.2, price_sensitivity: 2.0, base_churn_per_month: 0.04}
+      - {id: predplatitel, share: 0.30, base_orders_per_month: 2.0, price_sensitivity: 0.8, base_churn_per_month: 0.02}
+      - {id: bezny,       share: 0.45, base_orders_per_month: 0.8, price_sensitivity: 1.0, base_churn_per_month: 0.03}
+  products:
+    categories:
+      - {id: etiopie,   n_skus: 6,  price_min: 290, price_max: 490, supplier: S_ETH, zipf_s: 1.1}
+      - {id: kolumbie,  n_skus: 8,  price_min: 250, price_max: 420, supplier: S_COL, zipf_s: 1.1}
+      - {id: espresso,  n_skus: 10, price_min: 220, price_max: 380, supplier: S_BRA, zipf_s: 1.2}
+      - {id: prislusenstvi, n_skus: 25, price_min: 150, price_max: 4900, supplier: S_CZ, zipf_s: 1.3}
+  suppliers:
+    - {id: S_ETH, name: Addis Green Coffee, lead_time_days: 21, reliability: 0.95}
+    - {id: S_COL, name: Huila Cooperative,  lead_time_days: 25, reliability: 0.95}
+    - {id: S_BRA, name: Minas Trading,      lead_time_days: 18, reliability: 0.97}
+    - {id: S_CZ,  name: Barista Potřeby s.r.o., lead_time_days: 3, reliability: 0.99}
+  stores: {per_city_with_store: 1}
+  employees: {support_agents: 4, tickets_per_agent_day: 25}
+baseline:
+  seasonality: {weekly: [0.95,0.95,1.0,1.0,1.1,1.2,0.8], profile: winter_peak, black_friday: true, christmas: true, cz_holidays_closed: true}
+  payment_failure_rate: 0.02
+  return_rate: 0.01
+  review_rate: 0.12
+  ticket_rate_per_order: 0.015
+events:
+  - id: E1
+    type: price_change
+    start: 2026-03-01
+    target: {category: [etiopie, kolumbie, espresso]}
+    params: {price_change_pct: 15}
+    effects:
+      - {metric: purchase_rate, size: -0.06, lag_days: 0,  ramp_days: 7,  duration_days: null, decay_halflife_days: null}
+    caused_by: null
+    narrative_cs: Zdražení kávy o 15 % od 1. 3. 2026.
+  - id: E2
+    type: price_change
+    start: 2026-03-01
+    target: {segment: [student]}
+    params: {}
+    effects:
+      - {metric: churn_hazard, size: 0.60, lag_days: 42, ramp_days: 14, duration_days: 45, decay_halflife_days: 21}
+    caused_by: E1
+    narrative_cs: Studenti po zdražení odcházejí se zpožděním ~6 týdnů.
+  - id: E3
+    type: supplier_delay
+    start: 2026-05-04
+    target: {supplier: [S_ETH]}
+    params: {lead_time_multiplier: 3.0}
+    effects:
+      - {metric: ticket_rate, size: 1.5, lag_days: 10, ramp_days: 3, duration_days: 35, decay_halflife_days: 7}
+    caused_by: null
+    narrative_cs: Zpoždění dodávky z Etiopie → vyprodaná etiopská zrna, stížnosti.
+  - id: E4
+    type: quality_issue
+    start: 2026-05-14
+    target: {city: [Brno], segment: [predplatitel]}
+    params: {}
+    effects:
+      - {metric: churn_hazard, size: 0.80, lag_days: 21, ramp_days: 7, duration_days: 30, decay_halflife_days: 14}
+    caused_by: E3
+    narrative_cs: Brněnští předplatitelé po výpadku a stížnostech částečně odchází.
+  - id: E5
+    type: competitor_entry
+    start: 2026-09-07
+    target: {city: [Brno], channel: [store]}
+    params: {}
+    effects:
+      - {metric: purchase_rate, size: -0.20, lag_days: 0, ramp_days: 30, duration_days: null, decay_halflife_days: null}
+    caused_by: null
+    narrative_cs: Otevření konkurenční kavárny v Brně.
+decoys:
+  - {type: viral_spike, date: 2025-10-14, target: {category: [prislusenstvi]}, size: 2.5}
+  - {type: seasonal_peak, date: 2025-11-28, target: {}, size: 1.8}
+noise: {messiness: light}
