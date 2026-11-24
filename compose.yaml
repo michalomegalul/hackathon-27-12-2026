@@ -1,5 +1,22 @@
-# placeholder
 services:
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    environment:
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
+      OLLAMA_URL: ${OLLAMA_URL:-http://192.168.4.19:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:26b}
+      OLLAMA_DESKTOP_URL: ${OLLAMA_DESKTOP_URL:-}
+      OLLAMA_DESKTOP_MODEL: ${OLLAMA_DESKTOP_MODEL:-gemma4:12b}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DATA_DIR: /data
+      LLM_CACHE_DIR: /data/llm_cache
+      TEXT_POOL_DIR: /data/text_pools
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
   web:
     image: nginx:alpine
     ports:
@@ -7,4 +24,6 @@ services:
     volumes:
       - ./site:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
     restart: unless-stopped
