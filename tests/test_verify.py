@@ -14,7 +14,9 @@ def _spec(n=6000):
 def test_hypotheses_follow_the_event():
     spec = _spec()
     hs = {h.event_id: h for h in verify.hypotheses(spec)}
-    assert "E3" not in hs  # ticket_rate: no test (and not simulated)
+    e3 = [h for h in verify.hypotheses(spec) if h.event_id == "E3"]
+    assert [(h.kpi, h.vary, h.treated, h.topic) for h in e3] == [
+        ("tickets", "supplier", ["S_ETH"], "vyprodáno"), ("stockout_days", "supplier", ["S_ETH"], None)]
     e1, e2, e4, e5 = hs["E1"], hs["E2"], hs["E4"], hs["E5"]
     assert (e1.kpi, e1.vary, e1.treated, e1.fixed) == ("orders", "category", ["etiopie", "kolumbie", "espresso"], {})
     assert e1.price_pct == 15 and e1.direction == "down"
@@ -40,7 +42,7 @@ def worlds():
 def test_sql_gives_the_same_numbers(worlds):
     _, res = worlds
     tested = [r for r in res["tests"] if r["status"] != "not_testable"]
-    assert len(tested) == 4
+    assert len(tested) == 6
     for r in tested:
         assert r["sql_matches"], (r["event_id"], r["sql_result"], r["measured_pct"])
         assert r["twin"]["sql_matches"]

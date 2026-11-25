@@ -309,9 +309,9 @@ def _later_tables(ks: KPISet, con, have: dict[str, set[str]]) -> None:
         ev["date"] = pd.to_datetime(ev["date"])
         _add_ratio(ks, "rating_mean", ev, dims, "rating")
     t = have.get("tickets")
-    if t and (dc := date_col(t, "created_date", "ticket_date", "date")):
+    if t and (dc := date_col(t, "created_date", "ticket_date", "date", "opened_at")):
         topic = "t.topic" if "topic" in t else "NULL"
-        ev = con.execute(f"SELECT t.{dc} AS date, {topic} AS topic FROM tickets t").df()
+        ev = con.execute(f"SELECT CAST(t.{dc} AS DATE) AS date, {topic} AS topic FROM tickets t").df()
         ev["date"] = pd.to_datetime(ev["date"])
         _add_counts(ks, "tickets", ev, ["topic"] if "topic" in t else [], pairs=False)
 

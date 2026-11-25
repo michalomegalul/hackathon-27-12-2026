@@ -202,10 +202,21 @@ class Service:
         self.upset[buyers[~leave]] = 0.0
         return leave
 
+    def lost_orders(self, t: int, customer: np.ndarray, product: np.ndarray) -> None:
+        """Orders that could not be served (out of stock): a `vyprodáno` ticket now and then,
+        and a little upset."""
+        from .inventory import LOST_TICKET_P, LOST_UPSET
+        self._upset_at[t + 1].append((customer, np.full(len(customer), LOST_UPSET)))
+        w = self.rng_t.random(len(customer)) < LOST_TICKET_P
+        self.add_tickets(np.full(w.sum(), -1), customer[w], t + self.rng_t.geometric(0.7, w.sum()) - 1,
+                         np.full(w.sum(), "vyprodáno", dtype=object), self.cal.n_days, product[w])
+
     def on_orders(self, t: int, order_id: np.ndarray, customer: np.ndarray, is_store: np.ndarray,
-                  cancelled: np.ndarray) -> None:
+                  cancelled: np.ndarray, main_product: np.ndarray) -> None:
         """Deliveries, reviews and tickets for today's orders (cancelled ones get nothing)."""
         ok = ~cancelled
+        self._main_product = getattr(self, "_main_product", [])
+        self._main_product.append(main_product)
         ship = ok & ~is_store
         n_days = self.cal.n_days
         rng = self.rng_d
@@ -275,10 +286,13 @@ class Service:
                          np.concatenate([lday, bday]),
                          np.concatenate([np.full(late_t.sum(), "zpoždění", dtype=object), topic_b]), n_days)
 
-    def add_tickets(self, order_id, customer, day, topic, n_days) -> None:
-        """Queue tickets to be opened on `day` (order_id 0 = no order)."""
+    def add_tickets(self, order_id, customer, day, topic, n_days, product=None) -> None:
+        """Queue tickets to be opened on `day` (order_id -1 = no order; product -1 = the
+        order's main product, filled in when the tables are built)."""
+        if product is None:
+            product = np.full(len(order_id), -1)
         keep = day < n_days
-        order_id, customer, day, topic = order_id[keep], customer[keep], day[keep], topic[keep]
+        order_id, customer, day, topic, product = order_id[keep], customer[keep], day[keep], topic[keep], product[keep]
         n = len(order_id)
         if not n:
             return
@@ -286,7 +300,8 @@ class Service:
         idx = np.arange(k0, k0 + n)
         self._n_tickets += n
         never = self.rng_t.random(n) < UNRESOLVED_P
-        self.tickets.append({"order_id": order_id, "customer": customer, "day": day, "topic": topic, "never": never})
+        self.tickets.append({"order_id": order_id, "customer": customer, "day": day, "topic": topic,
+                             "never": never, "product": product})
         self._grow(k0 + n)
         self._t_customer[idx] = customer
         self._t_never[idx] = never
@@ -310,6 +325,7 @@ class Service:
     def tables(self, start: np.datetime64, orders: pd.DataFrame, rng: np.random.Generator) -> dict[str, pd.DataFrame]:
         n_days = self.cal.n_days
         day0 = np.datetime64(start, "D")
+        main = np.concatenate(getattr(self, "_main_product", [np.zeros(0, dtype=np.int64)]))  # per order
 
         def dates(days, valid):
             out = day0 + days.astype("timedelta64[D]")
@@ -338,6 +354,7 @@ class Service:
             "review_id": np.arange(1, len(order) + 1),
             "customer_id": r["customer"][order] + 1,
             "order_id": r["order_id"][order] + 1,
+            "product_id": main[r["order_id"][order]] + 1,
             "created_at": rts,
             "review_date": rts.astype("datetime64[D]"),
             "rating": r["rating"][order],
@@ -345,7 +362,9 @@ class Service:
             "text": "",
         })
 
-        t = _cat(self.tickets, ["order_id", "customer", "day", "topic", "never"])
+        t = _cat(self.tickets, ["order_id", "customer", "day", "topic", "never", "product"])
+        if len(t["product"]):
+            t["product"] = np.where(t["product"] >= 0, t["product"], main[np.maximum(t["order_id"], 0)])
         n_t = len(t["day"])
         resolved = self._t_resolved[:n_t] if n_t else np.zeros(0, dtype=np.int64)
         opened_ts = day0 + t["day"].astype("timedelta64[D]") + _seconds(rng, n_t, 7, 22)
@@ -357,6 +376,7 @@ class Service:
             "ticket_id": np.arange(1, n_t + 1),
             "customer_id": t["customer"][order] + 1,
             "order_id": pd.array(np.where(t["order_id"][order] >= 0, t["order_id"][order] + 1, 0), dtype="Int64"),
+            "product_id": t["product"][order] + 1,
             "topic": t["topic"][order],
             "opened_at": opened_ts[order],
             "resolved_at": res_ts[order],

@@ -715,3 +715,43 @@ the top of `s2d/detective/scan.py`.
       Example A seed 42 (40k, medium, calibrated): **E4 is calibrated to +85.5 % hazard on its
       own target (story +80 %), was ×2.2 widened to all of Brno; measured +93 % [49, 145],
       z 4.7, twin z 0.2.** E2 (students, leavers) missed at z 2.95 this run: story 3/4, twin 0/4.
+73. **Inventory and supply** (`s2d/sim/inventory.py`; tables `suppliers`, `shipments_in`,
+    `inventory_daily`). Baskets are now drawn inside the day loop (same rules as decision 18,
+    plus `is_main`), so they can be served from stock.
+    - **Replenishment:** each supplier is reviewed once a week (its own weekday), order-up-to
+      S = demand × (lead time + 7 + safety), safety = 4 days + 0.3 × lead time, minus stock
+      and what is on its way. `demand` is a running estimate (28-day half-life) of units sold
+      *plus lost*, started from the expected demand of the starting base. A shipment arrives
+      after the lead time; with probability 1 − reliability another 0.3–1.0 lead times later.
+      Warm start: the weekly orders of the last lead time are already on their way. One
+      shipment = one supplier's weekly order; `shipments_in` has one row per product line
+      (`shipment_line_id`, `shipment_id`, ordered / expected / received date, quantity).
+      Baseline (Example A, 40k): 0.8 % of product-days at zero stock, 1.1 % of units lost,
+      all from unreliable suppliers.
+    - **Serving:** lines are served in order while stock lasts. A failed main item is replaced
+      by another product of its category in stock with p 0.6, or, if the whole category is
+      out, by any product in stock with p 0.3. **An order with no line left is lost: it is not
+      in `orders` at all** (an e-shop shows "vyprodáno" before checkout), the customer writes a
+      `vyprodáno` ticket with p 0.08 (no order_id; `tickets.product_id` = the wanted product)
+      and gets upset 0.05 (decision 68).
+    - **`supplier_delay`** (needs `params.lead_time_multiplier` and a target supplier or
+      category): every shipment of the target's products that would arrive while the event is
+      on (start .. start + the longest lag + ramp + duration of its effects, 30 days if none is
+      finite) and was ordered before its end takes multiplier × lead time from its order date,
+      also those already on their way. Sales stop only when the shelf runs empty.
+    - **`stockout`**: the target's products cannot be sold while its first effect is on.
+    - Their effects (`ticket_rate`, `purchase_rate`, `churn_hazard`) are **emergent** (decision 69):
+      lost orders, `vyprodáno` tickets, upset. Example A seed 42, 40k: S_ETH shelves are empty
+      from about 05-12 (start 05-04; the story said lag 10) to mid-June, `vyprodáno` tickets go
+      from ~15 to ~100 a week, nothing in the twin.
+    - `tickets.product_id` and `reviews.product_id`: the order's main product (or the wanted one).
+74. **Verifier for supply events.** `ticket_rate` → **tickets per day** with the topic the event
+    is about (`vyprodáno` for supplier_delay / stockout, `zpoždění` for courier_change), joined to
+    products, so a supplier target varies `p.supplier_id` (`supplier` is now first in KEY_ORDER;
+    KPIs without a supplier column drop it). The DiD is a **difference in tickets a day**, not
+    relative: before a stockout the target may have no sold-out ticket at all (6k customers:
+    0.0 a day before, so the relative DiD was 10^11 %). A supplier_delay / stockout also gets a
+    **zero-stock test**: share of the target's products with `stock_units = 0` per day
+    (inventory_daily), pp DiD against the other products, at the same T as its first effect.
+    Example A seed 42 (40k, uncalibrated): E3 zero-stock +78 pp (twin 0.00), sold-out tickets
+    confirmed z ≈ 50 (twin z 0.2). Calibration does not touch emergent effects (decision 69).

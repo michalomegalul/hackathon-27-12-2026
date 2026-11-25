@@ -45,16 +45,22 @@ Z_CONFIRM = 3.0               # placebo z needed to confirm
 WARMUP_DAYS = 90              # leavers / new customers: the first days of the data are incomplete
 LEAVER_EDGE_DAYS = 120        # a leaver has no order in the last 120 days of the data
 LEAVER_MAX_GAP = 45          # leavers: only regular buyers (average gap <= 45 d); sparse ones blur the date
-KEY_ORDER = ("category", "city", "channel", "segment")  # the first key of a target is the one varied
+KEY_ORDER = ("supplier", "category", "city", "channel", "segment")  # the first key of a target is the one varied
 
 KPI = {"purchase_rate": "orders", "churn_hazard": "leavers", "acquisition_rate": "new_customers",
-       "delivery_days": "late_share", "rating_mean": "rating"}
+       "delivery_days": "late_share", "rating_mean": "rating", "ticket_rate": "tickets"}
 KPI_CS = {"orders": "objednávky", "leavers": "odchody zákazníků", "new_customers": "noví zákazníci",
           "late_share": "podíl pozdních zásilek", "rating": "průměrné hodnocení",
-          "late_churn": "odchody po pozdní zásilce", "cancellations": "zrušená předplatná"}
+          "late_churn": "odchody po pozdní zásilce", "cancellations": "zrušená předplatná",
+          "tickets": "tikety na podporu", "stockout_days": "podíl vyprodaných produktů"}
 # Ratio KPIs: the daily value is a mean (late share in %, rating in points) and the DiD is a
 # difference in those units, not a relative change (scan.did(ratio=True)).
-RATIO = {"late_share": "pp", "rating": "b."}
+RATIO = {"late_share": "pp", "rating": "b.", "stockout_days": "pp", "tickets": "/den"}
+# Of those, the KPIs whose daily value is a mean of `val` (the rest are daily counts). Tickets
+# are counts with a difference DiD: before a stockout there may be no sold-out ticket at all.
+MEAN_KPIS = {"late_share", "rating", "stockout_days"}
+# The ticket topic an emergent ticket_rate effect is about.
+TICKET_TOPIC = {"supplier_delay": "vyprodáno", "stockout": "vyprodáno", "courier_change": "zpoždění"}
 # Customer-level KPIs read city and channel from the customer (home channel, decision 17).
 COLUMNS = {
     "orders": {"city": "o.city", "channel": "o.channel", "segment": "c.segment", "category": "p.category"},
@@ -63,6 +69,9 @@ COLUMNS = {
     "late_share": {"city": "c.city", "channel": "o.channel", "segment": "c.segment"},
     "rating": {"city": "c.city", "channel": "o.channel", "segment": "c.segment"},
     "cancellations": {"city": "c.city", "channel": "c.preferred_channel", "segment": "c.segment"},
+    "tickets": {"supplier": "p.supplier_id", "category": "p.category", "city": "c.city",
+                "channel": "c.preferred_channel", "segment": "c.segment"},
+    "stockout_days": {"supplier": "p.supplier_id", "category": "p.category"},
 }
 # JOIN + lag (DECISIONS 70): a late parcel, then the customer leaves 30-60 days later.
 LAG_FROM, LAG_TO = 30, 60
@@ -89,6 +98,7 @@ class Hypothesis:
     dropped: list[str] = field(default_factory=list)  # target keys the KPI cannot split by
     unit: str = "%"                 # unit of story_pct / measured_pct: '%' relative, 'pp', 'b.' (points), 'd'
     on_days: int | None = None      # late_churn: days the courier switch lasts (cohort window)
+    topic: str | None = None        # tickets: only this topic
 
     @property
     def T(self) -> date:
@@ -127,7 +137,7 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
         story_pct = float(effect.size)  # days late / rating points, not scaled (DECISIONS 67)
         direction = "up" if story_pct > 0 else "down"
         unit = "d" if kpi == "late_share" else "b."
-    elif event.type == EventType.courier_change:
+    elif event.type in (EventType.courier_change, EventType.supplier_delay, EventType.stockout):
         story_pct = round(100 * effect.size, 4)  # emergent: the story's expectation, not scaled
         direction = "up" if story_pct > 0 else "down"
     else:
@@ -141,9 +151,27 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
         start=event.start, lag=effect.lag_days, direction=direction, story_pct=story_pct,
         expected_pct=None, claim_cs=event.narrative_cs or "",
         price_pct=event.params.price_change_pct if event.type == EventType.price_change else None,
-        dropped=dropped, unit=unit)
-    h.expected_pct = None if h.ratio or event.type == EventType.courier_change else _expected(spec, event, effect, h)
+        dropped=dropped, unit=unit, topic=TICKET_TOPIC.get(event.type.value) if kpi == "tickets" else None)
+    emergent = event.type in (EventType.courier_change, EventType.supplier_delay, EventType.stockout)
+    h.expected_pct = None if h.ratio or emergent else _expected(spec, event, effect, h)
     return h
+
+
+def stock_hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | None:
+    """A supplier_delay or stockout empties the shelves of its products: the share of the
+    target products with zero stock (inventory_daily), against the other products. Built
+    once per event (its first effect), at the same date as that effect's test."""
+    if event.type not in (EventType.supplier_delay, EventType.stockout) or effect is not event.effects[0]:
+        return None
+    keys = [k for k in ("supplier", "category") if _values(event.target, k)]
+    if not keys:
+        return None
+    return Hypothesis(
+        event_id=event.id, type=event.type.value, metric="stock", kpi="stockout_days",
+        segment=event.target.describe(), vary=keys[0], treated=_values(event.target, keys[0]),
+        fixed={k: _values(event.target, k) for k in keys[1:]},
+        start=event.start, lag=effect.lag_days, direction="up", story_pct=None, expected_pct=None,
+        claim_cs=event.narrative_cs or "", unit="pp")
 
 
 def join_lag_hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | None:
@@ -201,7 +229,7 @@ def hypotheses(spec: StorySpec, key: pd.DataFrame | None = None) -> list[Hypothe
         for eff in ev.effects:
             if simulated is not None and (ev.id, eff.metric.value) not in simulated:
                 continue
-            for h in (hypothesis(spec, ev, eff), join_lag_hypothesis(spec, ev, eff)):
+            for h in (hypothesis(spec, ev, eff), join_lag_hypothesis(spec, ev, eff), stock_hypothesis(spec, ev, eff)):
                 if h is not None:
                     out.append(h)
     return out
@@ -228,7 +256,7 @@ def _span(kpi: str, lo: date, hi: date) -> tuple[date, date]:
         return lo, hi
     if kpi == "new_customers":
         return lo + timedelta(days=WARMUP_DAYS), hi
-    if kpi == "cancellations":
+    if kpi in ("cancellations", "tickets", "stockout_days"):
         return lo, hi
     return lo + timedelta(days=WARMUP_DAYS), hi - timedelta(days=LEAVER_EDGE_DAYS)
 
@@ -281,6 +309,24 @@ def _events_cte(h: Hypothesis, lo: date, hi: date) -> str:
   JOIN customers c USING (customer_id)
   WHERE {where}
 )"""
+    if h.kpi == "tickets":
+        topic = f"t.topic = {_lit(h.topic)}" if h.topic else "TRUE"
+        return f"""events AS (   -- one row per ticket{f" about '{h.topic}'" if h.topic else ""}, dated at opening
+  SELECT CAST(t.opened_at AS DATE) AS day,
+         {grp} AS grp
+  FROM tickets t
+  JOIN customers c USING (customer_id)
+  LEFT JOIN products p USING (product_id)
+  WHERE {topic} AND {where}
+)"""
+    if h.kpi == "stockout_days":
+        return f"""events AS (   -- one row per product and day; val = 100 if the product had no stock that day
+  SELECT i.date AS day, 100.0 * CAST(i.stock_units = 0 AS INTEGER) AS val,
+         {grp} AS grp
+  FROM inventory_daily i
+  JOIN products p USING (product_id)
+  WHERE {where}
+)"""
     if h.kpi == "cancellations":
         return f"""events AS (   -- one row per cancelled subscription, dated at cancellation
   SELECT s.cancelled_at AS day,
@@ -318,7 +364,7 @@ events AS (   -- a leaver: a regular buyer (average gap <= {LEAVER_MAX_GAP} days
 
 def _ctes(h: Hypothesis, lo: date, hi: date) -> str:
     s0, s1 = _span(h.kpi, lo, hi)
-    agg = "avg(e.val)" if h.ratio else "count(e.grp)"
+    agg = "avg(e.val)" if h.kpi in MEAN_KPIS else "count(e.grp)"
     control = (f"{agg} FILTER (WHERE e.grp = 'control')" if h.vary else "NULL")
     return f"""WITH {_events_cte(h, lo, hi)},
 days AS (
@@ -344,7 +390,7 @@ def sql(h: Hypothesis, lo: date, hi: date) -> str:
     target = h.segment or "everyone"
     ctl = (f"{h.vary} not in ({', '.join(h.treated)})" + (f", same {', '.join(h.fixed)}" if h.fixed else "")
            if h.vary else "none: plain before/after")
-    if h.ratio:  # difference in the KPI's own units (pp of late parcels, rating points)
+    if h.ratio:  # difference in the KPI's own units (pp of late parcels, rating points, tickets a day)
         did = ("round((treated_after - treated_before) - (control_after - control_before), 2)"
                if h.vary else "round(treated_after - treated_before, 2)")
     else:
@@ -738,6 +784,8 @@ def narrative_cs(res: dict) -> str:
              ("rating", "down"): "kleslo průměrné hodnocení", ("rating", "up"): "stouplo průměrné hodnocení",
              ("late_churn", "up"): "odcházelo víc zákazníků po pozdní zásilce",
              ("cancellations", "up"): "přibylo zrušených předplatných",
+             ("tickets", "up"): "přibylo tiketů na podporu", ("tickets", "down"): "ubylo tiketů na podporu",
+             ("stockout_days", "up"): "přibylo vyprodaných produktů",
              ("cancellations", "down"): "ubylo zrušených předplatných",
              ("leavers", "up"): "přibylo odchodů zákazníků", ("leavers", "down"): "ubylo odchodů zákazníků",
              ("new_customers", "up"): "přibylo nových zákazníků", ("new_customers", "down"): "ubylo nových zákazníků"}

@@ -29,6 +29,9 @@ ABSOLUTE_METRICS = {Metric.delivery_days, Metric.rating_mean}
 # what drives them: worse ratings and customer-level churn after late deliveries.
 EMERGENT = {
     EventType.courier_change: {Metric.rating_mean, Metric.churn_hazard, Metric.ticket_rate},
+    # empty shelves: lost orders, `vyprodáno` tickets, a little upset (s2d/sim/inventory.py)
+    EventType.supplier_delay: {Metric.ticket_rate, Metric.purchase_rate, Metric.churn_hazard},
+    EventType.stockout: {Metric.ticket_rate, Metric.purchase_rate, Metric.churn_hazard},
 }
 
 # Curves below this value are treated as "over" (keeps decay tails short).
@@ -145,6 +148,13 @@ def mechanism(spec: StorySpec, event: Event, effect: Effect) -> str:
             raise NotImplementedError(
                 f"metric '{effect.metric.value}' of a courier_change only follows from a courier switch "
                 "(params.delivery_delay_days or a delivery_days effect) in the same cities")
+    if event.type in (EventType.supplier_delay, EventType.stockout):
+        if event.type == EventType.supplier_delay and not event.params.lead_time_multiplier:
+            raise NotImplementedError("supplier_delay needs params.lead_time_multiplier")
+        if not (event.target.supplier or event.target.category):
+            raise NotImplementedError(f"{event.type.value} needs a target supplier or category")
+        if effect.metric in EMERGENT[event.type]:
+            return "emergent"
     if effect.metric in IMPLEMENTED_METRICS:
         return "curve"
     raise NotImplementedError(f"metric '{effect.metric.value}' is not simulated yet")
@@ -161,8 +171,8 @@ TYPE_HANDLERS = {
     EventType.competitor_entry: _effects_only,
     EventType.campaign: _effects_only,
     EventType.quality_issue: _effects_only,
-    EventType.supplier_delay: _not_implemented,
-    EventType.stockout: _not_implemented,
+    EventType.supplier_delay: _effects_only,  # the delay itself lives in inventory.supply_windows
+    EventType.stockout: _effects_only,
     EventType.courier_change: _effects_only,
     EventType.service_outage: _not_implemented,
     EventType.staff_shortage: _not_implemented,

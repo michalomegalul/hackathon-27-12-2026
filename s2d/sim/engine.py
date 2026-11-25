@@ -26,6 +26,7 @@ from .catalog import Catalog
 from .events import CompiledStory
 from .population import Population, target_mask
 from .service import Service
+from .inventory import OTHER_P, SUBSTITUTE_P, Inventory
 from .subscriptions import SCHEDULED_SHARE, build_plans, subscriptions_table
 
 BASKET_EXTRA_ITEM_P = 0.6   # geometric basket size: mean 1/0.6 ≈ 1.7 items
@@ -108,6 +109,10 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
     churn_cause = np.full(pop.n, "", dtype=object)
     order_customer, order_day, order_category, order_failed, order_retry = [], [], [], [], []
     order_channel, order_sub = [], []
+    item_order, item_product, item_qty = [], [], []
+    alive0 = (pop.signup_day <= 0)
+    inv = Inventory(spec, cal, cat, float(pop.base_rate[alive0].sum() * cal.day_factor.mean()),
+                    streams["inventory"])
     n_orders_so_far = 0
 
     for t in range(cal.n_days):
@@ -173,12 +178,29 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
         u = rng_buy.random(len(who))
         main_cat = np.minimum((cdf < u[:, None]).sum(axis=1), n_cats - 1)
 
-        # 3. payment (decided today, so a cancelled order is never shipped), then service.
+        # 3. baskets, served from stock. An order with nothing left is lost (never recorded).
+        inv.start_day(t)
+        line_order, product, qty, is_main = _draw_baskets(len(who), main_cat, cat, rng_buy)
+        line_order, product, qty, is_main, main_product, kept = _serve(
+            t, inv, cat, line_order, product, qty, is_main, main_cat, rng_buy)
+        lost = ~kept
+        if lost.any():
+            svc.lost_orders(t, who[lost], main_product[lost])
+            remap = np.cumsum(kept) - 1
+            line_order = remap[line_order]
+            who, main_cat, channel, is_sub = who[kept], main_cat[kept], channel[kept], is_sub[kept]
+            main_product = main_product[kept]
+        inv.end_day(t)
+
+        # 4. payment (decided today, so a cancelled order is never shipped), then service.
         failed = rng_pay.random(len(who)) < spec.baseline.payment_failure_rate
         retry_ok = rng_pay.random(len(who)) < RETRY_SUCCESS_P
         ids = np.arange(n_orders_so_far, n_orders_so_far + len(who))
+        svc.on_orders(t, ids, who, chan_is_store[channel], failed & ~retry_ok, main_product)
+        item_order.append(line_order + n_orders_so_far)
+        item_product.append(product)
+        item_qty.append(qty)
         n_orders_so_far += len(who)
-        svc.on_orders(t, ids, who, chan_is_store[channel], failed & ~retry_ok)
 
         order_customer.append(who)
         order_day.append(np.full(len(who), t))
@@ -189,8 +211,9 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
         order_sub.append(is_sub)
 
     customer = np.concatenate(order_customer)
-    orders, items = _build_orders(spec, cal, pop, cat, customer, np.concatenate(order_day),
-                                  np.concatenate(order_category), rng_buy, np.concatenate(order_channel))
+    orders, items = _build_orders(spec, cal, pop, cat, customer, np.concatenate(order_day), rng_buy,
+                                  np.concatenate(order_channel), np.concatenate(item_order),
+                                  np.concatenate(item_product), np.concatenate(item_qty))
     sub = np.concatenate(order_sub)
     orders.insert(orders.columns.get_loc("channel") + 1, "subscription_id",
                   pd.array(np.where(sub, plans.sub_id[customer], 0), dtype="Int64"))
@@ -200,6 +223,7 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
     orders["status"] = np.where(cancelled, "cancelled", "completed")
     start = np.datetime64(cal.dates[0], "D")
     service = svc.tables(start, orders, streams["timestamps"])
+    service.update(inv.tables(start))
     service["subscriptions"] = subscriptions_table(plans, pop.table["signup_date"], churn_day, churn_cause,
                                                    start, streams["subscriptions"])
     return SimResult(churn_day, orders, items, payments, service, churn_cause)
@@ -252,7 +276,90 @@ def _churn_causes(idx: np.ndarray, t: int, pop: Population, churn_effects: list[
     return names[np.minimum(pick, len(parts) - 1)]
 
 
-def _build_orders(spec, cal, pop, cat, customer, day, main_cat, rng, channel_idx):
+def _draw_baskets(n: int, main_cat: np.ndarray, cat: Catalog, rng: np.random.Generator):
+    """Baskets of n orders: first item from the main category, extra items from overall
+    popularity, geometric size and quantity. Repeated products in one order are one line.
+    Returns (order index, product, quantity, is_main) per line, sorted by order."""
+    size = rng.geometric(BASKET_EXTRA_ITEM_P, n)
+    item_order = np.repeat(np.arange(n), size)
+    first = np.zeros(len(item_order), dtype=bool)
+    first[np.concatenate([[0], np.cumsum(size)[:-1]]).astype(np.int64)[:n]] = True
+
+    product = np.empty(len(item_order), dtype=np.int64)
+    u = rng.random(len(item_order))
+    product[first] = _pick_in_category(main_cat, u[first], cat)
+    pos = np.searchsorted(cat.global_cdf, u[~first] * cat.global_cdf[-1])
+    product[~first] = np.minimum(pos, len(cat.global_cdf) - 1)
+    quantity = rng.geometric(QUANTITY_P, len(item_order))
+
+    n_p = len(cat.global_cdf)
+    key = item_order * n_p + product
+    key, inverse = np.unique(key, return_inverse=True)
+    quantity = np.bincount(inverse, weights=quantity).astype(np.int64)
+    is_main = np.bincount(inverse, weights=first).astype(bool)
+    return key // n_p, key % n_p, quantity, is_main
+
+
+def _pick_in_category(category: np.ndarray, u: np.ndarray, cat: Catalog, allowed: np.ndarray | None = None):
+    """One product per row from its category by popularity (only `allowed` products; -1 if none)."""
+    out = np.full(len(category), -1, dtype=np.int64)
+    for c in np.unique(category):
+        sel = category == c
+        idx = cat.within_index[c]
+        w = np.diff(np.concatenate([[0], cat.within_cdf[c]]))
+        if allowed is not None:
+            w = w * allowed[idx]
+        if w.sum() <= 0:
+            continue
+        cdf = np.cumsum(w)
+        pos = np.searchsorted(cdf, u[sel] * cdf[-1], side="right")
+        out[sel] = idx[np.minimum(pos, len(idx) - 1)]
+    return out
+
+
+def _serve(t, inv: Inventory, cat: Catalog, line_order, product, qty, is_main, main_cat, rng):
+    """Serve lines from stock. A failed main item may be replaced by another product of its
+    category, or by any product if the category is out. Returns the kept lines, the main
+    product per order (the wanted one if the order is lost) and which orders survive."""
+    n = len(main_cat)
+    main_product = np.full(n, -1, dtype=np.int64)
+    main_product[line_order[is_main]] = product[is_main]
+    ok = inv.fulfil(t, product, qty)
+    fail_main = is_main & ~ok
+    if fail_main.any():
+        avail = inv.available(t) & (inv.stock > 0)
+        o = line_order[fail_main]
+        u1, u2 = rng.random(len(o)), rng.random(len(o))
+        sub = _pick_in_category(main_cat[o], u2, cat, avail)
+        none_in_cat = sub < 0
+        take = np.where(none_in_cat, u1 < OTHER_P, u1 < SUBSTITUTE_P)
+        if none_in_cat.any() and avail.any():
+            g = np.diff(np.concatenate([[0], cat.global_cdf])) * avail
+            cdf = np.cumsum(g)
+            pos = np.searchsorted(cdf, u2[none_in_cat] * cdf[-1], side="right")
+            sub[none_in_cat] = np.minimum(pos, len(cdf) - 1)
+        take &= sub >= 0
+        if take.any():
+            s_order, s_prod, s_qty = o[take], sub[take], qty[fail_main][take]
+            s_ok = inv.fulfil(t, s_prod, s_qty)
+            line_order = np.concatenate([line_order, s_order[s_ok]])
+            product = np.concatenate([product, s_prod[s_ok]])
+            qty = np.concatenate([qty, s_qty[s_ok]])
+            is_main = np.concatenate([is_main, np.ones(s_ok.sum(), dtype=bool)])
+            ok = np.concatenate([ok, np.ones(s_ok.sum(), dtype=bool)])
+            main_product[s_order[s_ok]] = s_prod[s_ok]
+    line_order, product, qty, is_main = line_order[ok], product[ok], qty[ok], is_main[ok]
+    # merge a substitute that is already in the order, keep lines sorted by order
+    n_p = len(cat.global_cdf)
+    key, inverse = np.unique(line_order * n_p + product, return_inverse=True)
+    qty = np.bincount(inverse, weights=qty).astype(np.int64)
+    is_main = np.bincount(inverse, weights=is_main).astype(bool)
+    line_order, product = key // n_p, key % n_p
+    kept = np.bincount(line_order, minlength=n) > 0
+    return line_order, product, qty, is_main, main_product, kept
+
+
+def _build_orders(spec, cal, pop, cat, customer, day, rng, channel_idx, item_order, product, quantity):
     n = len(customer)
     chan_names = np.array([c.channel.value for c in spec.company.channels], dtype=object)
     city_names = np.array([c.name for c in spec.company.cities], dtype=object)
@@ -265,32 +372,6 @@ def _build_orders(spec, cal, pop, cat, customer, day, main_cat, rng, channel_idx
     start = np.datetime64(cal.dates[0], "s")
     ts = start + (day * 86400 + seconds).astype("timedelta64[s]")
 
-    # Baskets: first item from the main category, extra items from overall popularity.
-    size = rng.geometric(BASKET_EXTRA_ITEM_P, n)
-    item_order = np.repeat(np.arange(n), size)
-    first = np.zeros(len(item_order), dtype=bool)
-    first[np.concatenate([[0], np.cumsum(size)[:-1]])] = True
-
-    product = np.empty(len(item_order), dtype=np.int64)
-    u = rng.random(len(item_order))
-    first_cat = main_cat[item_order[first]]
-    first_u = u[first]
-    first_product = np.empty(first.sum(), dtype=np.int64)
-    for c in range(len(cat.category_ids)):
-        sel = first_cat == c
-        pos = np.searchsorted(cat.within_cdf[c], first_u[sel] * cat.within_cdf[c][-1])
-        first_product[sel] = cat.within_index[c][np.minimum(pos, len(cat.within_index[c]) - 1)]
-    product[first] = first_product
-    pos = np.searchsorted(cat.global_cdf, u[~first] * cat.global_cdf[-1])
-    product[~first] = np.minimum(pos, len(cat.global_cdf) - 1)
-    quantity = rng.geometric(QUANTITY_P, len(item_order))
-
-    # Merge repeated products inside one order into a single line.
-    key = item_order * len(cat.global_cdf) + product
-    key, inverse = np.unique(key, return_inverse=True)
-    quantity = np.bincount(inverse, weights=quantity).astype(np.int64)
-    item_order = key // len(cat.global_cdf)
-    product = key % len(cat.global_cdf)
     unit_price = cat.price[day[item_order], product]
     line_total = unit_price * quantity
 

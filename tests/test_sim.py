@@ -36,11 +36,42 @@ def test_curve_shape():
 
 def test_unimplemented_event_type():
     spec = small_spec()
-    with pytest.raises(NotImplementedError, match="supplier_delay"):
+    from s2d.spec import EventType
+    spec.events[2].type = EventType.service_outage  # out of scope: still a stub
+    with pytest.raises(NotImplementedError, match="service_outage"):
         simulate(spec, strict=True)
     world = simulate(spec)  # non-strict: skipped and flagged in the answer key
     key = world.truth["answer_key"].set_index("event_id")
     assert not key.loc["E3", "simulated"] and key.loc["E1", "simulated"]
+
+
+def test_supplier_delay_empties_the_shelf():
+    """E3 of Example A: shipments from S_ETH take 3x as long; the shelf runs empty some days
+    later and `vyprodáno` tickets about those products follow. Nothing of it in the twin."""
+    spec = small_spec(6000)
+    story, twin = simulate(spec, seed=4), simulate(without_story(spec), seed=4)
+    assert story.truth["answer_key"].set_index("event_id").loc["E3", "mechanism"] == "emergent"
+
+    def zero_share(w, lo, hi):
+        inv = w.tables["inventory_daily"].merge(w.tables["products"][["product_id", "supplier_id"]])
+        inv = inv[(inv.supplier_id == "S_ETH") & (inv.date >= lo) & (inv.date < hi)]
+        return (inv.stock_units == 0).mean()
+    lo, hi = np.datetime64("2026-05-14"), np.datetime64("2026-06-11")
+    assert zero_share(story, lo, hi) > 0.5 and zero_share(twin, lo, hi) < 0.05
+    assert zero_share(story, np.datetime64("2026-04-01"), np.datetime64("2026-05-04")) < 0.05
+
+    def sold_out_tickets(w):
+        t = w.tables["tickets"].merge(w.tables["products"][["product_id", "supplier_id"]])
+        t = t[(t.topic == "vyprodáno") & (t.supplier_id == "S_ETH")]
+        d = t.opened_at.dt.date.astype("datetime64[ns]")
+        return ((d >= lo) & (d < hi)).sum()
+    assert sold_out_tickets(story) > 5 * max(sold_out_tickets(twin), 1)
+    # stock is never negative, and inventory flows add up
+    inv = story.tables["inventory_daily"].sort_values(["product_id", "date"])
+    assert (inv.stock_units >= 0).all()
+    prev = inv.groupby("product_id").stock_units.shift()
+    flow = (prev + inv.received_units - inv.sold_units - inv.stock_units).dropna()
+    assert (flow == 0).all()
 
 
 # ---------------------------------------------------------------- determinism + integrity
@@ -68,7 +99,8 @@ def test_foreign_keys():
                       ("order_items", "order_item_id"), ("payments", "payment_id"),
                       ("product_prices", "price_id"), ("deliveries", "delivery_id"),
                       ("reviews", "review_id"), ("tickets", "ticket_id"),
-                      ("subscriptions", "subscription_id"), ("stores", "store_id")]:
+                      ("subscriptions", "subscription_id"), ("stores", "store_id"),
+                      ("suppliers", "supplier_id"), ("shipments_in", "shipment_line_id")]:
         assert t[table][pk].is_unique, f"{table}.{pk} not unique"
     for child, col, parent, pk in [("orders", "customer_id", "customers", "customer_id"),
                                    ("order_items", "order_id", "orders", "order_id"),
@@ -79,6 +111,12 @@ def test_foreign_keys():
                                    ("orders", "store_id", "stores", "store_id"),
                                    ("orders", "subscription_id", "subscriptions", "subscription_id"),
                                    ("subscriptions", "customer_id", "customers", "customer_id"),
+                                   ("tickets", "product_id", "products", "product_id"),
+                                   ("reviews", "product_id", "products", "product_id"),
+                                   ("products", "supplier_id", "suppliers", "supplier_id"),
+                                   ("shipments_in", "product_id", "products", "product_id"),
+                                   ("shipments_in", "supplier_id", "suppliers", "supplier_id"),
+                                   ("inventory_daily", "product_id", "products", "product_id"),
                                    ("reviews", "order_id", "orders", "order_id"),
                                    ("reviews", "customer_id", "customers", "customer_id"),
                                    ("tickets", "order_id", "orders", "order_id"),
