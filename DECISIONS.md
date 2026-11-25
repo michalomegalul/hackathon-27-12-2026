@@ -609,3 +609,86 @@ the top of `s2d/detective/scan.py`.
     E2 +52 %, z 4.2, confirmed, and E1's test +0.4 %, z 0.3. One seed only. The detective
     (bonus) now runs on data calibrated for the verifier, i.e. smaller effects in its terms
     than in rounds 2–3.
+
+## Full simulator (feat/sim-full)
+
+67. **Service layer in the day loop** (`s2d/sim/service.py`). Deliveries, reviews and tickets are
+    drawn the day an order is placed, so a bad experience can change what *that* customer does
+    next. Payment failure is now decided in the loop too (same rule as decision 20), so a
+    cancelled order is never shipped, reviewed or ticketed. Store orders get no delivery. The
+    day step is: service state of the day (parcels arriving, tickets opening and closing) →
+    churn → purchases (with defection, 68) → payment → delivery, review, ticket. New RNG
+    streams are appended (`deliveries`, `tickets`, `reviews`, `service`, `subscriptions`,
+    `inventory`, `dirt`, `timestamps`), so every dataset changed once with this commit.
+    - **Couriers** are fictional (Balík Expres, RychloKurýr, DoDveří; a story's new courier is
+      Levná Doprava). Each city has one baseline courier, late 4–6 % of the time, a late parcel
+      1 + Poisson(0.2) days late. Promise: 2 days after the order, 3 on Friday and Saturday.
+    - **`courier_change`** with `params.delivery_delay_days` (or a `delivery_days` effect) switches
+      its target cities to a new courier while its `delivery_days` curve is on. At strength
+      s = delay × curve(t) the new courier is late with p = min(0.6, s), by s / p days on average,
+      so the mean extra delay is s. `delivery_delay_days` is a stated fact: not scaled by
+      difficulty, not touched by calibration (like `price_change_pct`, decision 9).
+    - **Satisfaction of an order** u = delay_days + N(0, 0.8) (store orders: noise only).
+      **Rating** = round(4.6 − 0.75·u + N(0, 0.6)), clipped to 1–5 (on-time mean ≈ 4.3).
+      **Review** probability = review_rate × (1 + 1.5 if late); date = delivered + Geometric(0.4) − 1;
+      a late parcel rated ≤ 3 gets topic `zpoždění` with p 0.85, otherwise the topic is drawn
+      by rating. `text` is empty; `s2d/texts.py` fills it from the pools.
+    - **Tickets**: the spec's base rate per order (topics kvalita / obsluha / cena / zpoždění /
+      vyprodáno 35/20/15/20/10 %), plus 0.12 per day late (at most 0.6) with topic `zpoždění`,
+      opened a day or two after the promised date. Support resolves them in order of opening,
+      `support_agents × tickets_per_agent_day` a day, each in 0–2 days; 4 % are never resolved
+      (`resolved_at` NULL), and the customer gives up on those after 60 days.
+68. **Churn after a bad experience is customer-level and emerges, nothing is lagged by hand.**
+    - **Upset** = P(leave instead of ordering at the next purchase occasion) =
+      0.5 × clip((u − 1.5) / 3, 0, 1), set when the parcel arrives, fading with a 45-day
+      half-life, cleared when the customer orders again. A day late is mostly tolerated
+      (upset ≈ 0.02), three days late is not (≈ 0.25). The customer acts at their next
+      *purchase occasion* (the Poisson draw that would have been an order), so the departure
+      comes about one purchase gap after the parcel: in Example B ~30–60 days, matching the
+      story's "~5 weeks" without a lag parameter.
+    - **An open ticket** multiplies that customer's daily hazard by 5 until it is resolved
+      (never-resolved: for 60 days).
+    - **The same rules run in the no-story twin.** The twin has late parcels too (4–6 %, nearly
+      all one day), and they barely move churn, which is why the twin's JOIN + lag test stays
+      at z < 2 while the story's is z ≈ 9–10.
+    - `_truth.customer_state.churn_cause`: why each leaver left, one cause drawn in proportion
+      to its share of the hazard (`jiné` baseline, the story event's type → cena / kvalita /
+      konkurence / vyprodáno / zpoždění, `podpora` for an open ticket; defection = zpoždění).
+69. **Effects of a `courier_change` are classified** (`events.mechanism`, answer-key column
+    `mechanism`): `delivery_days` = `courier` (the switch itself); `rating_mean`, `churn_hazard`,
+    `ticket_rate` = `emergent` (not applied; they follow from 67–68 and their size is the
+    story's expectation, not an input). An emergent effect needs a courier switch whose cities
+    cover it (Example B's E2 is caused by E1), otherwise it is not simulated. Answer-key
+    `magnitude_pct` of `delivery_days` and `rating_mean` is in their own units (days, rating
+    points: the report says sizes of these two are absolute). Calibration only scales `curve`
+    effects. The emergent sizes are not controlled: Example B's rating drop comes out at about
+    −1.8 points in the target cities against the story's −0.9.
+70. **Verifier for couriers** (`s2d/verify.py`).
+    - `delivery_days` → **late share** (deliveries dated at the promised day, 100 if late) and
+      `rating_mean` → **mean rating** (by review date): ratio KPIs, daily mean, DiD as a
+      difference in their own units (pp, rating points) with `scan.did(ratio=True)` and the
+      placebo on the same statistic. Treated = target cities, control = the other cities. The
+      late-share row also reports the DiD of the mean delay in days, next to the story's days.
+    - `churn_hazard` of a courier_change gets **two** tests: the usual city-level leavers
+      (decision 63), and **`late_churn`, the JOIN + lag test**: every parcel delivered in the
+      target cities while the new courier runs (start .. start + ramp + duration, at most
+      120 days before the data end), late vs on time, outcome "left 30–60 days later" = this
+      order was the customer's last, and one average gap after it (the customer's own gap up
+      to this order, ≥ 2 order days) falls 30–60 days after the parcel (decision 63's leaver
+      date, per parcel). Statistic: difference of the two shares in pp, 95 % CI and SE from a
+      bootstrap over customers (their parcels are not independent), z = diff / SE. Confirmed =
+      CI excludes 0, late higher, z ≥ 3. The same comparison over the same length *before* the
+      switch is shown as a placebo.
+    - **Unit = the parcel, not the customer.** A customer-level split ("had any late parcel")
+      compares heavy and light buyers: heavy buyers are more likely to get some late parcel and
+      also more likely to come back. On seed 42 it made late customers look *more* loyal
+      (lapse 40 % vs 49 %). Per parcel, lateness is random given the city and the date.
+    - **Result, Example B, 40k customers, seed 42 (calibrated, hard): story 6/6, twin 0/6.**
+      Late share +49.2 pp (z 83.6), mean delay +2.17 d (story 2.5), rating −1.79 (z 21.7),
+      city-level leavers +58 % (z 3.3), **JOIN + lag: 7.4 % of 6569 late parcels vs 3.8 % of
+      4927 on time (×1.96, +3.64 pp [2.8, 4.4], z 9.0); before the switch +0.68 pp, z 1.1.**
+      Seeds 1–5 (no calibration): JOIN + lag z 8.9–10.6, twin ≤ 1.9; city-level leavers z
+      2.0–3.8 (4/5): the aggregate barely shows it, the JOIN does.
+71. **`stores` table** (store_id, city, name, opened_date): `per_city_with_store` stores in every
+    city with a store. `orders.store_id` is set for store orders: the customer's home store,
+    customer_id modulo the city's stores (no RNG).

@@ -67,3 +67,51 @@ def test_narrative_names_confirmed_events_only(worlds):
     for r in res["tests"]:
         if not r["confirmed"]:
             assert r["claim_cs"] not in text
+
+
+# ---------------------------------------------------------------- Example B: courier, JOIN + lag
+
+
+@pytest.fixture(scope="module")
+def courier_worlds():
+    """Example B at 40k customers (its own difficulty, no calibration: the courier events
+    are stated facts and emergent effects, which calibration does not scale)."""
+    spec = load_spec("examples/b.yaml")
+    spec.entities.customers.n = 40000
+    story = simulate(spec, seed=11)
+    twin = simulate(without_story(spec), seed=11)
+    return spec, story, verify.verify_con(verify.world_con(story), spec, story.truth["answer_key"],
+                                          verify.world_con(twin))
+
+
+def test_courier_hypotheses():
+    spec = load_spec("examples/b.yaml")
+    hs = [(h.event_id, h.kpi) for h in verify.hypotheses(spec)]
+    assert hs[:4] == [("E1", "late_share"), ("E1", "rating"), ("E2", "leavers"), ("E2", "late_churn")]
+    lc = verify.hypotheses(spec)[3]
+    assert lc.fixed == {"city": ["Ostrava", "Olomouc"]} and lc.on_days == 120 and str(lc.start) == "2026-02-02"
+
+
+def test_courier_story_is_confirmed_and_the_twin_is_not(courier_worlds):
+    _, _, res = courier_worlds
+    rows = {(r["event_id"], r["kpi"]): r for r in res["tests"]}
+    for k in [("E1", "late_share"), ("E1", "rating"), ("E2", "late_churn")]:
+        assert rows[k]["confirmed"], (k, rows[k].get("z"), rows[k].get("measured_pct"))
+        assert not rows[k]["twin"]["confirmed"], k
+        assert rows[k]["sql_matches"] and rows[k]["twin"]["sql_matches"], k
+    assert rows[("E1", "late_share")]["measured_pct"] > 30            # pp more late parcels
+    assert rows[("E1", "rating")]["measured_pct"] < -0.5             # rating points
+    lc = rows[("E2", "late_churn")]
+    assert lc["groups"]["ratio"] > 1.4                                # late parcels: customers leave more often
+    assert lc["placebo_before"]["z"] < verify.Z_CONFIRM               # not before the switch
+    assert res["twin_confirmed"] == 0
+
+
+def test_courier_churn_is_customer_level(courier_worlds):
+    """The new courier changes nothing in the churn curves: the extra leavers are
+    customers whose own parcel was late (no segment-level hazard is applied)."""
+    _, story, _ = courier_worlds
+    from s2d.spec import Metric
+    assert not any(e.event_id in ("E1", "E2") for e in story.story.for_metric(Metric.churn_hazard))
+    cause = story.truth["customer_state"]["churn_cause"]
+    assert (cause == "zpoždění").sum() > 0
