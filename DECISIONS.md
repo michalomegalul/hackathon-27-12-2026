@@ -187,7 +187,12 @@ the top of `s2d/detective/scan.py`.
     onset.
 43. **Calendar:** CZ public holidays ±3 days, Black Friday −7…+4 days, and 1 Dec –
     7 Jan. December is the whole season, not just its end: the sim's December
-    multiplier starts on the 1st.
+    multiplier starts on the 1st. **It only explains spikes, stockouts and temporary
+    changes shorter than 10 days, or a shift without a control group.** A lasting shift
+    with a control and a confirmed DiD is never `explained_by_calendar`: the control has
+    the same holidays, so the DiD has already removed them. Before this, Example A E5
+    (found at −17.7 %, CI [−23.5, −12.3], confidence 0.72) was discarded because its
+    onset was within 3 days of 28 Sept.
 44. **Spikes** are runs of residual |z| > 3.5. One- and two-day blips are `transient`
     and not reported (story events are lasting changes). Churn spikes are never
     reported: churn dates are estimates. **Three-day spikes are reported, so the

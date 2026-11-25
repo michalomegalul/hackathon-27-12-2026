@@ -49,6 +49,7 @@ STOCKOUT_RUN, STOCKOUT_MIN_RATE = 3, 5.0
 LAGS = (0, 7, 14, 28, 42)
 LAG_MIN_T = 3.0
 LAG_MATCH_DAYS = 14
+CALENDAR_MAX_DAYS = 10    # only spikes and temporary changes shorter than this can be "just the calendar"
 
 
 @dataclass
@@ -253,6 +254,19 @@ def calendar_reason(day: pd.Timestamp, span_end: pd.Timestamp | None = None) -> 
     return None
 
 
+def calendar_applies(kind: str, start: str, end: str | None, has_control: bool) -> bool:
+    """Can a calendar date explain this candidate away? Only a spike or a change
+    that is over within CALENDAR_MAX_DAYS. A lasting shift measured against a
+    control group cannot be the calendar: the control has the same holidays, so
+    the DiD has already removed them."""
+    if kind != "shift":
+        return True
+    if end is not None and (pd.Timestamp(end) - pd.Timestamp(start)).days < CALENDAR_MAX_DAYS:
+        return True
+    return not has_control
+
+
+
 # ---------------------------------------------------------------- the scan
 
 
@@ -445,7 +459,8 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
             c.status = "not_confirmed"
         elif c.confidence < MIN_CONFIDENCE:
             c.status = "not_confirmed"
-        elif reason := calendar_reason(pd.Timestamp(c.start_date)):
+        elif (calendar_applies(c.kind, c.start_date, c.end_date, rv is not None)
+              and (reason := calendar_reason(pd.Timestamp(c.start_date)))):
             c.status = "explained_by_calendar"
             c.evidence += f"; {reason}"
         out.append(c)

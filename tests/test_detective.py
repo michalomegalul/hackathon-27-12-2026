@@ -132,3 +132,46 @@ def test_narrator_uses_detective_step_with_schema(monkeypatch):
     narrate.narrate(_result())
     assert seen["step"] == "detective" and seen["schema"] is narrate.SCHEMA
     assert "C001" in seen["prompt"] and "Nevymýšlej" in seen["prompt"]
+
+
+# ---------------------------------------------------------------- calendar and ramp onset on a synthetic store world
+
+
+def _store_world(seed: int, onset="2026-09-07", ramp=30, size=-0.2):
+    """Daily store and e-shop orders in three cities. Brno stores lose `size`
+    over a linear `ramp` from `onset`. Every store is closed on 28 Sept (a CZ
+    holiday), so a fit on the Brno series alone sees a zero day right there."""
+    from s2d.detective.kpis import KPISet
+    dates = pd.date_range("2025-06-01", "2026-12-31", freq="D")
+    rng = np.random.default_rng(seed)
+    weekly = np.tile([0.95, 0.95, 1.0, 1.0, 1.1, 1.2, 0.8], len(dates) // 7 + 1)[:len(dates)]
+    k = (dates - pd.Timestamp(onset)).days.to_numpy()
+    effect = 1 + size * np.clip((k + 1) / ramp, 0, 1) * (k >= 0)
+    closed = (dates == pd.Timestamp("2026-09-28")).astype(float)
+    base = {"Brno": 60, "Praha": 120, "Ostrava": 50}
+    ks = KPISet(dates=dates)
+    for city, mean in base.items():
+        lam_store = mean * weekly * (effect if city == "Brno" else 1) * (1 - closed)
+        ks.series[("orders", f"city={city};channel=store")] = pd.Series(rng.poisson(lam_store).astype(float), dates)
+        ks.series[("orders", f"city={city};channel=eshop")] = pd.Series(rng.poisson(mean * weekly).astype(float), dates)
+    for city in base:
+        ks.series[("orders", f"city={city}")] = sum(ks.series[("orders", f"city={city};channel={ch}")]
+                                                     for ch in ("store", "eshop"))
+    for ch in ("store", "eshop"):
+        ks.series[("orders", f"channel={ch}")] = sum(ks.series[("orders", f"city={c};channel={ch}")] for c in base)
+    ks.series[("orders", "")] = ks.series[("orders", "channel=store")] + ks.series[("orders", "channel=eshop")]
+    ks.dims["orders"] = ["city", "channel"]
+    return ks
+
+
+def _brno_store(cands):
+    return [c for c in cands if c.segment == "city=Brno;channel=store" and c.kind == "shift"
+            and c.start_date >= "2026-08-01" and c.status not in ("merged",)]
+
+
+def test_calendar_only_explains_spikes_and_short_changes():
+    assert scan.calendar_applies("spike", "2026-09-28", "2026-09-29", has_control=True)
+    assert scan.calendar_applies("shift", "2026-09-25", "2026-09-30", has_control=True)   # 5-day change
+    assert scan.calendar_applies("shift", "2026-09-25", None, has_control=False)          # no control
+    assert not scan.calendar_applies("shift", "2026-09-25", None, has_control=True)
+    assert not scan.calendar_applies("shift", "2026-09-25", "2026-12-01", has_control=True)
