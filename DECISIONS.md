@@ -519,3 +519,91 @@ the top of `s2d/detective/scan.py`.
       DiD shift, and re-set Z_REPORT on twins; (c) calibrate on the path the detector
       takes: for a pair, d = min(d_pair, d of its best parent); (d) the sim tables of
       decision 60 for churn.
+
+## Verifier: the story is in the data (round 4)
+
+62. **Change of strategy: the main proof is a verifier, not the detective** (`s2d/verify.py`).
+    The blind detective stays as a bonus ("hard mode", below the verification in the
+    Score tab). The verifier is not blind and does not search: for every answer-key row
+    with `simulated = true` it builds **one** test from the event itself, so there is no
+    multiple-testing budget to pay and z ≥ 3 is enough.
+    - **KPI from the metric:** purchase_rate → orders per day (orders containing the
+      target categories for a category target), churn_hazard → leavers per day (63),
+      acquisition_rate → new customers per day (signed up during the data, dated at the
+      first order). A `price_change` with `price_change_pct` also reads `product_prices`
+      (mean price of the target's products on start vs the day before).
+    - **Treated = the target; control = the same KPI in the other values of the same
+      dimension** (decision 37). The first key in the order category, city, channel, segment
+      is varied, the rest stays fixed: Brno stores vs stores in the other cities, Brno
+      subscribers vs subscribers elsewhere, coffee vs the other categories. A target with
+      no key is a plain before/after test.
+    - **Windows: [T, T+28) vs [T−28, T), T = start + lag.** Not "28 days before start": E2
+      starts on 2026-03-01 together with E1 and has lag 42, so the window before the start
+      would credit E1's effect on students to E2. Before start + lag the event's curve is 0
+      (decision 7). For lag 0 the two are the same.
+    - **Test:** relative DiD, 95 % CI from the 7-day block bootstrap (`scan.did`), placebo-
+      in-time z (`scan.placebo_z`, the DiD at every date more than 56 days from T); all on
+      the raw daily series (no despiking, no holiday mask), so a student's SQL gives the
+      same numbers. **Confirmed = CI excludes 0, direction as in the story, z ≥ 3**
+      (`Z_CONFIRM`). The result also shows the story's plateau size and its mean over the
+      after-window (`expected_pct`: size × mean curve; E5's 30-day ramp puts only ~half of
+      −25 % into the window).
+    - **SQL:** every test is one readable DuckDB query on `story.duckdb` (events → days →
+      daily treated/control → window means → `did_pct`). The verifier runs that query and
+      checks that `did_pct` equals the Python DiD (to 0.01 pp); its daily CTE is the series
+      the Python test runs on.
+    - **Twin:** the same hypotheses (built from the story's spec) run on the no-story twin.
+63. **Churn KPI for the verifier: leavers, not the repeat rate.** The detective's churn KPIs
+    read "buys less often" as churn (decision 60), so E1's frequency drop for students would
+    pass as E2. A leaver is a regular buyer (≥ 2 order days, average gap ≤ 45 days) with no
+    order in the last 120 days of the data, dated at last order + their average gap. A
+    frequency drop creates no permanent leavers, and the relative DiD of leavers is the
+    hazard multiplier, comparable with the story's size. The series runs from day 90 to
+    120 days before the end. It is a weak KPI: on seed 42 (40k, story sizes) the DiD on the
+    hidden churn dates is +30 %, on estimated dates +10 % (date error IQR −19..+16 days,
+    15 % of leavers are only sparse buyers). The gap ≤ 45 filter raised E2's z from 3.3 to
+    4.0 at calibrated size. Churn events therefore need large hazards (64).
+64. **Calibration targets the verifier's test** (`calibrate.TARGET_D`: easy / medium / hard
+    = 5 / 3.5 / 2.5). d = (DiD at T, story − twin, same seed) / robust SD of the twin's
+    placebo null, i.e. the z the verifier expects. Caps no longer scale with difficulty:
+    a price response at most 4/3 of the price change (E1 ≤ −20 %), any other drop at most
+    −30 % (E5); rises keep ×5. **Default 40k customers** (Example A, app, sweeps): the sim
+    takes 3.4 s (+1.3 s writing) at 40k, calibration ~55 s.
+    Sizes after calibration, Example A seed 42, medium: E1 −9.5 %, E5 −26 %, E2 hazard
+    ×4.4, E4 ×2.2 (d 3.35, `below_target`). **The churn sizes are far above the story's
+    +60 % / +80 %.** That is the price of churn being inferred from orders (decision 60);
+    a subscriptions or unsubscribe table would make it a power problem with sizes nearer
+    the story. Calibrated d is noisy and not monotone in size (medium E4 ends at the cap
+    with d 6.2, easy E4 at ×3.7 with d 5.2).
+65. **Results (2026-11-25), Example A, 40k customers, seeds 1–5, calibrated once per level
+    on seed 0 + 7919** (`python -m s2d.verify curve`, `docs/verify_curve_a.png`):
+
+    | difficulty | story confirmed | twin confirmed | E1 | E2 | E4 | E5 |
+    |---|---|---|---|---|---|---|
+    | easy | **90 %** (18/20) | 0 % | 4/5 | 5/5 | 4/5 | 5/5 |
+    | medium | **90 %** (18/20) | **0 %** | 3/5 | 5/5 | 5/5 | 5/5 |
+    | hard | 55 % (11/20) | 0 % | 0/5 | 3/5 | 3/5 | 5/5 |
+
+    Target (medium ≥ 90 % story, ≤ 10 % twin) is met. The twin does not depend on the
+    difficulty, so it is 20 distinct tests (4 events × 5 seeds), not 60; the largest twin z
+    is 2.15. E1 is the weakest: an order counts for coffee if it has any coffee item, and
+    extra basket items come from overall popularity, so a −7 % main-category effect shows
+    as about −4 %, and calibration's d (4.0) overstates the runs' z (2.5–5.3). Calibrating
+    once per level instead of per seed is the same procedure (another seed than the runs)
+    at a fifth of the cost.
+
+    **Seed 42, medium** (`python -m s2d.verify RUN --twin TWIN --narrate`): **story 3/4, twin
+    0/4.** E1 −4.1 % [−6.8, −3.5] z 3.5 ✅ (prices +14.8 %, story +15 %); E2 leavers +52 %
+    z 4.0 ✅; E4 +39 % [−3.7, +114.5] z 2.1 ❌ (its calibrated d was already below target);
+    E5 −12.5 % [−19.0, −5.3] z 6.2 ✅. Every SQL gives the same DiD. The narrator gets only
+    the confirmed rows: "Od 1. 3. 2026 po zdražení kávy o 15 % klesly objednávky v kategoriích
+    Etiopie, Kolumbie a Espresso o 4,1 %. K 12. 4. 2026 došlo u studentů k nárůstu odchodů
+    o 52,19 %. Dne 7. 9. 2026 po otevření konkurenční kavárny v Brně klesly objednávky v
+    brněnských prodejnách o 12,52 %." (gemma4:26b).
+66. **What the verifier does not show.** It confirms that each event moved its KPI in its
+    target against its control at its date; it does not show that nothing else did (that is
+    the detective's job) and it does not separate causes that share target and date: E2
+    (student churn) is tested 42 days after E1 and with a KPI that frequency drops do not
+    move, but a world with E1 alone has not been run through the E2 test yet. The detective
+    (bonus) now runs on data calibrated for the verifier, i.e. smaller effects in its terms
+    than in rounds 2–3.
