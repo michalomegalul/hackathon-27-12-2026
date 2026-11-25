@@ -486,3 +486,36 @@ the top of `s2d/detective/scan.py`.
       tells, and gives the lag search a customer-level anchor.
     - Keep `_truth.customer_state.churn_date` as it is: the scorer can then check that a
       `cancelled_at` table agrees with the hidden churn dates.
+61. **Results after round 3 (2026-11-25). Worse than round 2; target F1 ≥ 0.7 is further
+    away.** Example A, 10k customers, calibrated with decision 58, scan output (no LLM).
+    - **Seed 42, medium:** 0 of 4 matched, 3 reported (all false: Plzeň churn 2025-07, the
+      viral-spike decoy twice); F1 0 strict and with consequences, placebo p = 1.0 for both.
+      Twin seed 42: 1 event = 0.55 / year (the decoy). Twins seeds 1–10: 0.98 / year.
+    - **Detection curve** (`docs/detection_curve_a.png`, seeds 1–5):
+
+      | difficulty | F1 strict | F1 with důsledky | precision (strict / cons.) | recall | E1 | E2 | E4 | E5 | FP / run | důsledky / run |
+      |---|---|---|---|---|---|---|---|---|---|---|
+      | easy | 0.187 | 0.209 | 0.13 / 0.16 | 0.35 | 5/5 | 1/5 | 0/5 | 1/5 | 8.0 | 1.4 |
+      | medium | 0.040 | 0.040 | 0.03 / 0.03 | 0.05 | 1/5 | 0/5 | 0/5 | 0/5 | 4.8 | 0.0 |
+      | hard | 0.036 | 0.036 | 0.03 / 0.03 | 0.05 | 0/5 | 0/5 | 1/5 | 0/5 | 4.2 | 0.0 |
+
+    Why, per event (seed 42 candidates):
+    - **The core conflict:** realistic sizes (E1 −20 %, E5 −30 %) put the events at a
+      calibrated d ≈ 5, but the detector sees less than calibration measures (onset found on
+      a ramp, other seed), so real events land at z 3–5, under Z_REPORT 5.25. Seed 42: E1's
+      price test z 3.57 (CI excludes 0), students' purchase drop z 5.11, student churn z 4.24.
+      At ≤ 1 false event a year and 10k customers, realistic medium events are below the
+      noise. Round 2 found them only because they were 2–3× larger.
+    - **E5 is now hidden by the hierarchy.** −30 % of Brno stores is about −13 % of Brno over
+      a 30-day ramp: PELT finds no break in city=Brno or channel=store, so the pair is never
+      opened. The flat scan of round 2 tested the pair directly.
+    - **E2** still overlaps E1 (decision 60); **E4** is widened to all of Brno and stays weak.
+    - **Precision** got no better: 4–8 false positives a run against ~1.8 a run on twins. At
+      medium and hard none of them is a consequence of a matched event, because nothing is
+      matched; the consequence variant only helps when the parent event is found.
+    - **Left to try:** (a) more customers: d grows with √N, so 40k customers gives ×2 d at
+      the same sizes (the sim's cost, not the detector's); (b) let a pair open under a
+      parent *candidate* (CI excludes 0, any z) or under level-1 series with no break but a
+      DiD shift, and re-set Z_REPORT on twins; (c) calibrate on the path the detector
+      takes: for a pair, d = min(d_pair, d of its best parent); (d) the sim tables of
+      decision 60 for churn.
