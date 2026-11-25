@@ -158,3 +158,15 @@ def test_psi_fallbacks(psi_worlds):
     # E4 starts 70 days before the end: leavers are not measurable, and it says why
     assert "too close to the end" in rows[("E4", "leavers")]["reason"]
     assert psi_worlds["twin_confirmed"] == 0
+
+
+def test_fit_windows_extends_the_data_for_a_late_event():
+    spec = load_spec("tests/fixtures/psi_spec.yaml")
+    fitted, warnings = verify.fit_windows(spec)
+    assert spec.meta.days == 669                      # the input is not changed
+    assert fitted.meta.end == verify.date(2027, 1, 16)  # E4: T 2026-08-22 + 28 d + 120 d leaver edge
+    assert any("E4" in w for w in warnings)
+    for h, first, last in verify.needed_span(fitted):
+        assert fitted.meta.start <= first and last <= fitted.meta.end, h.event_id
+    assert verify.fit_windows(load_spec("examples/a.yaml"))[1] == []  # A and B already fit
+    assert verify.fit_windows(load_spec("examples/b.yaml"))[1] == []

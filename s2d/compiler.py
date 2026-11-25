@@ -108,6 +108,7 @@ class Attempt:
 class CompileResult:
     spec: StorySpec | None
     attempts: list[Attempt] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)  # e.g. data extended to measure an event
 
     @property
     def ok(self) -> bool:
@@ -245,6 +246,10 @@ def compile_story(company: str, story: str, *, seed: int | None = None,
             continue
         if seed is not None:
             spec.meta.seed = seed
+        from s2d.verify import fit_windows
+        spec, result.warnings = fit_windows(spec)  # every event measurable before the data ends
+        for w in result.warnings:
+            say(f"WARNING {w}")
         result.attempts.append(Attempt(b, info.model, info.seconds, True, "", info.cached, info.tokens_per_s))
         result.spec = spec
         break
@@ -271,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.error:
             print("  " + a.error.replace("\n", "\n  "))
     print(f"total {res.seconds:.1f}s, retries {res.retries}, first try valid: {res.first_try_valid}")
+    for w in res.warnings:
+        print(f"WARNING {w}")
     if not res.ok:
         return 1
     text = res.yaml()

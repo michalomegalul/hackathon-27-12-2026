@@ -256,6 +256,64 @@ def hypotheses(spec: StorySpec, key: pd.DataFrame | None = None) -> list[Hypothe
     return out
 
 
+# ---------------------------------------------------------------- measurement windows
+
+
+def needed_span(spec: StorySpec) -> list[tuple[Hypothesis, date, date]]:
+    """For every test of the story: (hypothesis, first day, last day) the data must cover so
+    that the test has its full before- and after-window. Leavers need LEAVER_EDGE_DAYS more
+    at the end and WARMUP_DAYS at the start, new customers WARMUP_DAYS at the start, the
+    JOIN + lag test a WINDOW-long cohort of parcels plus LEAVER_EDGE_DAYS."""
+    out = []
+    for h in hypotheses(spec):
+        if h.kpi == "late_churn":
+            first, last = h.start - timedelta(days=WINDOW), h.start + timedelta(days=WINDOW + LEAVER_EDGE_DAYS)
+        else:
+            first, last = h.T - timedelta(days=WINDOW), h.T + timedelta(days=WINDOW - 1)
+            if h.kpi in ("leavers", "new_customers"):
+                first -= timedelta(days=WARMUP_DAYS)
+            if h.kpi == "leavers":
+                last += timedelta(days=LEAVER_EDGE_DAYS)
+        out.append((h, first, last))
+    return out
+
+
+def fit_windows(spec: StorySpec) -> tuple[StorySpec, list[str]]:
+    """Extend the data (meta.start earlier, meta.days longer) so that every event's test
+    has its full measurement window. The story's dates stay as told: an event in August
+    whose churn shows 6 weeks later cannot be measured in data that ends in October, so
+    the data runs longer. Returns the (copied) spec and the warnings."""
+    from s2d.spec import Meta
+    spans = needed_span(spec)
+    if not spans:
+        return spec, []
+    first = min(f for _, f, _ in spans)
+    last = max(t for _, _, t in spans)
+    start, end = spec.meta.start, spec.meta.end
+    warnings = []
+    new_start = min(start, first)
+    new_end = max(end, last)
+    days = (new_end - new_start).days + 1
+    if days > Meta.model_fields["days"].metadata[-1].le:
+        cap = Meta.model_fields["days"].metadata[-1].le
+        warnings.append(f"the events need data {first} .. {last} ({days} days), more than {cap}: "
+                        "some tests will not be measurable")
+        days = cap
+        new_end = new_start + timedelta(days=cap - 1)
+    for h, f, t in spans:
+        if t > end:
+            warnings.append(f"{h.event_id} ({KPI_CS[h.kpi]}, from {h.T}) needs data until {t}, the data ended "
+                            f"{end}: extended to {new_end}")
+        if f < start:
+            warnings.append(f"{h.event_id} ({KPI_CS[h.kpi]}, from {h.T}) needs data from {f}, the data started "
+                            f"{start}: starts {new_start}")
+    if (new_start, days) == (start, spec.meta.days):
+        return spec, []
+    spec = spec.model_copy(deep=True)
+    spec.meta.start, spec.meta.days = new_start, days
+    return spec, list(dict.fromkeys(warnings))
+
+
 # ---------------------------------------------------------------- SQL
 
 

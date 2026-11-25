@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--no-story", action="store_true", help="drop all events (the no-story twin)")
     run.add_argument("--strict", action="store_true", help="fail on events that are not implemented yet")
     run.add_argument("--check", action="store_true", help="also run the no-story twin and print target vs realized")
+    run.add_argument("--no-fit", action="store_true",
+                     help="keep meta.start/days even if an event's test window runs past the data")
     run.add_argument("--no-calibrate", action="store_true", help="skip the recoverability gate (s2d.calibrate)")
     run.add_argument("--dirt", choices=["none", "low", "medium", "high"], default=None,
                      help="messiness of the export copy (out/export*); default from the spec's noise.messiness")
@@ -56,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     spec = load_spec(args.spec)
     if args.n_customers:
         spec.entities.customers.n = args.n_customers
+    if not args.no_fit:
+        from s2d.verify import fit_windows
+        spec, warnings = fit_windows(spec)  # before --no-story, so the twin covers the same days
+        for w in warnings:
+            print(f"WARNING {w}", file=sys.stderr)
     if args.no_story:
         spec = without_story(spec)
 

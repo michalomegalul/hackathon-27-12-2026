@@ -59,7 +59,7 @@ def run_compile(company: str, story: str, seed: int | None):
             raise RuntimeError("no valid spec after retries:\n" + "\n".join(a["error"] for a in attempts))
         job.log(f"valid spec after {len(attempts)} attempt(s)")
         return {"yaml": res.yaml(), "attempts": attempts, "retries": res.retries,
-                "first_try_valid": res.first_try_valid}
+                "first_try_valid": res.first_try_valid, "warnings": res.warnings}
     return jobs.start("compile", work, title="Story to spec")
 
 
@@ -71,6 +71,10 @@ def run_sim(spec_yaml: str, n_customers: int | None):
         spec = StorySpec.model_validate(yaml.safe_load(spec_yaml))
         if n_customers:
             spec.entities.customers.n = n_customers
+        from s2d.verify import fit_windows
+        spec, warnings = fit_windows(spec)  # an edited spec may put an event too close to the end
+        for w in warnings:
+            job.log(f"WARNING {w}")
         job.log(f"simulating {spec.meta.days} days, {spec.entities.customers.n} customers")
         t0 = time.perf_counter()
         table = None
@@ -213,6 +217,8 @@ with t_story:
     if state and state["status"] == "done":
         r = state["result"]
         st.write(f"Retries: {r['retries']}. Valid on first try: {'yes' if r['first_try_valid'] else 'no'}.")
+        for w in r.get("warnings", []):
+            st.warning(w)
         st.dataframe([{k: a[k] for k in ("backend", "model", "seconds", "ok", "cached", "tokens_per_s", "error")}
                       for a in r["attempts"]], hide_index=True)
 
