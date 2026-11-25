@@ -15,6 +15,9 @@ dependencies = [
     "streamlit==1.67.0",
     "anthropic==2.14.0",
     "httpx==0.28.1",
+    "ruptures==1.1.10",
+    "statsmodels==0.15.0",
+    "scipy==1.18.1",
 ]
 
 [dependency-groups]
