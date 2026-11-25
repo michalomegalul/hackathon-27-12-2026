@@ -117,3 +117,44 @@ def test_courier_churn_is_customer_level(courier_worlds):
     assert not any(e.event_id in ("E1", "E2") for e in story.story.for_metric(Metric.churn_hazard))
     cause = story.truth["customer_state"]["churn_cause"]
     assert (cause == "zpoždění").sum() > 0
+
+
+# ---------------------------------------------------------------- a new story (Psí Bouda): no A/B special cases
+
+
+@pytest.fixture(scope="module")
+def psi_worlds():
+    """The story that broke the verifier: a courier switch 3 months before the data ends,
+    subscriptions in one segment only, a stockout of all of one supplier's categories."""
+    spec = load_spec("tests/fixtures/psi_spec.yaml")
+    spec.entities.customers.n = 6000
+    story = simulate(spec, seed=7)
+    twin = simulate(without_story(spec), seed=7)
+    return verify.verify_con(verify.world_con(story), spec, story.truth["answer_key"], verify.world_con(twin))
+
+
+def test_psi_every_number_is_finite_and_sane(psi_worlds):
+    import math
+    for r in psi_worlds["tests"]:
+        if r["status"] == "not_testable":
+            assert r["reason"], r["event_id"]
+            continue
+        for v in [r["measured_pct"], *r["ci_pct"], r["z"]]:
+            assert math.isfinite(v) and abs(v) < 1000, (r["event_id"], r["kpi"], v)
+        assert r["sql_matches"], (r["event_id"], r["kpi"])
+
+
+def test_psi_fallbacks(psi_worlds):
+    rows = {(r["event_id"], r["kpi"]): r for r in psi_worlds["tests"]}
+    # late share and rating are measurable up to the end of the data (not cut like leavers)
+    assert rows[("E3", "late_share")]["confirmed"] and rows[("E3", "rating")]["status"] != "not_testable"
+    # no other supplier sells kibble: the control is every other product
+    so = rows[("E1", "stockout_days")]
+    assert so["confirmed"] and so["control"].startswith("mimo cíl")
+    # only breeders subscribe: no control, a rate per 1000 active subscriptions
+    c = rows[("E2", "cancellations")]
+    assert c["measured_unit"] == "‰/den" and c["control"] is None and c["confirmed"]
+    assert c["expected_pct"] == pytest.approx(c["measured_pct"], rel=0.6)
+    # E4 starts 70 days before the end: leavers are not measurable, and it says why
+    assert "too close to the end" in rows[("E4", "leavers")]["reason"]
+    assert psi_worlds["twin_confirmed"] == 0

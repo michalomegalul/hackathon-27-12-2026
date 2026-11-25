@@ -368,12 +368,13 @@ def _verify_section(run_dir: str) -> None:
         rows.append({
             "událost": r["event_id"], "tvrzení": r["claim_cs"],
             "test": f"{r['kpi']} · {r['segment'] or 'všichni'} · od {r['T']}",
-            "příběh": fmt(r["story_pct"], r.get("unit", "%")), "v okně": fmt(r["expected_pct"]),
+            "příběh": fmt(r["story_pct"], r.get("unit", "%")), "v okně": fmt(r["expected_pct"], r.get("expected_unit", "%")),
             "naměřeno": fmt(r.get("measured_pct"), mu),
             "95% CI": (f"[{r['ci_pct'][0]:+.1f}, {r['ci_pct'][1]:+.1f}]" if r.get("ci_pct") else "–"),
             "z": r.get("z"), "p (placebo)": r.get("p_placebo"),
             "příběh ✓": "✅" if r["confirmed"] else "❌",
             "dvojče z": tw.get("z"), "dvojče ✓": ("✅" if tw.get("confirmed") else "❌") if tw else "",
+            "poznámka": r.get("reason") or r.get("note") or "",
         })
     st.dataframe(pd.DataFrame(rows), hide_index=True)
     from s2d import verify
@@ -393,8 +394,9 @@ def _verify_section(run_dir: str) -> None:
                 st.write(f"Ceny dotčených produktů: {fmt(r['price']['measured_pct'])} "
                          f"(příběh {fmt(r['price']['story_pct'])}, {r['price']['products']} produktů)")
             ok = "same DiD as the test" if r.get("sql_matches") else "DIFFERENT from the test"
-            st.caption(f"Run it on story.duckdb (DuckDB). Gives did_pct = {r['sql_result']['did_pct']:+.2f} "
-                       f"{r.get('measured_unit', '%')}: {ok}.")
+            did = r.get("sql_result", {}).get("did_pct")
+            st.caption(f"Run it on story.duckdb (DuckDB). Gives did_pct = "
+                       f"{'NULL' if did is None else f'{did:+.2f}'} {r.get('measured_unit', '%')}: {ok}.")
             st.code(r["sql"], language="sql")
             if "price" in r:
                 st.code(r["price"]["sql"], language="sql")

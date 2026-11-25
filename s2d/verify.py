@@ -26,7 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -55,10 +55,14 @@ KPI_CS = {"orders": "objednávky", "leavers": "odchody zákazníků", "new_custo
           "tickets": "tikety na podporu", "stockout_days": "podíl vyprodaných produktů"}
 # Ratio KPIs: the daily value is a mean (late share in %, rating in points) and the DiD is a
 # difference in those units, not a relative change (scan.did(ratio=True)).
-RATIO = {"late_share": "pp", "rating": "b.", "stockout_days": "pp", "tickets": "/den"}
+RATIO = {"late_share": "pp", "rating": "b.", "stockout_days": "pp", "tickets": "/den", "cancellations": "‰/den"}
 # Of those, the KPIs whose daily value is a mean of `val` (the rest are daily counts). Tickets
 # are counts with a difference DiD: before a stockout there may be no sold-out ticket at all.
 MEAN_KPIS = {"late_share", "rating", "stockout_days"}
+# A count KPI (orders, leavers, new customers) with fewer events than this in a group's
+# before-window has no stable baseline for a relative change (+600 % of 0.1 a day): it is
+# tested and reported as a difference in events a day instead (DECISIONS 79).
+MIN_BASE_EVENTS = 20
 # The ticket topic an emergent ticket_rate effect is about.
 TICKET_TOPIC = {"supplier_delay": "vyprodáno", "stockout": "vyprodáno", "courier_change": "zpoždění"}
 # Customer-level KPIs read city and channel from the customer (home channel, decision 17).
@@ -99,6 +103,10 @@ class Hypothesis:
     unit: str = "%"                 # unit of story_pct / measured_pct: '%' relative, 'pp', 'b.' (points), 'd'
     on_days: int | None = None      # late_churn: days the courier switch lasts (cohort window)
     topic: str | None = None        # tickets: only this topic
+    control_mode: str = "vary"      # 'vary': other values of `vary`; 'rest': everything outside the target
+    absolute: bool = False          # a count KPI tested as a difference in events a day (small baseline)
+    expected_unit: str = "%"        # unit of expected_pct
+    note: str = ""                  # why the control or the unit differs from the default
 
     @property
     def T(self) -> date:
@@ -106,7 +114,11 @@ class Hypothesis:
 
     @property
     def ratio(self) -> bool:
-        return self.kpi in RATIO
+        return self.kpi in RATIO or self.absolute
+
+    @property
+    def measured_unit(self) -> str:
+        return RATIO.get(self.kpi) or ("/den" if self.absolute else "%")
 
 
 # ---------------------------------------------------------------- hypotheses
@@ -153,8 +165,21 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
         price_pct=event.params.price_change_pct if event.type == EventType.price_change else None,
         dropped=dropped, unit=unit, topic=TICKET_TOPIC.get(event.type.value) if kpi == "tickets" else None)
     emergent = event.type in (EventType.courier_change, EventType.supplier_delay, EventType.stockout)
-    h.expected_pct = None if h.ratio or emergent else _expected(spec, event, effect, h)
+    if kpi == "cancellations" and not emergent:
+        # the story's added cancellations per 1000 active subscriptions a day
+        h.expected_pct = round(_expected(spec, event, effect, h) / 100 * 1000 * _base_hazard(spec, event), 2)
+        h.expected_unit = RATIO[kpi]
+    else:
+        h.expected_pct = None if h.ratio or emergent else _expected(spec, event, effect, h)
     return h
+
+
+def _base_hazard(spec: StorySpec, event: Event) -> float:
+    """Daily base churn hazard of the event's target segments (share-weighted)."""
+    segs = [s for s in spec.entities.customers.segments
+            if not event.target.segment or s.id in event.target.segment]
+    p = sum(s.share * s.base_churn_per_month for s in segs) / sum(s.share for s in segs)
+    return daily_hazard(p, 30.4)
 
 
 def stock_hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | None:
@@ -207,11 +232,7 @@ def _expected(spec: StorySpec, event: Event, effect: Effect, h: Hypothesis) -> f
     if event.type == EventType.churn_shock:
         w = event.params.churn_window_days
         added = daily_hazard(event.params.churn_pct / 100, w)
-        segs = [s for s in spec.entities.customers.segments
-                if not event.target.segment or s.id in event.target.segment]
-        share = sum(s.share for s in segs)
-        p = sum(s.share * s.base_churn_per_month for s in segs) / share
-        base = daily_hazard(p, 30.4)
+        base = _base_hazard(spec, event)
         on = np.zeros(n)
         on[iT:iT + int(w)] = 1.0
         return round(100 * added / base * float(on[iT:iT + WINDOW].mean()), 2)
@@ -251,23 +272,26 @@ def _d(x: date) -> str:
 
 
 def _span(kpi: str, lo: date, hi: date) -> tuple[date, date]:
-    """Days on which the KPI is complete."""
-    if kpi == "orders":
-        return lo, hi
+    """Days on which the KPI is complete. Only the KPIs that need a customer's history are
+    cut: new customers (warm-up) and leavers (warm-up, and no order in the last 120 days).
+    Everything dated by its own row (orders, deliveries, reviews, ...) is complete to the end."""
     if kpi == "new_customers":
         return lo + timedelta(days=WARMUP_DAYS), hi
-    if kpi in ("cancellations", "tickets", "stockout_days"):
-        return lo, hi
-    return lo + timedelta(days=WARMUP_DAYS), hi - timedelta(days=LEAVER_EDGE_DAYS)
+    if kpi == "leavers":
+        return lo + timedelta(days=WARMUP_DAYS), hi - timedelta(days=LEAVER_EDGE_DAYS)
+    return lo, hi
 
 
 def _group(h: Hypothesis) -> tuple[str, str]:
     """(CASE expression for the group, WHERE clause for the fixed part)."""
     cols = COLUMNS[h.kpi]
+    fixed = [_in(cols[k], v) for k, v in h.fixed.items()]
+    if h.vary and h.control_mode == "rest":  # control: everything outside the whole target
+        target = " AND ".join([_in(cols[h.vary], h.treated)] + fixed)
+        return f"CASE WHEN {target} THEN 'treated' ELSE 'control' END", "TRUE"
     grp = (f"CASE WHEN {_in(cols[h.vary], h.treated)} THEN 'treated' ELSE 'control' END"
            if h.vary else "'treated'")
-    where = " AND ".join(_in(cols[k], v) for k, v in h.fixed.items()) or "TRUE"
-    return grp, where
+    return grp, " AND ".join(fixed) or "TRUE"
 
 
 def _events_cte(h: Hypothesis, lo: date, hi: date) -> str:
@@ -328,12 +352,12 @@ def _events_cte(h: Hypothesis, lo: date, hi: date) -> str:
   WHERE {where}
 )"""
     if h.kpi == "cancellations":
-        return f"""events AS (   -- one row per cancelled subscription, dated at cancellation
-  SELECT s.cancelled_at AS day,
+        return f"""subs AS (   -- one row per subscription with its group
+  SELECT s.started_at, s.cancelled_at,
          {grp} AS grp
   FROM subscriptions s
   JOIN customers c USING (customer_id)
-  WHERE s.cancelled_at IS NOT NULL AND {where}
+  WHERE {where}
 )"""
     if h.kpi == "new_customers":
         return f"""events AS (   -- a new customer (signed up during the data), dated at the first order
@@ -364,6 +388,22 @@ events AS (   -- a leaver: a regular buyer (average gap <= {LEAVER_MAX_GAP} days
 
 def _ctes(h: Hypothesis, lo: date, hi: date) -> str:
     s0, s1 = _span(h.kpi, lo, hi)
+    if h.kpi == "cancellations":
+        def rate(g):
+            return (f"1000.0 * count(*) FILTER (WHERE s.grp = '{g}' AND s.cancelled_at = days.day)\n"
+                    f"           / nullif(count(*) FILTER (WHERE s.grp = '{g}'), 0)")
+        return f"""WITH {_events_cte(h, lo, hi)},
+days AS (
+  SELECT CAST(d AS DATE) AS day FROM range({_d(s0)}, {_d(s1 + timedelta(days=1))}, INTERVAL 1 DAY) t(d)
+),
+daily AS (   -- cancellations per 1000 subscriptions active that day: treated group and control group
+  SELECT days.day,
+         {rate('treated')} AS treated,
+         {rate('control') if h.vary else 'NULL'} AS control
+  FROM days LEFT JOIN subs s
+    ON s.started_at <= days.day AND (s.cancelled_at IS NULL OR s.cancelled_at >= days.day)
+  GROUP BY days.day
+)"""
     agg = "avg(e.val)" if h.kpi in MEAN_KPIS else "count(e.grp)"
     control = (f"{agg} FILTER (WHERE e.grp = 'control')" if h.vary else "NULL")
     return f"""WITH {_events_cte(h, lo, hi)},
@@ -379,6 +419,14 @@ daily AS (   -- {KPI_CS[h.kpi]} per day: treated group and control group
 )"""
 
 
+def _control_text(h: Hypothesis) -> str:
+    if not h.vary:
+        return "none: plain before/after"
+    if h.control_mode == "rest":
+        return "everything outside the target"
+    return f"{h.vary} not in ({', '.join(h.treated)})" + (f", same {', '.join(h.fixed)}" if h.fixed else "")
+
+
 def _windows(h: Hypothesis, s1: date) -> tuple[date, date, date]:
     T = h.T
     return T - timedelta(days=WINDOW), T, min(T + timedelta(days=WINDOW), s1 + timedelta(days=1))
@@ -388,8 +436,7 @@ def sql(h: Hypothesis, lo: date, hi: date) -> str:
     """The whole test as one query: daily series, window means, DiD in %."""
     b0, T, a1 = _windows(h, _span(h.kpi, lo, hi)[1])
     target = h.segment or "everyone"
-    ctl = (f"{h.vary} not in ({', '.join(h.treated)})" + (f", same {', '.join(h.fixed)}" if h.fixed else "")
-           if h.vary else "none: plain before/after")
+    ctl = _control_text(h)
     if h.ratio:  # difference in the KPI's own units (pp of late parcels, rating points, tickets a day)
         did = ("round((treated_after - treated_before) - (control_after - control_before), 2)"
                if h.vary else "round(treated_after - treated_before, 2)")
@@ -409,8 +456,8 @@ windows AS (
 )
 SELECT round(treated_before, 2) AS treated_before, round(treated_after, 2) AS treated_after,
        round(control_before, 2) AS control_before, round(control_after, 2) AS control_after,
-       round(100 * (treated_after / treated_before - 1), 2) AS treated_change_pct,
-       round(100 * (control_after / control_before - 1), 2) AS control_change_pct,
+       round(100 * (treated_after / nullif(treated_before, 0) - 1), 2) AS treated_change_pct,
+       round(100 * (control_after / nullif(control_before, 0) - 1), 2) AS control_change_pct,
        {did} AS did_pct
 FROM windows"""
 
@@ -534,14 +581,17 @@ def test_join_lag(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_s
     out = {"event_id": h.event_id, "metric": h.metric, "kpi": h.kpi, "segment": h.segment,
            "control": "včas doručené zásilky (on-time parcels)", "T": h.start.isoformat(), "direction": h.direction,
            "story_pct": h.story_pct, "expected_pct": None, "claim_cs": h.claim_cs,
-           "unit": "%", "measured_unit": "pp", "confirmed": False, "status": "not_testable"}
+           "unit": "%", "measured_unit": "pp", "confirmed": False, "status": "not_testable", "reason": ""}
     if a1 <= s0:
+        out["reason"] = (f"the switch ({h.start}) is less than {LEAVER_EDGE_DAYS} days before the end of the "
+                         f"data ({hi}): leaving cannot be told from not ordering yet")
         return out
     df = con.execute(join_lag_cte(h, hi) + "\nSELECT customer_id, period, late, delivered_date, "
                      f"left_{LAG_FROM}_{LAG_TO} FROM cohort").df()
     rng = np.random.default_rng(seed)
     after, before = df[df["period"] == "after"], df[df["period"] == "before"]
     if after["late"].sum() < 30 or (~after["late"].astype(bool)).sum() < 30:
+        out["reason"] = f"too few parcels ({int(after['late'].sum())} late) in {s0} .. {a1 - timedelta(days=1)}"
         return out
     point, lo_ci, hi_ci, se = _diff_stats(after, rng)
     z = abs(point) / se
@@ -632,6 +682,80 @@ def statistic(df: pd.DataFrame, h: Hypothesis) -> tuple[np.ndarray, np.ndarray |
     return seg, rest, iT, na
 
 
+def _no_control(h: Hypothesis) -> Hypothesis:
+    """The whole target as the treated group, no control: a plain before/after."""
+    fixed = ({h.vary: h.treated} if h.vary else {}) | h.fixed
+    return replace(h, vary=None, treated=[], fixed=fixed, control_mode="vary")
+
+
+def _before_events(v: np.ndarray, iT: int) -> float:
+    return float(np.nansum(v[max(iT - WINDOW, 0):iT]))
+
+
+def _usable(v: np.ndarray | None, h: Hypothesis, iT: int) -> bool:
+    """Does a group have data in the before-window? Means (and rates) need values on at
+    least half the days, counts at least one event."""
+    if v is None:
+        return False
+    b = v[max(iT - WINDOW, 0):iT]
+    if h.kpi in MEAN_KPIS or h.kpi == "cancellations":
+        return int(np.isfinite(b).sum()) >= WINDOW // 2
+    return _before_events(v, iT) > 0
+
+
+def resolve(con, h: Hypothesis, lo: date, hi: date) -> Hypothesis:
+    """Fit the test to the data, before it runs (on the story, then the twin reuses it):
+
+    control   the other values of `vary` (same fixed keys) if they have data; else everything
+              outside the target (a stockout of S_POL's kibble and canned food: there is no
+              other supplier of those categories, so the control is all other products); else
+              none (only one segment has subscriptions: nobody else can cancel).
+    unit      a count KPI whose before-window has fewer than MIN_BASE_EVENTS events in a group
+              is tested as a difference in events a day, not a relative change."""
+    notes = []
+    for mode in (("vary", "rest") if h.vary else ()):
+        cand = replace(h, control_mode=mode)
+        df = series(con, cand, lo, hi)
+        hit = np.flatnonzero(df["day"].to_numpy() == np.datetime64(h.T))
+        if not len(hit):
+            return h
+        iT = int(hit[0])
+        if _usable(df["control"].to_numpy(float), cand, iT):
+            h = cand
+            break
+        notes.append(f"control {_control_text(cand)!r} has no data")
+    else:
+        if h.vary:
+            h = _no_control(h)
+        df = series(con, h, lo, hi)
+        hit = np.flatnonzero(df["day"].to_numpy() == np.datetime64(h.T))
+        if not len(hit):
+            return h
+        iT = int(hit[0])
+    if h.kpi in ("orders", "leavers", "new_customers"):
+        groups = [df["treated"].to_numpy(float)] + ([df["control"].to_numpy(float)] if h.vary else [])
+        base = min(_before_events(v, iT) for v in groups)
+        if base < MIN_BASE_EVENTS:
+            notes.append(f"{base:.0f} events in the before-window: a difference a day, not a relative change")
+            h = replace(h, absolute=True)
+            if h.expected_pct is not None:  # the story's relative change applied to the observed baseline
+                b = _before_events(groups[0], iT) / WINDOW
+                h = replace(h, expected_pct=round(h.expected_pct / 100 * b, 2), expected_unit="/den")
+    return replace(h, note="; ".join(notes))
+
+
+def _untestable_reason(df: pd.DataFrame, h: Hypothesis) -> str:
+    if df.empty:
+        return "the KPI has no days"
+    first, last = df["day"].iloc[0].date(), df["day"].iloc[-1].date()
+    if h.T > last - timedelta(days=MIN_AFTER - 1):
+        return (f"T {h.T} is too close to the end of the measurable data ({last}): "
+                f"the after-window needs {MIN_AFTER} days")
+    if h.T < first + timedelta(days=WINDOW):
+        return f"T {h.T} is too close to the start of the measurable data ({first})"
+    return "not testable"
+
+
 def null_effects(seg, rest, iT: int, na: int, ratio: bool = False) -> np.ndarray:
     """The DiD at every anchor more than 2 windows away from T: the placebo-in-time null."""
     t, e = scan.did_effects(seg, rest, 0, WINDOW, na, ratio)
@@ -643,26 +767,33 @@ def test(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_sql: bool 
         return test_join_lag(con, h, lo, hi, seed, check_sql)
     df = series(con, h, lo, hi)
     out = {"event_id": h.event_id, "metric": h.metric, "kpi": h.kpi, "segment": h.segment,
-           "control": (f"{h.vary} ∉ {{{', '.join(h.treated)}}}" if h.vary else None),
+           "control": (None if not h.vary else "mimo cíl (everything outside the target)"
+                       if h.control_mode == "rest" else f"{h.vary} ∉ {{{', '.join(h.treated)}}}"),
            "T": h.T.isoformat(), "direction": h.direction,
-           "story_pct": h.story_pct, "expected_pct": h.expected_pct, "claim_cs": h.claim_cs,
-           "unit": h.unit, "measured_unit": RATIO.get(h.kpi, "%"),
-           "confirmed": False, "status": "not_testable"}
+           "story_pct": h.story_pct, "expected_pct": h.expected_pct, "expected_unit": h.expected_unit,
+           "claim_cs": h.claim_cs, "unit": h.unit, "measured_unit": h.measured_unit, "note": h.note,
+           "confirmed": False, "status": "not_testable", "reason": ""}
     st = statistic(df, h)
     if st is None:
+        out["reason"] = _untestable_reason(df, h)
         return out
     seg, rest, iT, na = st
     before, after = slice(iT - WINDOW, iT), slice(iT, iT + na)
     k = 1.0 if h.ratio else 100.0
-    point, (lo_ci, hi_ci), _ = scan.did(seg, rest, before, after, np.random.default_rng(seed), ratio=h.ratio)
-    z = scan.placebo_z(seg, rest, iT, iT, WINDOW, na, ratio=h.ratio)
+    with np.errstate(all="ignore"):
+        point, (lo_ci, hi_ci), _ = scan.did(seg, rest, before, after, np.random.default_rng(seed), ratio=h.ratio)
+        z = scan.placebo_z(seg, rest, iT, iT, WINDOW, na, ratio=h.ratio)
+    if not all(np.isfinite([point, lo_ci, hi_ci, z])):
+        out["reason"] = "no data in a window (the KPI is empty for the target around T)"
+        return out
     sign = 1 if h.direction == "up" else -1
     right_way = sign * point > 0
     excludes = lo_ci > 0 or hi_ci < 0
     confirmed = bool(right_way and excludes and z >= Z_CONFIRM)
     null = null_effects(seg, rest, iT, na, h.ratio)
-    med = np.median(null)
-    p = float(np.mean(np.abs(null - med) >= abs(point - med)))  # share of placebo dates at least as extreme
+    null = null[np.isfinite(null)]
+    med = np.median(null) if len(null) else 0.0
+    p = float(np.mean(np.abs(null - med) >= abs(point - med))) if len(null) else 1.0  # share of placebo dates at least as extreme
     out.update(
         measured_pct=round(k * point, 2), ci_pct=[round(k * lo_ci, 2), round(k * hi_ci, 2)],
         z=round(z, 2), p_placebo=round(p, 4), right_direction=bool(right_way), ci_excludes_0=bool(excludes),
@@ -675,7 +806,8 @@ def test(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_sql: bool 
     if check_sql:
         row = con.execute(out["sql"]).df().iloc[0]
         out["sql_result"] = {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
-        out["sql_matches"] = bool(abs(float(row["did_pct"]) - k * point) < 0.006)
+        d = out["sql_result"]["did_pct"]
+        out["sql_matches"] = d is not None and bool(abs(d - k * point) < 0.006)
     if h.price_pct is not None and h.vary == "category":
         q = price_sql(h)
         r = con.execute(q).fetchone()
@@ -697,8 +829,8 @@ def _range(con) -> tuple[date, date]:
 
 
 def verify_con(con, spec: StorySpec, key: pd.DataFrame | None, twin_con=None, check_sql: bool = True) -> dict:
-    hyps = hypotheses(spec, key)
     lo, hi = _range(con)
+    hyps = [h if h.kpi == "late_churn" else resolve(con, h, lo, hi) for h in hypotheses(spec, key)]
     rows = [test(con, h, lo, hi, check_sql=check_sql) for h in hyps]
     res = {"tests": rows, "n": len(rows), "confirmed": sum(r["confirmed"] for r in rows)}
     if twin_con is not None:
@@ -773,12 +905,16 @@ def format_table(res: dict) -> str:
         tw = r.get("twin", {})
         lines.append(
             f"{r['event_id']:<5} {r['kpi']:<14} {r['segment'] or 'everyone':<30} {r['T']:<10} "
-            f"{_u(r['story_pct'], r.get('unit', '%')):>9} {_u(r['expected_pct'], '%'):>9} "
+            f"{_u(r['story_pct'], r.get('unit', '%')):>9} {_u(r['expected_pct'], r.get('expected_unit', '%')):>9} "
             f"{_u(r.get('measured_pct'), mu):>10} {ci:>17} "
             f"{r.get('z', float('nan')):>6.2f}  {'✅' if r['confirmed'] else '❌'} "
             f"{_u(tw.get('measured_pct'), mu) if tw else '':>10} "
             f"{tw.get('z') if tw.get('z') is not None else float('nan'):>6.2f} "
             f"{('✅' if tw.get('confirmed') else '❌') if tw else ''}")
+        if r.get("reason"):
+            lines.append(f"      not testable: {r['reason']}")
+        if r.get("note"):
+            lines.append(f"      note: {r['note']}")
         if "price" in r:
             lines.append(f"      prices of {r['segment']}: {_fmt(r['price']['measured_pct'])} "
                          f"(story {_fmt(r['price']['story_pct'])}, {r['price']['products']} products)")
