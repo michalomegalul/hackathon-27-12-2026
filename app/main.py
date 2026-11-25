@@ -372,6 +372,10 @@ def _verify_section(run_dir: str) -> None:
             "dvojče z": tw.get("z"), "dvojče ✓": ("✅" if tw.get("confirmed") else "❌") if tw else "",
         })
     st.dataframe(pd.DataFrame(rows), hide_index=True)
+    from s2d import verify
+    st.write(ver["narration"]["text"] if "narration" in ver else verify.narrative_cs(ver))
+    st.caption("Only confirmed events are told. " + (f"Narrator: {ver['narration']['source']}"
+                                                      if "narration" in ver else "Template, no LLM."))
     for r in ver["tests"]:
         if "series" not in r:
             continue

@@ -481,6 +481,37 @@ def narrative_cs(res: dict) -> str:
     return " ".join(out) if out else "Žádná událost příběhu se v datech nepotvrdila."
 
 
+def narrate(res: dict, on_status=None) -> dict:
+    """The narrator for confirmed events only: one LLM call that rewrites the template
+    into a short Czech story. Only the confirmed rows go into the prompt, so nothing
+    else can be told. Falls back to the template."""
+    from s2d import llm
+    template = narrative_cs(res)
+    rows = [r for r in res["tests"] if r["confirmed"]]
+    if not rows:
+        return {"text": template, "source": "template (nothing confirmed)"}
+    facts = "\n".join(json.dumps({k: r.get(k) for k in ("event_id", "claim_cs", "kpi", "segment", "T",
+                                                         "measured_pct", "ci_pct", "z")}
+                                   | ({"price_pct": r["price"]["measured_pct"]} if "price" in r else {}),
+                                   ensure_ascii=False) for r in rows)
+    prompt = f"""Jsi datový analytik. Tyto události příběhu firmy byly v datech potvrzeny testem
+(rozdíl v rozdílech proti kontrolní skupině, 28 dní po vs. 28 dní před):
+{facts}
+
+Napiš 3 až 5 vět česky: co se stalo, kdy, u koho a jak velký byl naměřený efekt.
+Pravidla: jen tyto události, žádné jiné. Každé datum a číslo musí pocházet z tabulky.
+Nevymýšlej příčiny, které nejsou v claim_cs. Odpověz jen textem."""
+    try:
+        text = str(llm.complete("detective", prompt, on_status=on_status)).strip()
+        if not text:
+            raise ValueError("empty")
+        info = llm.last_call()
+        return {"text": text, "source": f"{info.backend} {info.model}" + (" (cache)" if info.cached else ""),
+                "template": template}
+    except (llm.LLMError, ValueError) as e:
+        return {"text": template, "source": f"template (LLM failed: {e})"}
+
+
 def _date_cs(iso: str) -> str:
     d = date.fromisoformat(iso)
     return f"{d.day}. {d.month}. {d.year}"
@@ -579,9 +610,13 @@ def main(argv=None) -> int:
     p.add_argument("--twin")
     p.add_argument("--sql", action="store_true", help="print the SQL of every test")
     p.add_argument("--out", help="write the result JSON here")
+    p.add_argument("--narrate", action="store_true", help="Czech story of the confirmed events (LLM, template fallback)")
     a = p.parse_args(argv)
     res = verify(a.run_dir, a.twin)
     print(format_table(res))
+    if a.narrate:
+        res["narration"] = narrate(res)
+        print(f"\n{res['narration']['text']}\n({res['narration']['source']})")
     if a.sql:
         for r in res["tests"]:
             if r.get("sql"):
