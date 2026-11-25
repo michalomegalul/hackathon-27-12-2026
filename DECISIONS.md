@@ -352,3 +352,56 @@ the top of `s2d/detective/scan.py`.
     for it (decision 44). Spike confidence keeps its own scale ((max |z| − 3.5) / 4).
     Tests that check calendar, onset and direction logic use effects above this threshold
     (store drop −50 %, churn ×5); whether a −35 % drop is reported is now a power question.
+56. **Results after round 2 (2026-11-25, commits up to decision 55). Target F1 ≥ 0.7 on
+    medium is NOT reached.** Example A, 10k customers, calibrated, scan output (no LLM).
+    - **Seed 42, medium:** precision 0.17, recall 0.25, **F1 0.20** (was 0). E1 matched
+      (timing +0 d, segment 1.0). Date-shuffle placebo p = 0.050. Twin: 1 event in 670 days
+      = 0.55 / year (the decoy). Twins seeds 1–10: 0.82 / year.
+    - **Detection curve** (`docs/detection_curve_a.png`, seeds 1–5):
+
+      | difficulty | F1 | precision | recall | E1 | E2 | E4 | E5 | false pos. / run |
+      |---|---|---|---|---|---|---|---|---|
+      | easy | 0.165 | 0.11 | 0.35 | 5/5 | 0/5 | 0/5 | 2/5 | 11.6 |
+      | medium | 0.246 | 0.17 | 0.45 | 5/5 | 0/5 | 1/5 | 3/5 | 8.6 |
+      | hard | 0.244 | 0.18 | 0.40 | 5/5 | 0/5 | 0/5 | 3/5 | 7.6 |
+
+    Why, per event:
+    - **E1 (price −6 %)** is found every time, through the price test, at its price date.
+      But reaching d ≥ 9 takes −37 % to −61 % (students, sensitivity 2.0, lose up to ~86 %).
+    - **E2 (student churn +60 %, lag 42) is never matched.** E1 lowers students' purchase
+      frequency from 03-01, so the repeat rate falls and gaps grow, which both churn KPIs
+      read as churn. The detective dates "student churn" around 03-08 to 03-11, five weeks
+      before E2's 04-12. Same-direction breaks within 35 days are one ramp (decision 34),
+      so E2's own onset is absorbed. A rule "churn at the time of a purchase drop is the
+      purchase drop" was tried and reverted: churn also lowers orders at the same time, so
+      the two rules explain each other away (synthetic churn world).
+    - **E4 (Brno subscribers' churn)** cannot be seen in its segment at all: d = 0 even at
+      5× hazard. It is widened to all of Brno and still ends below target (d 4.8–6.1 at
+      medium and easy). When found, the repeat rate dates it ~20 days late (a 30-day
+      rolling KPI plus a 7-day ramp is longer than the 35-day ramp fit), and the merge
+      prefers Brno × students, where E2's tail adds to it.
+    - **E5 (Brno stores −20 %)** needs −50 % to −58 %. Found on time but in about half the
+      runs with z 5–6, below 6.5, although calibration measured d ≈ 8–11 on its own seed.
+      Calibration's d is measured at the true onset; the detective has to find the onset
+      on a 30-day ramp, which costs z.
+    - **Precision** is the larger problem: 8–12 false positives a run, against 1.5 a run
+      on twins. They are side effects of the large calibrated events, real in the data but
+      not in the answer key: accessories × students "up" against a control of coffee that
+      fell 40–80 % (a mirror the sibling-only mirror rule does not cover), segment-level
+      purchase shifts around E1, and Brno × student churn. Easier stories score worse,
+      because their effects are bigger. A general mirror rule (any confirmed opposite shift
+      in the control, larger z wins) was tried and reverted: the mirror often has the
+      larger z (accessories z 15.9 vs the coffee price drop z 7.4), so it removed E1.
+
+    - **Calibration overshoots when events interact.** At hard, E5 ends at −84 % (d 17,
+      target 7): E4 is widened to all of Brno in the same loop, its churn lowers Brno store
+      orders, and E5's paired measurement saw less effect in the earlier iterations. Sizes
+      only ever go up, so the overshoot stays. Widening before scaling, and allowing a step
+      back down, would fix it.
+
+    What this says about the plan: with a detector that keeps ≤ 1 false event a year over
+    ~1000 series, an event must be ~9 noise units to be found reliably. Effects that big
+    leak into neighbouring KPIs and segments, and the scorer counts each leak as a false
+    positive. Fixing that needs either a scorer that accepts consequences of a true event
+    (same segment family and window, linked by caused_by), or a detector that attributes
+    them (control-group contamination, churn vs frequency), not more threshold tuning.
