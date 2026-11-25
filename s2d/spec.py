@@ -376,7 +376,8 @@ class StorySpec(Strict):
                 errors.append(f"decoy {i}: date {d.date} is outside {start}..{end}")
             check_target(f"decoy {i}", d.target)
 
-        # TODO(recoverability gate): every effect >= 0.5 noise units at segment level.
+        # The recoverability gate (every effect findable) needs a simulation, so it is
+        # not a validation rule: s2d/calibrate.py runs it before the sim (DECISIONS 6, 54).
         if errors:
             raise ValueError("; ".join(errors))
         return self

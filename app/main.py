@@ -73,7 +73,15 @@ def run_sim(spec_yaml: str, n_customers: int | None):
             spec.entities.customers.n = n_customers
         job.log(f"simulating {spec.meta.days} days, {spec.entities.customers.n} customers")
         t0 = time.perf_counter()
+        table = None
+        if spec.events:
+            from s2d.calibrate import calibrate, format_table
+            job.log("recoverability gate: measuring every event in noise units")
+            spec, table = calibrate(spec, log=job.log)
+            job.log(format_table(table))
         world = simulate(spec)
+        if table is not None:
+            world.truth["calibration"] = table
         for reason in world.story.skipped:
             job.log(f"skipped {reason}")
         out = DATA_DIR / "runs" / job.id

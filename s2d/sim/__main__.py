@@ -3,6 +3,10 @@
     python -m s2d.sim run examples/a.yaml --seed 42 --out data/a/
     python -m s2d.sim run examples/a.yaml --out data/a/ --check   # + no-story twin and churn report
     python -m s2d.sim run examples/a.yaml --out data/a_nostory/ --no-story
+
+Before simulating, s2d.calibrate scales up any effect that would be below its
+difficulty's recoverability target (--no-calibrate to skip). The result is in
+_truth.calibration.
 """
 
 import argparse
@@ -27,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--no-story", action="store_true", help="drop all events (the no-story twin)")
     run.add_argument("--strict", action="store_true", help="fail on events that are not implemented yet")
     run.add_argument("--check", action="store_true", help="also run the no-story twin and print target vs realized")
+    run.add_argument("--no-calibrate", action="store_true", help="skip the recoverability gate (s2d.calibrate)")
     args = parser.parse_args(argv)
 
     spec = load_spec(args.spec)
@@ -36,8 +41,16 @@ def main(argv: list[str] | None = None) -> int:
         spec = without_story(spec)
 
     t0 = time.perf_counter()
+    table = None
+    if spec.events and not args.no_calibrate:
+        from s2d.calibrate import calibrate, format_table
+        spec, table = calibrate(spec, seed=args.seed)
+        print(format_table(table), file=sys.stderr)
+    t_cal = time.perf_counter() - t0
     world = simulate(spec, seed=args.seed, strict=args.strict)
-    t_sim = time.perf_counter() - t0
+    if table is not None:
+        world.truth["calibration"] = table
+    t_sim = time.perf_counter() - t0 - t_cal
     db = write_world(world, args.out)
     t_all = time.perf_counter() - t0
 
@@ -46,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"seed={world.seed}  days={spec.meta.days}  customers={world.population.n}")
     for name, df in world.tables.items():
         print(f"  {name:<15} {len(df):>9,} rows")
-    print(f"simulated in {t_sim:.1f}s, written in {t_all - t_sim:.1f}s -> {db}")
+    print(f"calibrated in {t_cal:.1f}s, simulated in {t_sim:.1f}s, written in {t_all - t_sim - t_cal:.1f}s -> {db}")
 
     if args.check:
         twin = simulate(without_story(spec), seed=args.seed)

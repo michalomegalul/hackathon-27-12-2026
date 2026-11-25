@@ -17,7 +17,9 @@ file together.
    it. It needs `params.churn_pct` and `params.churn_window_days`, and its effects must
    use `metric: churn_hazard`. Its effect `size`, `ramp_days` and `duration_days` are
    ignored. Only `lag_days` is used.
-6. **The recoverability gate (d ≥ 0.5 noise units) is not implemented yet.** It is marked as a TODO in `spec.py`.
+6. **The recoverability gate runs before the sim, in `s2d/calibrate.py`**, not as a spec
+   validation rule (it needs a simulation). See decision 54 for what a noise unit is and
+   why the targets are far above the report's d ≥ 0.5.
 
 ## Effects and curves
 
@@ -294,3 +296,41 @@ the top of `s2d/detective/scan.py`.
       not a spike), spikes starting ≤ 2 days apart are one, and they need the global
       confidence ≥ 0.5 like everything else (max |z| ≥ 5.5).
     - **`z` is in every candidate row** (detective.json), next to the confidence.
+54. **Recoverability gate (`s2d/calibrate.py`, decision 6).** The runner (CLI and app) calls
+    it before simulating; `--no-calibrate` skips it. Per answer-key effect:
+    - **Noise unit** σ = robust SD, over every date, of the 28/28-day DiD statistic of the
+      effect's KPI in its target segment against its control, on a no-story twin. The KPIs,
+      controls and statistic are the detective's own (`kpis.build`, `scan.test_arrays`,
+      `scan.did_effects`), read-only. In the brief's terms d = |effect|·√28 / CV with
+      CV = σ·√28, an *effective* daily CV: autocorrelation and the control's noise are in it.
+      The analytic Poisson CV was rejected: it puts every Example A event at d ≥ 3 while
+      the detective found none of them, because the real noise of the statistic is 2–3×
+      Poisson for counts and 14–26× for the rolling repeat rate.
+    - **Effect** = the same statistic at start + lag (after-window from the end of the
+      ramp; for the repeat rate 30 days later still), story run minus twin run with the
+      same seed, so nearly noise-free. churn_hazard is measured in both churn KPIs and the
+      stronger counts. d = |effect| / σ is the placebo z a detector expects.
+    - **Seed:** calibration runs on seed + 7919, not on the run's own seed, so sizes are
+      not tailored to the noise the detective will see.
+    - **Targets** are relative to the detective's threshold: d ≥ Z_REPORT + 4.0 / 2.5 / 0.5
+      (easy / medium / hard; 10.5 / 9.0 / 7.0 with Z_REPORT = 6.5). The brief's 1.5 / 1.0 /
+      0.6 cannot be detected at ≤ 1 false event a year: the detector needs z ≥ 6.5 for that
+      budget, so a d = 1 event is pure noise to it (agreed with the user, 2026-11-25). The
+      offsets come from synthetic store series only (24 seeds; reported with the right onset
+      within ±7 days): d = 6.5 → 38 % (step) / 54 % (30-day ramp), 7.5 → 54 / 71 %,
+      8.5 → 58 / 79 %, 9.5 → 67 / 92 %.
+    - **Scaling.** Below target, `size` (churn_shock: `churn_pct`) is multiplied by
+      1.05·target/d (at most 8× per step, 4 iterations), direction kept, only ever up.
+      `price_change_pct` is a stated fact and never changes. Caps: −0.85 / +4.0 relative,
+      churn_pct 60. Difficulty's ×1.5/×1/×0.5 (decision 9) still applies first; calibration
+      lifts what is left below the target.
+    - **Widening.** At the cap and still short, or not visible in any KPI the detective
+      scans (segment too small), the event's target loses one key, the one that gives the
+      largest d, and is scaled again. Example A E4 (Brno × predplatitel churn): d = 0 even at
+      5× hazard, widened to all of Brno.
+    - **Output:** `_truth.calibration`, one row per effect: original and simulated size and
+      segment, σ, CV, effect, d before and after, target, status (`ok`, `scaled`, `widened`,
+      `below_target`, `not_measurable`). Anything that does not reach its target is printed
+      as a WARNING and stays as it is. The answer key shows the simulated size and segment.
+    - It only edits the spec and runs the sim as a black box, so feat/sim-full can change
+      the sim's internals without touching it. Cost: ~20 s for 10k customers.
