@@ -37,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--no-calibrate", action="store_true", help="skip the recoverability gate (s2d.calibrate)")
     run.add_argument("--dirt", choices=["none", "low", "medium", "high"], default=None,
                      help="messiness of the export copy (out/export*); default from the spec's noise.messiness")
+    run.add_argument("--texts", metavar="POOL", help="text pool JSON for reviews.text "
+                     "(default: data/text_pools/<company>.json or generic.json if present; 'none' to skip)")
     run.add_argument("--pg", metavar="URL", help="also export to Postgres (with PK/FK); the dirty copy if --dirt")
     run.add_argument("--pg-schema", default="public", help="Postgres schema for the analyst tables")
     pgp = sub.add_parser("pg", help="export an existing run to Postgres")
@@ -67,6 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     world = simulate(spec, seed=args.seed, strict=args.strict)
     if table is not None:
         world.truth["calibration"] = table
+    if args.texts != "none":
+        from s2d.texts import fill_reviews, find_pool, load_pool
+        pool = Path(args.texts) if args.texts else find_pool(spec)
+        if pool is not None:
+            n = fill_reviews(world.tables, load_pool(pool), world.seed)
+            print(f"reviews: {n:,} texts from {pool}", file=sys.stderr)
     t_sim = time.perf_counter() - t0 - t_cal
     from .dirt import FROM_SPEC
     dirt = args.dirt or FROM_SPEC[spec.noise.messiness.value]

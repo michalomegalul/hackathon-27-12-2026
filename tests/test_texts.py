@@ -41,3 +41,19 @@ def test_fill_is_seeded_and_falls_back():
     assert a.tolist() == b.tolist()
     assert a[0].startswith("Čekal jsem 1 den na Etiopie Sidamo")
     assert "3 dny" in a[1] and "7 dní" in a[2]  # rating 2 falls back to the nearest rating
+
+
+def test_fill_reviews_from_a_pool():
+    from s2d.sim import simulate
+    from s2d.spec import load_spec
+    from s2d.texts import fill_reviews
+    spec = load_spec("examples/b.yaml")
+    spec.entities.customers.n = 1500
+    world = simulate(spec, seed=1)
+    pools = {"review|5|kvalita|_any": ["Super {produkt}, doporučuji."],
+             "review|1|zpoždění|_any": ["Objednávka {objednavka} přišla o {dny} později."]}
+    n = fill_reviews(world.tables, pools, seed=1)
+    r = world.tables["reviews"]
+    assert n == (r["text"] != "").sum() > 0
+    late = r[(r["topic"] == "zpoždění") & (r["text"] != "")]
+    assert late["text"].str.contains("přišla o").all() and not late["text"].str.contains("{").any()

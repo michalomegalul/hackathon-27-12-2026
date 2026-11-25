@@ -791,3 +791,4 @@ the top of `s2d/detective/scan.py`.
       dependency; Docker's daemon was not running): Example B, 40k customers, dirt medium:
       19 tables in 1.3 s, row counts equal to DuckDB. `tests/test_pg.py` runs when
       `S2D_TEST_PG` is set and is skipped otherwise.
+77. **Review texts.** `python -m s2d.sim run` fills `reviews.text` from a text pool (`--texts POOL`; by default `data/text_pools/<company>.json`, else `generic.json`, if one exists; `--texts none` skips) with `texts.fill_reviews`: the pool key is the review's rating, topic and its product's category; `{produkt}` = product name, `{dny}` = the parcel's delay, `{objednavka}` = order id. No pool on disk yet (the overnight batch has not run), so the column stays empty until one exists. Tickets get no text.

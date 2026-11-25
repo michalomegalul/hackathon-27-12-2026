@@ -259,6 +259,38 @@ def fill_texts(rows: pd.DataFrame, pools: dict, seed: int) -> pd.Series:
     return pd.Series(out, index=rows.index, name="text")
 
 
+def fill_reviews(tables: dict[str, pd.DataFrame], pools: dict, seed: int) -> int:
+    """Fill `reviews.text` of a simulated world in place from the pools (rating, topic and
+    the product's category pick the pool; {produkt}, {dny}, {objednavka} come from the row).
+    Returns the number of reviews that got a text."""
+    r = tables.get("reviews")
+    if r is None or r.empty or not pools:
+        return 0
+    prod = tables["products"].set_index("product_id")
+    delay = pd.Series(0, index=r.index)
+    d = tables.get("deliveries")
+    if d is not None and not d.empty:
+        delay = r["order_id"].map(d.set_index("order_id")["delay_days"]).fillna(0).astype(int)
+    rows = pd.DataFrame({
+        "kind": "review", "rating": r["rating"].to_numpy(), "topic": r["topic"].to_numpy(),
+        "category": prod.loc[r["product_id"], "category"].to_numpy(),
+        "produkt": prod.loc[r["product_id"], "name"].to_numpy(),
+        "dny": delay.to_numpy(), "objednavka": r["order_id"].to_numpy(),
+    }, index=r.index)
+    text = fill_texts(rows, pools, seed)
+    r["text"] = text.to_numpy()
+    return int((text != "").sum())
+
+
+def find_pool(spec: StorySpec) -> Path | None:
+    """The company's pool if it was generated, else the generic one, else None."""
+    for name in (slug(spec.company.name), "generic"):
+        path = pool_dir() / f"{name}.json"
+        if path.exists():
+            return path
+    return None
+
+
 # ---------------------------------------------------------------- CLI
 
 
