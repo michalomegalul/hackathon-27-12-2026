@@ -39,7 +39,7 @@ MIN_MEAN = 2.0            # shifts are only scanned on count series with >= 2 ev
 PAIR_MAX_DAYS = 150       # an up break and a later down break within this are one event
 BOOT = 200                # bootstrap resamples
 BLOCK = 7                 # bootstrap block length (days)
-Z_REPORT = 4.0            # reported shifts need placebo z >= this (set on no-story twins, DECISIONS 55)
+Z_REPORT = 6.5            # reported shifts need placebo z >= this (set on no-story twins, DECISIONS 55)
 MIN_CONFIDENCE = 0.5      # = confidence at Z_REPORT
 EP_MIN, EP_CUM = 0.3, 0.8  # Adtributor: per-value and cumulative explanatory power
 MIN_SURPRISE = 0.002      # below this JS divergence a change counts as uniform

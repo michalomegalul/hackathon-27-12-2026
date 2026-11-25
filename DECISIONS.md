@@ -334,3 +334,21 @@ the top of `s2d/detective/scan.py`.
       as a WARNING and stays as it is. The answer key shows the simulated size and segment.
     - It only edits the spec and runs the sim as a black box, so feat/sim-full can change
       the sim's internals without touching it. Cost: ~20 s for 10k customers.
+55. **Global threshold: placebo z ≥ 6.5** (`scan.Z_REPORT`; confidence 0.5 at Z_REPORT, so
+    `MIN_CONFIDENCE` stays 0.5). Set on 10 no-story twins of Example A only (seeds 1–10,
+    10k customers, 18.3 twin-years), after decisions 51–54:
+
+    | Z_REPORT | false events / year |
+    |---|---|
+    | 4.0 | 6.6 (before the spike rules of 53: 6.0 with 51–52 only) |
+    | 6.0 | 1.15 |
+    | **6.5** | **0.82** |
+
+    At 6.5 the 15 false events are: the viral-spike **decoy on 2025-10-14 in all 10 twins**
+    (0.55 / year; the sim keeps decoys in the twin, decision 50), two new-customer shifts in
+    Praha in Nov 2025 (z 8.7 and 9.9: the Black Friday week moves first orders by channel and
+    segment differently), one category shift (etiopie, z 7.0) and two spikes. The decoy is a
+    real one-day ×2.5 spike and stays reported rather than being filtered by a rule written
+    for it (decision 44). Spike confidence keeps its own scale ((max |z| − 3.5) / 4).
+    Tests that check calendar, onset and direction logic use effects above this threshold
+    (store drop −50 %, churn ×5); whether a −35 % drop is reported is now a power question.
