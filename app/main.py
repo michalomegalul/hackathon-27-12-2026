@@ -8,6 +8,7 @@ fragment polls it, because Cloudflare drops requests that take over ~100 s.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import duckdb  # noqa: E402
+import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 import yaml  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
@@ -63,7 +65,7 @@ def run_compile(company: str, story: str, seed: int | None):
 
 def run_sim(spec_yaml: str, n_customers: int | None):
     def work(job: jobs.Job):
-        from s2d.sim import simulate
+        from s2d.sim import simulate, without_story
         from s2d.sim.output import write_world
 
         spec = StorySpec.model_validate(yaml.safe_load(spec_yaml))
@@ -76,11 +78,31 @@ def run_sim(spec_yaml: str, n_customers: int | None):
             job.log(f"skipped {reason}")
         out = DATA_DIR / "runs" / job.id
         db = write_world(world, out)
+        job.log("no-story twin (same seed, no events)")
+        write_world(simulate(without_story(spec)), out / "twin")
         job.log(f"done in {time.perf_counter() - t0:.1f} s")
-        return {"dir": str(out), "db": str(db),
+        return {"dir": str(out), "db": str(db), "twin": str(out / "twin"),
                 "rows": {name: len(df) for name, df in world.tables.items()},
                 "skipped": list(world.story.skipped)}
     return jobs.start("sim", work, title="Simulation")
+
+
+def run_detective(run_dir: str, twin_dir: str | None):
+    def work(job: jobs.Job):
+        from s2d import detective, score
+
+        res = detective.run(run_dir, narrate=True, on_status=job.log)
+        detective.save(res, Path(run_dir) / "detective.json")
+        job.log(f"{len(res['events'])} events, scan {res['timing']['scan_s']} s")
+        if twin_dir and Path(twin_dir).exists():
+            job.log("same scan on the no-story twin")
+            tw = detective.run(twin_dir, narrate=False)
+            detective.save(tw, Path(twin_dir) / "detective.json")
+        job.log("scoring against the answer key")
+        card = score.scorecard(run_dir, twin_dir if twin_dir and Path(twin_dir).exists() else None)
+        (Path(run_dir) / "scorecard.json").write_text(json.dumps(card, ensure_ascii=False, default=str), "utf-8")
+        return {"run_dir": run_dir}
+    return jobs.start("detective", work, title="Detective")
 
 
 def _set_job(slot: str, job_id: str) -> None:
@@ -217,8 +239,114 @@ with t_data:
                                    "group by 1 order by 1").df()
                 st.line_chart(daily, x="order_date", y="orders")
 
+def _run_dir() -> str | None:
+    sim_state = jobs.read(_job_id("sim_job") or "")
+    if sim_state and sim_state["status"] == "done":
+        return sim_state["result"]["dir"]
+    return None
+
+
+def _event_chart(run_dir: str, events: list[dict], truth: list[dict] | None = None):
+    """KPI series of the events, with dashed lines at detected starts and solid red
+    lines at the true start + lag (Score tab only)."""
+    import altair as alt
+    from s2d import detective
+
+    names = list(dict.fromkeys(e["series"] for e in events))[:6]
+    if not names:
+        return None
+    df = detective.series_frame(run_dir, names)
+    if df.empty:
+        return None
+    long = df.rolling(7, center=True, min_periods=1).mean().reset_index(names="date").melt(
+        "date", var_name="series", value_name="value (7-day mean)")
+    base = alt.Chart(long).mark_line().encode(x="date:T", y="value (7-day mean):Q", color="series:N")
+    rules = [alt.Chart(pd.DataFrame({"date": pd.to_datetime([e["start_date"] for e in events]),
+                                     "id": [e["id"] for e in events]}))
+             .mark_rule(strokeDash=[4, 3], color="#555").encode(x="date:T", tooltip=["id", "date:T"])]
+    if truth:
+        t = pd.DataFrame(truth)
+        t["date"] = pd.to_datetime(t["start_date"]) + pd.to_timedelta(t["lag_days"].fillna(0), unit="D")
+        rules.append(alt.Chart(t).mark_rule(color="#c0392b").encode(x="date:T", tooltip=["event_id", "date:T"]))
+    return alt.layer(base, *rules).properties(height=360)
+
+
 with t_detective:
-    st.write("Detective: not built yet. It will read only the analyst tables and propose events.")
+    run_dir = _run_dir()
+    if not run_dir:
+        st.write("Simulate data first.")
+    else:
+        st.caption("The detective reads only the analyst tables. It never sees the spec, the seed or the answer key.")
+        det_state = jobs.read(_job_id("det_job") or "")
+        busy = det_state and det_state["status"] in ("queued", "running")
+        if st.button("Run detective", type="primary", disabled=bool(busy)):
+            twin = str(Path(run_dir) / "twin")
+            _set_job("det_job", run_detective(run_dir, twin))
+        job_panel("det_job")
+        det_path = Path(run_dir) / "detective.json"
+        if det_path.exists():
+            from s2d import detective
+            res = detective.load(det_path)
+            st.write(f"{res['n_series']} series, {len(res['candidates'])} candidates, "
+                     f"{len(res['events'])} events. Scan {res['timing']['total_s']} s.")
+            chart = _event_chart(run_dir, res["events"])
+            if chart is not None:
+                st.altair_chart(chart, width="stretch")
+            if "narration" in res:
+                st.subheader("Příběh podle dat")
+                st.write(res["narration"]["narrative_cs"])
+                st.caption(f"Narrator: {res['narration']['source']}")
+            cols = ["id", "metric", "segment", "start_date", "end_date", "direction", "magnitude_pct",
+                    "lag_days", "caused_by", "kind", "confidence", "evidence"]
+            st.dataframe(pd.DataFrame(res["events"], columns=cols), hide_index=True)
+            with st.expander("All candidates, including rejected ones"):
+                st.dataframe(pd.DataFrame(res["candidates"])[cols + ["status"]], hide_index=True)
 
 with t_score:
-    st.write("Score: not built yet. It will match detected events against the answer key.")
+    run_dir = _run_dir()
+    card_path = Path(run_dir) / "scorecard.json" if run_dir else None
+    if not card_path or not card_path.exists():
+        st.write("Run the detective first.")
+    else:
+        card = json.loads(card_path.read_text("utf-8"))
+        sc = card["score"]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Precision", f"{sc['precision']:.2f}")
+        c2.metric("Recall", f"{sc['recall']:.2f}")
+        c3.metric("F1", f"{sc['f1']:.2f}")
+        if "twin" in card:
+            c4.metric("Twin: false events / year", card["twin"]["false_events_per_year"])
+        st.caption(f"Placebo (200 shuffles of the answer-key dates): p = {card['placebo']['p_value']}. "
+                   f"Bonus caused_by: {sc['caused_by_bonus']['hit']}/{sc['caused_by_bonus']['possible']}.")
+
+        by_true = {m["event_id"]: m for m in sc["matches"]}
+        events = {e["id"]: e for e in card["events"]}
+        rows = []
+        for t in card["answer_key"]:
+            m = by_true.get(t["event_id"])
+            e = events.get(m["pred_id"]) if m else None
+            rows.append({
+                "event": t["event_id"], "true": f"{t['metric']} {t['direction']} {t['segment']}",
+                "true start+lag": str((pd.Timestamp(t["start_date"]) + pd.Timedelta(days=int(t["lag_days"] or 0))).date()),
+                "true size %": t["magnitude_pct"],
+                "found": f"{e['id']} {e['segment'] or 'vše'}" if e else ("not simulated" if not t["simulated"] else "missed"),
+                "date": m["timing"] if m else None, "segment": m["segment"] if m else None,
+                "magnitude": m["magnitude"] if m else None, "lag": m["lag"] if m else None,
+                "score": m["score"] if m else None})
+        table = pd.DataFrame(rows)
+
+        def color(v):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return ""
+            return "background-color: #d5f0d5" if v >= 0.5 else "background-color: #f6d5d5"
+        st.dataframe(table.style.map(color, subset=["date", "segment", "magnitude", "lag", "score"]),
+                     hide_index=True)
+        if sc["false_positives"]:
+            st.write("False positives")
+            st.dataframe(pd.DataFrame(sc["false_positives"]), hide_index=True)
+        chart = _event_chart(run_dir, card["events"], card["answer_key"])
+        if chart is not None:
+            st.altair_chart(chart, width="stretch")
+        st.write("Placebo F1 distribution (random answer-key dates) vs the real F1")
+        hist = pd.Series(card["placebo"]["placebo_f1"]).value_counts().sort_index()
+        st.bar_chart(hist.rename_axis("F1").rename("count"))
