@@ -241,7 +241,7 @@ def _sim(spec_path: Path, out: Path, seed: int, n: int | None, no_story: bool) -
     subprocess.run(cmd, check=True, capture_output=True)
 
 
-def sweep(spec_path: str | Path, seeds: list[int], n: int | None = 10000, difficulty: str | None = None,
+def sweep(spec_path: str | Path, seeds: list[int], n: int | None = 40000, difficulty: str | None = None,
           workdir: Path | None = None, twin: bool = True) -> dict:
     from s2d import detective
     spec_path = Path(spec_path)
@@ -278,7 +278,7 @@ def sweep(spec_path: str | Path, seeds: list[int], n: int | None = 10000, diffic
     return {"spec": str(spec_path), "difficulty": difficulty, "n_customers": n, "runs": rows, "summary": summary}
 
 
-def curve(spec_path: str | Path, out_png: str | Path, seeds: list[int], n: int | None = 10000) -> dict:
+def curve(spec_path: str | Path, out_png: str | Path, seeds: list[int], n: int | None = 40000) -> dict:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -339,7 +339,7 @@ def main(argv=None) -> int:
         p.add_argument("spec")
         p.add_argument("--seeds", type=int, default=5)
         p.add_argument("--first-seed", type=int, default=1)
-        p.add_argument("--n-customers", type=int, default=10000)
+        p.add_argument("--n-customers", type=int, default=40000)
         p.add_argument("--difficulty")
         p.add_argument("--out", default="docs/detection_curve.png")
         a = p.parse_args(argv[1:])

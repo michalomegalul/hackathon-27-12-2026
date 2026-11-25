@@ -13,7 +13,7 @@ company:
     - {name: Plzeň,   weight: 0.15, has_store: true}
 entities:
   customers:
-    n: 12000
+    n: 40000
     growth_per_year: 0.20
     segments:
       - {id: student,     share: 0.25, base_orders_per_month: 1.2, price_sensitivity: 2.0, base_churn_per_month: 0.04}
