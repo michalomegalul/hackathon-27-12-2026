@@ -7,6 +7,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,32 @@ class World:
     truth: dict[str, pd.DataFrame]   # hidden (DuckDB schema _truth)
 
 
+def stores_table(spec: StorySpec, cal: Calendar) -> pd.DataFrame:
+    """`per_city_with_store` stores in every city with has_store, all open before the data."""
+    rows = []
+    k = spec.entities.stores.per_city_with_store
+    for c in spec.company.cities:
+        if not c.has_store:
+            continue
+        for j in range(k):
+            rows.append({"store_id": len(rows) + 1, "city": c.name,
+                         "name": f"{spec.company.name} {c.name}" + (f" {j + 1}" if k > 1 else ""),
+                         "opened_date": cal.dates[0] - timedelta(days=365 + 97 * len(rows))})
+    return pd.DataFrame(rows, columns=["store_id", "city", "name", "opened_date"])
+
+
+def _store_of_order(orders: pd.DataFrame, stores: pd.DataFrame, spec: StorySpec) -> pd.Series:
+    """Store orders go to the customer's home store: customer_id modulo the city's stores."""
+    out = pd.Series(pd.NA, index=orders.index, dtype="Int64")
+    store = (orders["channel"] == "store").to_numpy()
+    if not store.any() or stores.empty:
+        return out
+    by_city = stores.groupby("city")["store_id"].apply(list).to_dict()
+    sub = orders.loc[store, ["customer_id", "city"]]
+    out.loc[store] = [by_city[c][cid % len(by_city[c])] for cid, c in zip(sub["customer_id"], sub["city"])]
+    return out
+
+
 def without_story(spec: StorySpec) -> StorySpec:
     """The 'no-story twin': same company and seed, all events removed (decoys stay)."""
     return spec.model_copy(update={"events": []})
@@ -50,8 +77,12 @@ def simulate(spec: StorySpec, seed: int | None = None, strict: bool = False) -> 
     pop = build_population(spec, cal, story, streams)
     result = run_day_loop(spec, cal, story, pop, catalog, streams)
 
+    stores = stores_table(spec, cal)
+    result.orders.insert(result.orders.columns.get_loc("channel") + 1, "store_id",
+                         _store_of_order(result.orders, stores, spec))
     tables = {
         "customers": pop.table,
+        "stores": stores,
         "products": catalog.products,
         "product_prices": product_prices_table(catalog, cal),
         "orders": result.orders,

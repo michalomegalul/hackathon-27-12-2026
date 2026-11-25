@@ -75,6 +75,7 @@ def test_foreign_keys():
                                    ("payments", "order_id", "orders", "order_id"),
                                    ("product_prices", "product_id", "products", "product_id"),
                                    ("deliveries", "order_id", "orders", "order_id"),
+                                   ("orders", "store_id", "stores", "store_id"),
                                    ("reviews", "order_id", "orders", "order_id"),
                                    ("reviews", "customer_id", "customers", "customer_id"),
                                    ("tickets", "order_id", "orders", "order_id"),
@@ -88,6 +89,7 @@ def test_foreign_keys():
     shipped = orders.loc[t["deliveries"]["order_id"]]
     assert (shipped["status"] == "completed").all() and (shipped["channel"] != "store").all()
     assert t["deliveries"]["order_id"].is_unique
+    assert (orders["store_id"].notna() == (orders["channel"] == "store")).all()
     # every order has at least one item, and its total matches the items
     items = t["order_items"].assign(line=lambda d: d.quantity * d.unit_price)
     totals = items.groupby("order_id")["line"].sum()
