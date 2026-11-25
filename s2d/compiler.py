@@ -88,6 +88,8 @@ Rules:
 - A churn_shock needs params.churn_pct and params.churn_window_days, and its effects
   use metric churn_hazard.
 - Things the story calls red herrings, one-off spikes or outages go to decoys, not events.
+- Normal seasonal peaks (school start, Christmas, Black Friday, summer) are baseline.seasonality,
+  never events. If the story says nothing changes, events is [].
 - narrative_cs: one short Czech sentence per event.
 - Keep numbers realistic for a Czech business of the described size and type.
 """
@@ -155,11 +157,10 @@ def _require_all(node):
 
 
 def llm_schema() -> dict:
-    """schema/story.schema.json, tightened for generation: all keys required and
-    at least one event."""
-    schema = _require_all(load_schema())
-    schema["properties"]["events"]["minItems"] = 1
-    return schema
+    """schema/story.schema.json, tightened for generation: all keys required. `events`
+    may be empty (a story where nothing happens); an empty list is challenged once
+    in compile_story instead of being forbidden by the grammar."""
+    return _require_all(load_schema())
 
 
 def spec_to_yaml(spec: StorySpec) -> str:
@@ -200,24 +201,31 @@ def format_errors(err: Exception) -> str:
     return f"- {err}"
 
 
-def validate(data) -> StorySpec:
-    """Pydantic types/bounds plus StorySpec's semantic checks."""
+EMPTY_EVENTS = ("events is empty: every change the story describes (a price change, campaign, delay, "
+                "churn, competitor, ...) must be an event. Seasonal peaks are not events. If the story "
+                "really describes no change, output the same spec again with events: [].")
+
+
+def validate(data, allow_empty: bool = False) -> StorySpec:
+    """Pydantic types/bounds plus StorySpec's semantic checks. An empty `events` is an
+    error unless allow_empty (the model already confirmed it once)."""
     if not isinstance(data, dict):
         raise ValueError("output is not a JSON object")
     spec = StorySpec.model_validate(data)
-    if not spec.events:
-        raise ValueError("events is empty: every change the story describes must be an event")
+    if not spec.events and not allow_empty:
+        raise ValueError(EMPTY_EVENTS)
     return spec
 
 
 def compile_story(company: str, story: str, *, seed: int | None = None,
                   backend: str | None = None, fallback: bool = True,
-                  on_status=None) -> CompileResult:
+                  on_status=None, cache: bool = True) -> CompileResult:
     schema = llm_schema()
     base = build_prompt(company, story)
     prompt = base
     result = CompileResult(spec=None)
     say = on_status or (lambda _msg: None)
+    empty_seen = False  # gemma likes a lazy `events: []`: challenged once, accepted the second time
 
     plan = [backend or llm.backend_name()] * (1 + MAX_RETRIES)
     if fallback and plan[0] != "claude" and llm.claude_available():
@@ -227,7 +235,7 @@ def compile_story(company: str, story: str, *, seed: int | None = None,
         say(f"attempt {i + 1}/{len(plan)} on {b}")
         t0 = time.perf_counter()
         try:
-            data = llm.complete("spec", prompt, schema, backend=b, on_status=say)
+            data = llm.complete("spec", prompt, schema, backend=b, on_status=say, cache=cache)
         except llm.LLMError as e:
             info = llm.last_call()
             result.attempts.append(Attempt(b, info.model or "?", time.perf_counter() - t0, False, str(e)))
@@ -236,8 +244,9 @@ def compile_story(company: str, story: str, *, seed: int | None = None,
             continue
         info = llm.last_call()
         try:
-            spec = validate(data)
+            spec = validate(data, allow_empty=empty_seen)
         except (ValidationError, ValueError) as e:
+            empty_seen = empty_seen or str(e) == EMPTY_EVENTS
             msg = format_errors(e)
             result.attempts.append(Attempt(b, info.model, info.seconds, False, msg,
                                            info.cached, info.tokens_per_s))

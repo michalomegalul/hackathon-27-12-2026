@@ -90,6 +90,15 @@ def test_semantic_errors_are_retried(fake, mutate, message):
     assert message in res.attempts[0].error
 
 
+def test_empty_events_are_challenged_once_then_accepted(fake):
+    empty = _spec("pekarna")
+    empty["events"] = []
+    f = fake(empty, empty)
+    res = compile_story(**_story("pekarna"))
+    assert res.ok and res.retries == 1 and res.spec.events == []
+    assert "events is empty" in res.attempts[0].error and "events: []" in f.calls[1]["prompt"]
+
+
 def test_gives_up_after_two_retries_without_claude(fake):
     bad = _spec("kola")
     bad["entities"]["customers"]["segments"][0]["share"] = 0.99
@@ -127,7 +136,7 @@ def test_replay_miss_stops_immediately(fake, monkeypatch):
 def test_llm_schema_requires_every_key():
     schema = llm_schema()
     assert set(schema["required"]) == set(schema["properties"])
-    assert schema["properties"]["events"]["minItems"] == 1
+    assert "minItems" not in schema["properties"]["events"]  # empty is challenged, not forbidden
     event = schema["properties"]["events"]["items"]
     assert "narrative_cs" in event["required"] and "caused_by" in event["required"]
 
