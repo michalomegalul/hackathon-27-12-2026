@@ -36,7 +36,7 @@ import pandas as pd
 import yaml
 
 from s2d.detective import scan
-from s2d.sim.events import DIFFICULTY_SCALE, compile_curve, daily_hazard
+from s2d.sim.events import ABSOLUTE_METRICS, DIFFICULTY_SCALE, compile_curve, daily_hazard
 from s2d.spec import Effect, Event, EventType, StorySpec
 
 WINDOW = scan.WINDOW          # 28 days before and after
@@ -47,14 +47,25 @@ LEAVER_EDGE_DAYS = 120        # a leaver has no order in the last 120 days of th
 LEAVER_MAX_GAP = 45          # leavers: only regular buyers (average gap <= 45 d); sparse ones blur the date
 KEY_ORDER = ("category", "city", "channel", "segment")  # the first key of a target is the one varied
 
-KPI = {"purchase_rate": "orders", "churn_hazard": "leavers", "acquisition_rate": "new_customers"}
-KPI_CS = {"orders": "objednávky", "leavers": "odchody zákazníků", "new_customers": "noví zákazníci"}
+KPI = {"purchase_rate": "orders", "churn_hazard": "leavers", "acquisition_rate": "new_customers",
+       "delivery_days": "late_share", "rating_mean": "rating"}
+KPI_CS = {"orders": "objednávky", "leavers": "odchody zákazníků", "new_customers": "noví zákazníci",
+          "late_share": "podíl pozdních zásilek", "rating": "průměrné hodnocení",
+          "late_churn": "odchody po pozdní zásilce"}
+# Ratio KPIs: the daily value is a mean (late share in %, rating in points) and the DiD is a
+# difference in those units, not a relative change (scan.did(ratio=True)).
+RATIO = {"late_share": "pp", "rating": "b."}
 # Customer-level KPIs read city and channel from the customer (home channel, decision 17).
 COLUMNS = {
     "orders": {"city": "o.city", "channel": "o.channel", "segment": "c.segment", "category": "p.category"},
     "leavers": {"city": "c.city", "channel": "c.preferred_channel", "segment": "c.segment"},
     "new_customers": {"city": "c.city", "channel": "c.preferred_channel", "segment": "c.segment"},
+    "late_share": {"city": "c.city", "channel": "o.channel", "segment": "c.segment"},
+    "rating": {"city": "c.city", "channel": "o.channel", "segment": "c.segment"},
 }
+# JOIN + lag (DECISIONS 70): a late parcel, then the customer leaves 30-60 days later.
+LAG_FROM, LAG_TO = 30, 60
+JOIN_BOOT = 400              # cluster bootstrap over customers
 
 
 @dataclass
@@ -75,10 +86,16 @@ class Hypothesis:
     claim_cs: str
     price_pct: float | None = None
     dropped: list[str] = field(default_factory=list)  # target keys the KPI cannot split by
+    unit: str = "%"                 # unit of story_pct / measured_pct: '%' relative, 'pp', 'b.' (points), 'd'
+    on_days: int | None = None      # late_churn: days the courier switch lasts (cohort window)
 
     @property
     def T(self) -> date:
         return self.start + timedelta(days=self.lag)
+
+    @property
+    def ratio(self) -> bool:
+        return self.kpi in RATIO
 
 
 # ---------------------------------------------------------------- hypotheses
@@ -98,9 +115,17 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
     keys = [k for k in keys if k in COLUMNS[kpi]]
     vary = keys[0] if keys else None
     scale = DIFFICULTY_SCALE[spec.meta.difficulty]
+    unit = "%"
     if event.type == EventType.churn_shock:
         story_pct = float(event.params.churn_pct)
         direction = "up"
+    elif effect.metric in ABSOLUTE_METRICS:
+        story_pct = float(effect.size)  # days late / rating points, not scaled (DECISIONS 67)
+        direction = "up" if story_pct > 0 else "down"
+        unit = "d" if kpi == "late_share" else "b."
+    elif event.type == EventType.courier_change:
+        story_pct = round(100 * effect.size, 4)  # emergent: the story's expectation, not scaled
+        direction = "up" if story_pct > 0 else "down"
     else:
         story_pct = round(100 * effect.size * scale, 4)
         direction = "up" if story_pct > 0 else "down"
@@ -112,9 +137,33 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
         start=event.start, lag=effect.lag_days, direction=direction, story_pct=story_pct,
         expected_pct=None, claim_cs=event.narrative_cs or "",
         price_pct=event.params.price_change_pct if event.type == EventType.price_change else None,
-        dropped=dropped)
-    h.expected_pct = _expected(spec, event, effect, h)
+        dropped=dropped, unit=unit)
+    h.expected_pct = None if h.ratio or event.type == EventType.courier_change else _expected(spec, event, effect, h)
     return h
+
+
+def join_lag_hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | None:
+    """A courier_change's churn effect, tested where it happens: deliveries in the target
+    cities while the new courier runs, late vs on time, and whether the customer leaves
+    30-60 days after that parcel (customers JOIN orders JOIN deliveries)."""
+    if event.type != EventType.courier_change or effect.metric.value != "churn_hazard":
+        return None
+    from s2d.sim.service import courier_delay
+    switch = next((e for e in [event] + [x for x in spec.events if x.id == event.caused_by]
+                   if courier_delay(e) is not None), None)
+    if switch is None:
+        switch = next((e for e in spec.events if courier_delay(e) is not None
+                       and (not e.target.city or set(event.target.city or []) <= set(e.target.city))), None)
+    if switch is None:
+        return None
+    dd = next((e for e in switch.effects if e.metric.value == "delivery_days"), None)
+    on = None if dd is None or dd.duration_days is None else dd.lag_days + dd.ramp_days + dd.duration_days
+    return Hypothesis(
+        event_id=event.id, type=event.type.value, metric=effect.metric.value, kpi="late_churn",
+        segment=event.target.describe(), vary=None, treated=[],
+        fixed={"city": _values(event.target, "city")} if event.target.city else {},
+        start=switch.start, lag=0, direction="up", story_pct=round(100 * effect.size, 4),
+        expected_pct=None, claim_cs=event.narrative_cs or "", unit="pp", on_days=on)
 
 
 def _expected(spec: StorySpec, event: Event, effect: Effect, h: Hypothesis) -> float:
@@ -148,9 +197,9 @@ def hypotheses(spec: StorySpec, key: pd.DataFrame | None = None) -> list[Hypothe
         for eff in ev.effects:
             if simulated is not None and (ev.id, eff.metric.value) not in simulated:
                 continue
-            h = hypothesis(spec, ev, eff)
-            if h is not None:
-                out.append(h)
+            for h in (hypothesis(spec, ev, eff), join_lag_hypothesis(spec, ev, eff)):
+                if h is not None:
+                    out.append(h)
     return out
 
 
@@ -189,6 +238,24 @@ def _group(h: Hypothesis) -> tuple[str, str]:
 
 def _events_cte(h: Hypothesis, lo: date, hi: date) -> str:
     grp, where = _group(h)
+    if h.kpi == "late_share":
+        return f"""events AS (   -- one row per delivery, dated at the promised day; val = 100 if late
+  SELECT d.promised_date AS day, 100.0 * CAST(d.late AS INTEGER) AS val,
+         {grp} AS grp
+  FROM deliveries d
+  JOIN orders o USING (order_id)
+  JOIN customers c USING (customer_id)
+  WHERE d.late IS NOT NULL AND {where}
+)"""
+    if h.kpi == "rating":
+        return f"""events AS (   -- one row per review
+  SELECT r.review_date AS day, r.rating AS val,
+         {grp} AS grp
+  FROM reviews r
+  JOIN orders o USING (order_id)
+  JOIN customers c ON c.customer_id = r.customer_id
+  WHERE {where}
+)"""
     if h.kpi == "orders":
         uses_cat = h.vary == "category" or "category" in h.fixed
         if uses_cat:
@@ -237,14 +304,15 @@ events AS (   -- a leaver: a regular buyer (average gap <= {LEAVER_MAX_GAP} days
 
 def _ctes(h: Hypothesis, lo: date, hi: date) -> str:
     s0, s1 = _span(h.kpi, lo, hi)
-    control = ("count(e.grp) FILTER (WHERE e.grp = 'control')" if h.vary else "NULL")
+    agg = "avg(e.val)" if h.ratio else "count(e.grp)"
+    control = (f"{agg} FILTER (WHERE e.grp = 'control')" if h.vary else "NULL")
     return f"""WITH {_events_cte(h, lo, hi)},
 days AS (
   SELECT CAST(d AS DATE) AS day FROM range({_d(s0)}, {_d(s1 + timedelta(days=1))}, INTERVAL 1 DAY) t(d)
 ),
 daily AS (   -- {KPI_CS[h.kpi]} per day: treated group and control group
   SELECT days.day,
-         count(e.grp) FILTER (WHERE e.grp = 'treated') AS treated,
+         {agg} FILTER (WHERE e.grp = 'treated') AS treated,
          {control} AS control
   FROM days LEFT JOIN events e ON e.day = days.day
   GROUP BY days.day
@@ -262,8 +330,12 @@ def sql(h: Hypothesis, lo: date, hi: date) -> str:
     target = h.segment or "everyone"
     ctl = (f"{h.vary} not in ({', '.join(h.treated)})" + (f", same {', '.join(h.fixed)}" if h.fixed else "")
            if h.vary else "none: plain before/after")
-    did = ("round(100 * ((treated_after / treated_before) / (control_after / control_before) - 1), 2)"
-           if h.vary else "round(100 * (treated_after / treated_before - 1), 2)")
+    if h.ratio:  # difference in the KPI's own units (pp of late parcels, rating points)
+        did = ("round((treated_after - treated_before) - (control_after - control_before), 2)"
+               if h.vary else "round(treated_after - treated_before, 2)")
+    else:
+        did = ("round(100 * ((treated_after / treated_before) / (control_after / control_before) - 1), 2)"
+               if h.vary else "round(100 * (treated_after / treated_before - 1), 2)")
     return f"""-- {h.event_id} ({h.type}): {KPI_CS[h.kpi]}, {target}
 -- control: {ctl}
 -- before {b0} .. {T - timedelta(days=1)}, after {T} .. {a1 - timedelta(days=1)}
@@ -299,6 +371,165 @@ WITH p AS (
 SELECT count(*) AS products, round(100 * (avg(after / before) - 1), 2) AS price_change_pct FROM p"""
 
 
+def delay_sql(h: Hypothesis) -> str:
+    """Mean delay (delivered - promised, days) of the target's deliveries vs the others,
+    28 days after start vs 28 before: comparable with the story's delivery_days."""
+    grp, where = _group(h)
+    T = h.T
+    b0, a1 = T - timedelta(days=WINDOW), T + timedelta(days=WINDOW)
+    return f"""-- {h.event_id}: mean delay in days, after vs before {T}
+WITH d AS (
+  SELECT {grp} AS grp, d.promised_date >= {_d(T)} AS after, d.delivered_date - d.promised_date AS delay
+  FROM deliveries d JOIN orders o USING (order_id) JOIN customers c USING (customer_id)
+  WHERE d.delivered_date IS NOT NULL AND d.promised_date >= {_d(b0)} AND d.promised_date < {_d(a1)} AND {where}
+), m AS (
+  SELECT avg(delay) FILTER (WHERE grp = 'treated' AND after) - avg(delay) FILTER (WHERE grp = 'treated' AND NOT after) AS t,
+         avg(delay) FILTER (WHERE grp = 'control' AND after) - avg(delay) FILTER (WHERE grp = 'control' AND NOT after) AS c
+  FROM d
+)
+SELECT round(t, 2) AS treated_change_days, round(c, 2) AS control_change_days, round(t - coalesce(c, 0), 2) AS did_days FROM m"""
+
+
+def _join_windows(h: Hypothesis, hi: date) -> tuple[date, date, date]:
+    """(before start, switch start, after end): deliveries in [start, end) are the cohort, the
+    same length before it is the placebo period. The data must run LEAVER_EDGE_DAYS past end
+    so that "no later order" means something."""
+    days = h.on_days or 120
+    end = min(h.start + timedelta(days=days), hi - timedelta(days=LEAVER_EDGE_DAYS))
+    length = (end - h.start).days
+    return h.start - timedelta(days=length), h.start, end
+
+
+def join_lag_cte(h: Hypothesis, hi: date) -> str:
+    b0, s0, a1 = _join_windows(h, hi)
+    where = " AND ".join(_in(f"c.{k}", v) for k, v in h.fixed.items()) or "TRUE"
+    return f"""WITH ranked AS (   -- each order with the customer's first and last order day and order days so far
+  SELECT o.order_id, o.customer_id, o.order_date,
+         min(o.order_date) OVER (PARTITION BY o.customer_id) AS first_order,
+         max(o.order_date) OVER (PARTITION BY o.customer_id) AS last_order,
+         dense_rank() OVER (PARTITION BY o.customer_id ORDER BY o.order_date) AS order_days
+  FROM orders o
+),
+cohort AS (   -- customers JOIN orders JOIN deliveries: one row per delivered parcel
+  SELECT d.delivery_id, r.customer_id, d.delivered_date, d.late,
+         CASE WHEN d.delivered_date >= {_d(s0)} THEN 'after' ELSE 'before' END AS period,
+         -- left {LAG_FROM}-{LAG_TO} days later: this was the customer's last order, and one average
+         -- gap after it (when the next order was due) falls {LAG_FROM}-{LAG_TO} days after the parcel
+         CASE WHEN r.order_date = r.last_order AND r.order_days >= 2
+                   AND r.order_date + CAST(round((r.order_date - r.first_order) / nullif(r.order_days - 1, 0)) AS INTEGER)
+                       BETWEEN d.delivered_date + {LAG_FROM} AND d.delivered_date + {LAG_TO}
+              THEN 1 ELSE 0 END AS left_{LAG_FROM}_{LAG_TO}
+  FROM deliveries d
+  JOIN ranked r USING (order_id)
+  JOIN customers c ON c.customer_id = r.customer_id
+  WHERE d.late IS NOT NULL AND {where}
+    AND d.delivered_date >= {_d(b0)} AND d.delivered_date < {_d(a1)}
+)"""
+
+
+def join_lag_sql(h: Hypothesis, hi: date) -> str:
+    b0, s0, a1 = _join_windows(h, hi)
+    target = h.segment or "everyone"
+    col = f"left_{LAG_FROM}_{LAG_TO}"
+    return f"""-- {h.event_id} ({h.type}): did a late parcel make its customer leave {LAG_FROM}-{LAG_TO} days later?
+-- target: {target}; parcels delivered {s0} .. {a1 - timedelta(days=1)} (new courier),
+-- placebo: the same comparison {b0} .. {s0 - timedelta(days=1)} (old courier)
+{join_lag_cte(h, hi)},
+groups AS (
+  SELECT period,
+         count(*) FILTER (WHERE late) AS late_parcels,
+         100 * avg({col}) FILTER (WHERE late) AS late_left_pct,
+         count(*) FILTER (WHERE NOT late) AS on_time_parcels,
+         100 * avg({col}) FILTER (WHERE NOT late) AS on_time_left_pct
+  FROM cohort GROUP BY period
+)
+SELECT period, late_parcels, round(late_left_pct, 2) AS late_left_pct,
+       on_time_parcels, round(on_time_left_pct, 2) AS on_time_left_pct,
+       round(late_left_pct - on_time_left_pct, 2) AS did_pct,     -- difference, percentage points
+       round(late_left_pct / nullif(on_time_left_pct, 0), 2) AS ratio
+FROM groups ORDER BY period DESC"""
+
+
+def _diff_stats(df: pd.DataFrame, rng: np.random.Generator) -> tuple[float, float, float, float]:
+    """Late minus on-time share leaving (pp), 95 % CI and SE from a bootstrap over customers
+    (a customer's parcels are not independent)."""
+    col = f"left_{LAG_FROM}_{LAG_TO}"
+    late = df["late"].to_numpy(bool)
+    y = df[col].to_numpy(float)
+    point = 100 * (y[late].mean() - y[~late].mean()) if late.any() and (~late).any() else float("nan")
+    cust, inv = np.unique(df["customer_id"].to_numpy(), return_inverse=True)
+    # per customer sums, so one bootstrap draw is a weighted sum over customers
+    sl = np.bincount(inv, weights=y * late, minlength=len(cust))
+    nl = np.bincount(inv, weights=late.astype(float), minlength=len(cust))
+    so = np.bincount(inv, weights=y * ~late, minlength=len(cust))
+    no = np.bincount(inv, weights=(~late).astype(float), minlength=len(cust))
+    w = rng.multinomial(len(cust), np.full(len(cust), 1 / len(cust)), size=JOIN_BOOT).astype(float)
+    boot = 100 * (w @ sl / np.maximum(w @ nl, 1) - w @ so / np.maximum(w @ no, 1))
+    lo, hi = np.percentile(boot, [2.5, 97.5])
+    return float(point), float(lo), float(hi), float(np.std(boot)) or 1e-9
+
+
+def test_join_lag(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_sql: bool = True) -> dict:
+    b0, s0, a1 = _join_windows(h, hi)
+    out = {"event_id": h.event_id, "metric": h.metric, "kpi": h.kpi, "segment": h.segment,
+           "control": "včas doručené zásilky (on-time parcels)", "T": h.start.isoformat(), "direction": h.direction,
+           "story_pct": h.story_pct, "expected_pct": None, "claim_cs": h.claim_cs,
+           "unit": "%", "measured_unit": "pp", "confirmed": False, "status": "not_testable"}
+    if a1 <= s0:
+        return out
+    df = con.execute(join_lag_cte(h, hi) + "\nSELECT customer_id, period, late, delivered_date, "
+                     f"left_{LAG_FROM}_{LAG_TO} FROM cohort").df()
+    rng = np.random.default_rng(seed)
+    after, before = df[df["period"] == "after"], df[df["period"] == "before"]
+    if after["late"].sum() < 30 or (~after["late"].astype(bool)).sum() < 30:
+        return out
+    point, lo_ci, hi_ci, se = _diff_stats(after, rng)
+    z = abs(point) / se
+    b_point, b_lo, b_hi, b_se = _diff_stats(before, rng) if before["late"].sum() >= 30 else (float("nan"),) * 4
+    excludes = lo_ci > 0 or hi_ci < 0
+    confirmed = bool(point > 0 and excludes and z >= Z_CONFIRM)
+    col = f"left_{LAG_FROM}_{LAG_TO}"
+    a_late = after[after["late"].astype(bool)][col]
+    a_on = after[~after["late"].astype(bool)][col]
+    out.update(
+        measured_pct=round(point, 2), ci_pct=[round(lo_ci, 2), round(hi_ci, 2)], z=round(z, 2),
+        right_direction=bool(point > 0), ci_excludes_0=bool(excludes), confirmed=confirmed,
+        status="confirmed" if confirmed else "not_confirmed",
+        before=[b0.isoformat(), (s0 - timedelta(days=1)).isoformat()],
+        after=[s0.isoformat(), (a1 - timedelta(days=1)).isoformat()],
+        groups={"late_parcels": int(len(a_late)), "late_left_pct": round(100 * a_late.mean(), 2),
+                "on_time_parcels": int(len(a_on)), "on_time_left_pct": round(100 * a_on.mean(), 2),
+                "ratio": round(a_late.mean() / a_on.mean(), 2) if a_on.mean() > 0 else None},
+        placebo_before={"diff_pp": None if np.isnan(b_point) else round(b_point, 2),
+                        "ci_pct": None if np.isnan(b_point) else [round(b_lo, 2), round(b_hi, 2)],
+                        "z": None if np.isnan(b_point) else round(abs(b_point) / b_se, 2)},
+        sql=join_lag_sql(h, hi))
+    if check_sql:
+        res = con.execute(out["sql"]).df()
+        row = res[res["period"] == "after"].iloc[0]
+        out["sql_result"] = {k: (None if pd.isna(v) else (v if isinstance(v, str) else float(v)))
+                             for k, v in row.items()}
+        out["sql_rows"] = res.to_dict("records")
+        out["sql_matches"] = bool(abs(float(row["did_pct"]) - point) < 0.006)
+    return out
+
+
+def departure_offsets(con, h: Hypothesis, hi: date) -> pd.DataFrame:
+    """For the chart: days from each parcel (cohort, after period) to the customer's estimated
+    departure (last order + one average gap), for parcels after which the customer never ordered
+    again. Columns: late, offset, parcels_in_group."""
+    q = join_lag_cte(h, hi) + """,
+est AS (
+  SELECT d.delivery_id, d.late,
+         r.order_date + CAST(round((r.order_date - r.first_order) / nullif(r.order_days - 1, 0)) AS INTEGER) - d.delivered_date AS offset
+  FROM cohort k JOIN deliveries d USING (delivery_id) JOIN ranked r USING (order_id)
+  WHERE k.period = 'after' AND r.order_date = r.last_order AND r.order_days >= 2
+)
+SELECT k.late, e.offset, count(*) OVER (PARTITION BY k.late) AS parcels_in_group
+FROM cohort k LEFT JOIN est e USING (delivery_id) WHERE k.period = 'after'"""
+    return con.execute(q).df()
+
+
 # ---------------------------------------------------------------- the test
 
 
@@ -322,35 +553,39 @@ def statistic(df: pd.DataFrame, h: Hypothesis) -> tuple[np.ndarray, np.ndarray |
     return seg, rest, iT, na
 
 
-def null_effects(seg, rest, iT: int, na: int) -> np.ndarray:
+def null_effects(seg, rest, iT: int, na: int, ratio: bool = False) -> np.ndarray:
     """The DiD at every anchor more than 2 windows away from T: the placebo-in-time null."""
-    t, e = scan.did_effects(seg, rest, 0, WINDOW, na)
+    t, e = scan.did_effects(seg, rest, 0, WINDOW, na, ratio)
     return e[np.abs(t - iT) > 2 * WINDOW]
 
 
 def test(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_sql: bool = True) -> dict:
+    if h.kpi == "late_churn":
+        return test_join_lag(con, h, lo, hi, seed, check_sql)
     df = series(con, h, lo, hi)
     out = {"event_id": h.event_id, "metric": h.metric, "kpi": h.kpi, "segment": h.segment,
            "control": (f"{h.vary} ∉ {{{', '.join(h.treated)}}}" if h.vary else None),
            "T": h.T.isoformat(), "direction": h.direction,
            "story_pct": h.story_pct, "expected_pct": h.expected_pct, "claim_cs": h.claim_cs,
+           "unit": h.unit, "measured_unit": RATIO.get(h.kpi, "%"),
            "confirmed": False, "status": "not_testable"}
     st = statistic(df, h)
     if st is None:
         return out
     seg, rest, iT, na = st
     before, after = slice(iT - WINDOW, iT), slice(iT, iT + na)
-    point, (lo_ci, hi_ci), _ = scan.did(seg, rest, before, after, np.random.default_rng(seed))
-    z = scan.placebo_z(seg, rest, iT, iT, WINDOW, na)
+    k = 1.0 if h.ratio else 100.0
+    point, (lo_ci, hi_ci), _ = scan.did(seg, rest, before, after, np.random.default_rng(seed), ratio=h.ratio)
+    z = scan.placebo_z(seg, rest, iT, iT, WINDOW, na, ratio=h.ratio)
     sign = 1 if h.direction == "up" else -1
     right_way = sign * point > 0
     excludes = lo_ci > 0 or hi_ci < 0
     confirmed = bool(right_way and excludes and z >= Z_CONFIRM)
-    null = null_effects(seg, rest, iT, na)
+    null = null_effects(seg, rest, iT, na, h.ratio)
     med = np.median(null)
     p = float(np.mean(np.abs(null - med) >= abs(point - med)))  # share of placebo dates at least as extreme
     out.update(
-        measured_pct=round(100 * point, 2), ci_pct=[round(100 * lo_ci, 2), round(100 * hi_ci, 2)],
+        measured_pct=round(k * point, 2), ci_pct=[round(k * lo_ci, 2), round(k * hi_ci, 2)],
         z=round(z, 2), p_placebo=round(p, 4), right_direction=bool(right_way), ci_excludes_0=bool(excludes),
         confirmed=confirmed, status="confirmed" if confirmed else "not_confirmed",
         before=[str(df["day"].iloc[iT - WINDOW].date()), str(df["day"].iloc[iT - 1].date())],
@@ -361,11 +596,16 @@ def test(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_sql: bool 
     if check_sql:
         row = con.execute(out["sql"]).df().iloc[0]
         out["sql_result"] = {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}
-        out["sql_matches"] = bool(abs(float(row["did_pct"]) - 100 * point) < 0.006)
+        out["sql_matches"] = bool(abs(float(row["did_pct"]) - k * point) < 0.006)
     if h.price_pct is not None and h.vary == "category":
         q = price_sql(h)
         r = con.execute(q).fetchone()
         out["price"] = {"story_pct": h.price_pct, "measured_pct": r[1], "products": r[0], "sql": q}
+    if h.kpi == "late_share":
+        q = delay_sql(h)
+        r = con.execute(q).fetchone()
+        out["delay"] = {"story_days": h.story_pct, "treated_days": r[0], "control_days": r[1],
+                        "did_days": r[2], "sql": q}
     return out
 
 
@@ -437,24 +677,41 @@ def summary_line(res: dict) -> str:
     return line
 
 
+def _u(v, unit: str) -> str:
+    if v is None:
+        return "–"
+    return f"{v:+.1f} %" if unit == "%" else f"{v:+.2f} {unit}"
+
+
 def format_table(res: dict) -> str:
-    head = f"{'event':<5} {'KPI':<14} {'target':<36} {'T':<10} {'story':>8} {'in window':>9} " \
-           f"{'measured':>9} {'95% CI':>17} {'z':>6}  {'':2} {'twin z':>6} {'':2}"
+    head = f"{'event':<5} {'KPI':<14} {'target':<30} {'T':<10} {'story':>9} {'in window':>9} " \
+           f"{'measured':>10} {'95% CI':>17} {'z':>6}  {'':2} {'twin':>10} {'twin z':>6} {'':2}"
     lines = [head, "-" * len(head)]
     for r in res["tests"]:
+        mu = r.get("measured_unit", "%")
         ci = f"[{r['ci_pct'][0]:+.1f}, {r['ci_pct'][1]:+.1f}]" if r.get("ci_pct") else "–"
         tw = r.get("twin", {})
         lines.append(
-            f"{r['event_id']:<5} {r['kpi']:<14} {r['segment'] or 'everyone':<36} {r['T']:<10} "
-            f"{_fmt(r['story_pct']):>8} {_fmt(r['expected_pct']):>9} {_fmt(r.get('measured_pct')):>9} {ci:>17} "
+            f"{r['event_id']:<5} {r['kpi']:<14} {r['segment'] or 'everyone':<30} {r['T']:<10} "
+            f"{_u(r['story_pct'], r.get('unit', '%')):>9} {_u(r['expected_pct'], '%'):>9} "
+            f"{_u(r.get('measured_pct'), mu):>10} {ci:>17} "
             f"{r.get('z', float('nan')):>6.2f}  {'✅' if r['confirmed'] else '❌'} "
+            f"{_u(tw.get('measured_pct'), mu) if tw else '':>10} "
             f"{tw.get('z') if tw.get('z') is not None else float('nan'):>6.2f} "
             f"{('✅' if tw.get('confirmed') else '❌') if tw else ''}")
         if "price" in r:
             lines.append(f"      prices of {r['segment']}: {_fmt(r['price']['measured_pct'])} "
                          f"(story {_fmt(r['price']['story_pct'])}, {r['price']['products']} products)")
+        if "delay" in r:
+            lines.append(f"      mean delay: {_u(r['delay']['did_days'], 'd')} against the control "
+                         f"(story {_u(r['delay']['story_days'], 'd')})")
+        if "groups" in r:
+            g, pb = r["groups"], r["placebo_before"]
+            lines.append(f"      left {LAG_FROM}-{LAG_TO} d after the parcel: late {g['late_left_pct']:.1f} % "
+                         f"of {g['late_parcels']}, on time {g['on_time_left_pct']:.1f} % of {g['on_time_parcels']} "
+                         f"(x{g['ratio']}); same test before the switch: {_u(pb['diff_pp'], 'pp')} z {pb['z']}")
         if "sql_matches" in r:
-            lines.append(f"      SQL gives DiD {r['sql_result']['did_pct']:+.2f} %: "
+            lines.append(f"      SQL gives {r['sql_result']['did_pct']:+.2f} {mu}: "
                          f"{'same as the test' if r['sql_matches'] else 'MISMATCH'}")
     lines.append(summary_line(res))
     return "\n".join(lines)
@@ -463,13 +720,25 @@ def format_table(res: dict) -> str:
 def narrative_cs(res: dict) -> str:
     """Czech description of the confirmed events only (template: every number from the table)."""
     verbs = {("orders", "down"): "klesly", ("orders", "up"): "vzrostly",
+             ("late_share", "up"): "přibylo pozdních zásilek", ("late_share", "down"): "ubylo pozdních zásilek",
+             ("rating", "down"): "kleslo průměrné hodnocení", ("rating", "up"): "stouplo průměrné hodnocení",
+             ("late_churn", "up"): "odcházelo víc zákazníků po pozdní zásilce",
              ("leavers", "up"): "přibylo odchodů zákazníků", ("leavers", "down"): "ubylo odchodů zákazníků",
              ("new_customers", "up"): "přibylo nových zákazníků", ("new_customers", "down"): "ubylo nových zákazníků"}
     out = []
     for r in sorted((r for r in res["tests"] if r["confirmed"]), key=lambda r: r["T"]):
         who = _segment_cs(r["segment"])
         what = verbs[(r["kpi"], r["direction"])]
-        size = f"o {abs(r['measured_pct']):.0f} %"
+        mu = r.get("measured_unit", "%")
+        size = (f"o {abs(r['measured_pct']):.0f} %" if mu == "%" else
+                f"o {abs(r['measured_pct']):.1f} p. b." if mu == "pp" else f"o {abs(r['measured_pct']):.2f} bodu")
+        if r["kpi"] == "late_churn":
+            g = r["groups"]
+            s = (f"Od {_date_cs(r['T'])} {_segment_cs(r['segment'])} odešlo {LAG_FROM}–{LAG_TO} dní po pozdní zásilce "
+                 f"{g['late_left_pct']:.1f} % zákazníků, po včasné {g['on_time_left_pct']:.1f} % (z = {r['z']:.1f}). "
+                 f"{r['claim_cs']}".rstrip())
+            out.append(s)
+            continue
         if r["kpi"] == "orders":
             s = f"Od {_date_cs(r['T'])} {what} objednávky {who} {size} oproti kontrolní skupině"
         else:
