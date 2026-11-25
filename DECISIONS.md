@@ -154,8 +154,23 @@ the top of `s2d/detective/scan.py`.
 34. **Onset = start of a fitted ramp,** not the PELT location. Each break is refit as
     level → linear ramp (0-35 days) → level, all (t0, t1) solved in closed form; the
     reported start is t0. PELT puts a ramp's break in its middle.
+    **The fit runs on the segment relative to its control** (share of segment + control
+    for counts, difference for ratios; 0/0 days interpolated), not on the segment alone.
+    Example A E5 (Brno stores −20 % over a 30-day ramp from 09-07): every store is closed
+    on 28 Sept, PELT put the break on that zero day and the fit on the Brno series locked
+    onto it (onset 09-25). Relative to the other cities' stores the closure cancels and
+    the onset is 09-09. **Same-direction breaks closer than 35 days are one ramp**
+    starting at the first: PELT cuts a long ramp into two steps, and the second one's fit
+    could not reach back past the first. Synthetic check (`_store_world` in the tests,
+    20 seeds): −35 % over 30 days → median onset error 0 d, 84 % within ±6 d; −20 % over
+    30 days → median +5 d, 46 % within ±6 d (a weak long ramp cannot be dated better
+    than that; a step at its midpoint fits almost as well). A CUSUM onset estimator was
+    tried and was worse on ramps.
 35. **An up break followed by a down break in the same series within 150 days is one
-    temporary event** (end_date = the second break), not two events.
+    temporary event** (end_date = the second break), not two events. **If that pair is not
+    confirmed, its end break is evaluated again as an onset of its own.** Otherwise a noise
+    break eats the real one: in Example A seed 42 an up break on 06-25 paired with the E5
+    break on 09-28, the pair failed the DiD, and E5 was never tested.
 36. **Seasonality cannot be removed from an everyone-level series** (< 2 years of data).
     So every reported shift needs a control group: Adtributor picks the segment for an
     overall break (EP ≥ 0.3 per value up to 0.8, dimension with the highest JS

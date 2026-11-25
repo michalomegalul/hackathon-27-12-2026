@@ -266,6 +266,19 @@ def calendar_applies(kind: str, start: str, end: str | None, has_control: bool) 
     return not has_control
 
 
+def onset_series(x: np.ndarray, seg: np.ndarray, rest: np.ndarray | None, ratio: bool) -> np.ndarray:
+    """The series the ramp is fitted on. With a control group it is the segment
+    relative to the control (share of seg + rest for counts, difference for
+    ratios), so days that hit both (a holiday when every store is closed) cancel
+    instead of pulling the fit. 0/0 days are interpolated."""
+    if rest is None:
+        return x
+    if ratio:
+        return pd.Series(seg - rest).interpolate(limit_direction="both").to_numpy()
+    tot = seg + rest
+    share = np.divide(seg, tot, out=np.full(len(seg), np.nan), where=tot > 0)
+    return pd.Series(share).interpolate(limit_direction="both").to_numpy()
+
 
 # ---------------------------------------------------------------- the scan
 
@@ -359,6 +372,21 @@ def _union_series(ks: KPISet, kpi: str, seg: str) -> pd.Series | None:
     return None if any(p is None for p in parts) else sum(parts)
 
 
+def _shift(kpi: str, seg: str, s: pd.Series, b: int, level: float, lo: int, right: int,
+           end: int | None) -> Candidate | None:
+    """A shift candidate at break b, before the onset fit and the DiD."""
+    w = _windows(len(s), b, b, right)
+    if w is None:
+        return None
+    return Candidate(
+        id="", metric=METRIC[kpi], segment=seg, kpi=kpi, start_date=str(s.index[b].date()),
+        end_date=str(s.index[end].date()) if end is not None else None,
+        direction="up" if level > 0 else "down", magnitude_pct=0.0,
+        lag_days=None, caused_by=None, kind="shift", confidence=0.0, evidence="",
+        series=f"{kpi}|{seg}",
+        extra={"t0": b, "t1": b, "lo": lo, "right": right, "before": w[0], "after": w[1]})
+
+
 def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
     rng = np.random.default_rng(seed)  # bootstrap only; fixed so a run is repeatable
     raw: list[Candidate] = []
@@ -383,6 +411,11 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         for b in bks:
             lo, hi = max(0, b - WINDOW), min(n, b + WINDOW)
             levels.append(pr.x[b:hi].mean() - pr.x[lo:b].mean())
+        # PELT cuts a long ramp into steps: same-direction breaks closer than
+        # RAMP_MAX are one ramp, starting at the first of them
+        keep = [i for i in range(len(bks)) if i == 0 or not (
+            bks[i] - bks[i - 1] <= RAMP_MAX and np.sign(levels[i]) == np.sign(levels[i - 1]))]
+        bks, levels = [bks[i] for i in keep], [levels[i] for i in keep]
         # pair an up break with a later opposite break: a temporary event
         used = set()
         for i, b in enumerate(bks):
@@ -397,21 +430,23 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
                 used.add(end)
             right = bks[end] if end is not None else n
             lo = bks[i - 1] if i > 0 else 0
-            t0 = t1 = b
-            w = _windows(n, t0, t1, right)
-            if w is None:
-                continue
-            raw.append(Candidate(
-                id="", metric=METRIC[kpi], segment=seg, kpi=kpi,
-                start_date=str(s.index[t0].date()),
-                end_date=str(s.index[bks[end]].date()) if end is not None else None,
-                direction="up" if levels[i] > 0 else "down", magnitude_pct=0.0,
-                lag_days=None, caused_by=None, kind="shift", confidence=0.0, evidence="",
-                series=f"{kpi}|{seg}",
-                extra={"t0": t0, "t1": t1, "lo": lo, "right": right, "before": w[0], "after": w[1]}))
+            c = _shift(kpi, seg, s, b, levels[i], lo, right, bks[end] if end is not None else None)
+            if end is not None:
+                # if the pair is not confirmed as one temporary event, its end
+                # break is still a candidate onset of its own
+                nxt = bks[end + 1] if end + 1 < len(bks) else n
+                fb = _shift(kpi, seg, s, bks[end], levels[end], b, nxt, None)
+                if c is None:
+                    c = fb
+                elif fb is not None:
+                    c.extra["fallback"] = fb
+            if c is not None:
+                raw.append(c)
 
     out: list[Candidate] = []
-    for c in raw:
+    while raw:
+        c = raw.pop(0)
+        fb = c.extra.pop("fallback", None)
         s = ks.get(c.kpi, c.segment)
         before, after = c.extra["before"], c.extra["after"]
         raw_change = s.iloc[after].mean() / max(s.iloc[before].mean(), 1e-9) - 1
@@ -422,6 +457,8 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
                 c.status = "uniform_change"
                 c.evidence = "změna stejná ve všech segmentech, od sezónnosti ji nejde odlišit"
                 out.append(c)
+                if fb is not None:
+                    raw.insert(0, fb)
                 continue
             c.segment = seg
             c.extra["surprise"] = surprise
@@ -429,6 +466,8 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
             if s is None:
                 c.status = "uniform_change"
                 out.append(c)
+                if fb is not None:
+                    raw.insert(0, fb)
                 continue
         rest = _rest(ks, c.kpi, c.segment, s)
         sv = s.to_numpy(float)
@@ -437,9 +476,12 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         nb, na = before.stop - before.start, after.stop - after.start
         pr = preps.get((c.kpi, c.segment)) or prepare(s)
         b = c.extra["t0"]
-        t0, t1 = ramp_onset(pr.x, b, max(c.extra["lo"], b - 60), min(c.extra["right"], b + 60))
+        t0, t1 = ramp_onset(onset_series(pr.x, sv, rv, ratio), b,
+                            max(c.extra["lo"], b - 60), min(c.extra["right"], b + 60))
         w = _windows(len(s), t0, t1, c.extra["right"])
         if w is None:
+            if fb is not None:
+                raw.insert(0, fb)
             continue
         before, after = w
         nb, na = before.stop - before.start, after.stop - after.start
@@ -464,6 +506,8 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
             c.status = "explained_by_calendar"
             c.evidence += f"; {reason}"
         out.append(c)
+        if fb is not None and c.status != "reported":
+            raw.insert(0, fb)
 
     out += price_candidates(ks, rng)
     reported = merge([c for c in out if c.status == "reported"])

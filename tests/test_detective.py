@@ -175,3 +175,37 @@ def test_calendar_only_explains_spikes_and_short_changes():
     assert scan.calendar_applies("shift", "2026-09-25", None, has_control=False)          # no control
     assert not scan.calendar_applies("shift", "2026-09-25", None, has_control=True)
     assert not scan.calendar_applies("shift", "2026-09-25", "2026-12-01", has_control=True)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_lasting_store_drop_near_a_holiday_is_reported(seed):
+    """Fix for Example A E5: a confirmed DiD shift vs the other cities' stores
+    must not be thrown out because 28 Sept is a holiday."""
+    found = _brno_store(scan.scan(_store_world(seed, size=-0.35)))
+    assert found, "Brno store drop not found"
+    assert not any(c.status == "explained_by_calendar" for c in found)
+    assert any(c.status == "reported" and c.direction == "down" for c in found), [(c.status, c.ci, c.confidence) for c in found]
+
+
+def test_ramp_onset_is_ramp_start_and_scores_on_start_plus_lag():
+    """The reported start of a 30-day ramp is its first day, not its end and not
+    the holiday in the middle of it, and the scorer measures it against start + lag.
+    Over 10 seeds: the median error is within 3 days and 7 of 10 score a match."""
+    from s2d import score
+    key = pd.Series({"start_date": pd.Timestamp("2026-08-24"), "lag_days": 14, "segment": "city=Brno;channel=store",
+                     "metric": "purchase_rate", "direction": "down", "magnitude_pct": -35.0})
+    errs, matched = [], 0
+    for seed in range(1, 11):
+        rep = [c for c in _brno_store(scan.scan(_store_world(seed, size=-0.35))) if c.status == "reported"]
+        if not rep:
+            continue
+        c = rep[0]
+        errs.append((pd.Timestamp(c.start_date) - pd.Timestamp("2026-09-07")).days)
+        sl = score.slots(c.row(), key)  # truth start 08-24 + lag 14 = ramp start 09-07
+        assert sl["delta_days"] == errs[-1]
+        matched += score.pair_score(sl) >= score.MATCH
+        # a prediction at the end of the ramp is 30 days late: no timing credit, no match
+        late = score.slots({**c.row(), "start_date": "2026-10-07"}, key)
+        assert late["timing"] == 0.0 and score.pair_score(late) == 0.0
+    assert abs(np.median(errs)) <= 3, errs
+    assert matched >= 7, errs
