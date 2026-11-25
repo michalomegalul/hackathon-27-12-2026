@@ -1,30 +1,25 @@
-"""Recoverability gate: make every answer-key effect findable before the story is simulated.
+"""Recoverability gate: make every answer-key effect confirmable before the story is simulated.
 
     from s2d.calibrate import calibrate
-    spec, table = calibrate(spec, seed)     # spec with sizes scaled up where needed
+    spec, table = calibrate(spec, seed)     # spec with sizes scaled where needed
 
-The story must be visible in the data, or there is nothing to detect. Each effect
-is measured in noise units of the statistic a detector tests:
+The story must be visible in the data. Each effect is measured in noise units of
+the verifier's test for it (s2d/verify.py: the event's KPI in its target against
+the other values of the same dimension, 28 days after start + lag vs 28 before):
 
-    sigma  = robust SD, over every date, of the 28/28-day DiD of the effect's KPI in
-             its target segment against its control, on a no-story twin
-    effect = the same statistic at start + lag (after-window from the end of the
-             ramp), story run minus twin run with the same seed (paired, so nearly
-             noise-free)
-    d      = |effect| / sigma  =  |effect| * sqrt(28) / CV,  CV = sigma * sqrt(28)
+    sigma  = robust SD of that DiD over every date more than 56 days from T, on a
+             no-story twin (the placebo-in-time null of the test)
+    effect = the DiD at T, story run minus twin run with the same seed (paired,
+             so nearly noise-free)
+    d      = |effect| / sigma, the placebo z the verifier expects
 
-so CV is the effective daily CV (autocorrelation and the control's noise
-included) and d is the placebo z a detector expects. The KPIs, controls and DiD
-are the detective's own (s2d.detective.kpis / scan.test_arrays / scan.did_effects);
-calibration only reads them, it never changes the detective.
-
-Difficulty sets the target d relative to the detective's reporting threshold
-scan.Z_REPORT (see TARGET_OFFSET). An effect below its target has its `size`
-(churn_shock: `churn_pct`) scaled up, keeping its direction; one far above it is
-scaled back down, never below the story's own size. Stated facts such as
-`price_change_pct` are never touched. If even the plausibility cap cannot reach
-the target, the event's target is widened by dropping one key, before any scaling. Whatever still cannot reach its
-target is left as it is and listed with a warning.
+Difficulty sets the target d (TARGET_D). An effect below its target has its
+`size` (churn_shock: `churn_pct`) scaled up, keeping its direction; one far above
+it is scaled back down, never below the story's own size. Stated facts such as
+`price_change_pct` are never touched, and drops are capped at realistic sizes. If
+even the cap is far from the target, the event's target is widened by dropping
+one key, before any scaling. Whatever still cannot reach its target is left as
+it is and listed with a warning.
 
 This module only edits the spec. It runs the simulator as a black box (feat/sim-full
 changes the sim's internals, not this).
@@ -35,34 +30,24 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-import duckdb
 import numpy as np
 import pandas as pd
 
-from s2d.detective import kpis as kpis_mod
+from s2d import verify
 from s2d.detective import scan
 from s2d.sim import simulate, without_story
 from s2d.sim.events import DIFFICULTY_SCALE, IMPLEMENTED_METRICS
-from s2d.sim.output import DATE_COLUMNS
-from s2d.spec import Difficulty, EventType, Metric, StorySpec, Target
+from s2d.spec import Difficulty, EventType, StorySpec, Target
 
-# target d = scan.Z_REPORT + offset. Chosen so medium sizes stay realistic (DECISIONS 57):
-# on Example A at 10k customers, d = Z_REPORT means roughly a -20 to -25 % price
-# response (E1) and a -25 to -30 % drop of Brno stores (E5). Easy is about 1.5x
-# that size, hard sits below the threshold (found in a minority of runs).
-TARGET_OFFSET = {Difficulty.easy: 1.5, Difficulty.medium: 0.0, Difficulty.hard: -1.25}
-# The KPIs a detector can see a metric in. churn_hazard has two; the stronger counts.
-KPIS = {
-    Metric.purchase_rate: ["orders"],
-    Metric.acquisition_rate: ["new_customers"],
-    Metric.churn_hazard: ["churn_onsets", "repeat_rate"],
-}
+# Target d of the verifier's single test (DECISIONS 62). verify.Z_CONFIRM is 3:
+# medium sits half a noise unit above it, hard half a unit below.
+TARGET_D = {Difficulty.easy: 5.0, Difficulty.medium: 3.5, Difficulty.hard: 2.5}
 # Plausibility caps on the simulated size (relative multiplier - 1, or churn_pct).
 SIZE_CAP = {"down": -0.85, "up": 4.0}
 CHURN_PCT_CAP = 60.0
-# Realism caps on a drop, at medium; times the difficulty scale (x1.5 / x1 / x0.5).
-# A price response is at most PRICE_ELASTICITY_CAP x the price change (15 % dearer ->
-# at most -20 % orders); any other purchase or acquisition drop at most DROP_CAP.
+# Realism caps on a drop, the same at every difficulty. A price response is at most
+# PRICE_ELASTICITY_CAP x the price change (15 % dearer -> at most -20 % orders); any
+# other purchase or acquisition drop at most DROP_CAP.
 PRICE_ELASTICITY_CAP = 4 / 3
 DROP_CAP = -0.30
 WIDEN_BELOW = 0.5            # widen only if even at the cap d < WIDEN_BELOW x target
@@ -74,7 +59,7 @@ KEY_ORDER = ("category", "city", "channel", "segment")  # how the KPI series nam
 
 
 def target_d(difficulty: Difficulty) -> float:
-    return scan.Z_REPORT + TARGET_OFFSET[difficulty]
+    return TARGET_D[difficulty]
 
 
 def kpi_segment(target: Target) -> str:
@@ -87,55 +72,47 @@ def kpi_segment(target: Target) -> str:
     return ";".join(parts)
 
 
-def world_kpis(world) -> kpis_mod.KPISet:
-    """The detective's KPI series of a simulated world, from its analyst tables only."""
-    con = duckdb.connect()
-    for name, df in world.tables.items():
-        df = df.copy()
-        for col in DATE_COLUMNS & set(df.columns):
-            df[col] = pd.to_datetime(df[col]).dt.date
-        con.register("_df", df)
-        con.execute(f"CREATE TABLE {name} AS SELECT * FROM _df")
-        con.unregister("_df")
-    return kpis_mod.build(con)
-
-
 @dataclass
 class Measure:
     kpi: str | None
     effect: float | None     # DiD statistic, story - twin
     sigma: float | None
-    d: float | None          # None: no KPI a detector scans covers this target
+    d: float | None          # None: the verifier has no test for this target
 
 
-def _measure(twin: kpis_mod.KPISet, story: kpis_mod.KPISet, metric: Metric, seg: str,
-             day: pd.Timestamp, ramp: int, up: bool) -> Measure:
-    best = Measure(None, None, None, None)
-    for kpi in KPIS.get(metric, []):
-        tw = scan.test_arrays(twin, kpi, seg)
-        st = scan.test_arrays(story, kpi, seg)
-        if tw is None or st is None or tw.rest is None or st.rest is None:
-            continue
-        if not tw.ratio and np.nanmean(tw.raw_seg) < scan.MIN_MEAN:
-            continue  # too sparse: the detective does not scan shifts on it
-        gap = ramp + kpis_mod.SMEAR_DAYS.get(kpi, 0)
-        anchor = int(tw.index.get_indexer([day])[0])
-        # near the end of the data the after-window is shorter, as in the detective
-        na = min(scan.WINDOW, len(tw.seg) - anchor - gap)
-        if anchor < scan.WINDOW or na < scan.MIN_AFTER:
-            continue
-        t, e_tw = scan.did_effects(tw.seg, tw.rest, gap, na=na, ratio=tw.ratio)
-        _, e_st = scan.did_effects(st.seg, st.rest, gap, na=na, ratio=st.ratio)
-        at = np.flatnonzero(t == anchor)
-        if not len(at) or np.isnan(e_st[at[0]]) or np.isnan(e_tw[at[0]]):
-            continue
-        sigma = scan.robust_sd(e_tw)
-        effect = float(e_st[at[0]] - e_tw[at[0]])
-        want = (1 if up else -1) * (-1 if kpi in kpis_mod.INVERSE_KPIS else 1)
-        d = max(0.0, want * effect) / sigma
-        if best.d is None or d > best.d:
-            best = Measure(kpi, effect, sigma, d)
-    return best
+class Twin:
+    """The no-story twin's tables, with each test's daily series cached."""
+
+    def __init__(self, world):
+        self.con = verify.world_con(world)
+        self.lo, self.hi = verify._range(self.con)
+        self._cache: dict[str, pd.DataFrame] = {}
+
+    def series(self, h: verify.Hypothesis) -> pd.DataFrame:
+        k = verify._ctes(h, self.lo, self.hi)
+        if k not in self._cache:
+            self._cache[k] = verify.series(self.con, h, self.lo, self.hi)
+        return self._cache[k]
+
+
+def _measure(twin: Twin, story_con, h: verify.Hypothesis | None) -> Measure:
+    if h is None:
+        return Measure(None, None, None, None)
+    tw = verify.statistic(twin.series(h), h)
+    st = verify.statistic(verify.series(story_con, h, twin.lo, twin.hi), h)
+    if tw is None or st is None:
+        return Measure(h.kpi, None, None, None)
+    seg_tw, rest_tw, iT, na = tw
+    seg_st, rest_st = st[0], st[1]
+    t, e_tw = scan.did_effects(seg_tw, rest_tw, 0, scan.WINDOW, na)
+    _, e_st = scan.did_effects(seg_st, rest_st, 0, scan.WINDOW, na)
+    at = np.flatnonzero(t == iT)
+    if not len(at) or np.isnan(e_st[at[0]]) or np.isnan(e_tw[at[0]]):
+        return Measure(h.kpi, None, None, None)
+    sigma = scan.robust_sd(verify.null_effects(seg_tw, rest_tw, iT, na))
+    effect = float(e_st[at[0]] - e_tw[at[0]])
+    want = 1 if h.direction == "up" else -1
+    return Measure(h.kpi, effect, sigma, max(0.0, want * effect) / sigma)
 
 
 def _slots(spec: StorySpec) -> list[tuple[int, int]]:
@@ -160,12 +137,8 @@ def size_cap(spec: StorySpec, i: int, j: int, up: bool) -> float:
     if up:
         return SIZE_CAP["up"]
     ev = spec.events[i]
-    scale = DIFFICULTY_SCALE[spec.meta.difficulty]
     pct = ev.params.price_change_pct if ev.type == EventType.price_change else None
-    if pct:
-        realistic = -PRICE_ELASTICITY_CAP * abs(pct) / 100 * scale
-    else:
-        realistic = DROP_CAP * scale
+    realistic = -PRICE_ELASTICITY_CAP * abs(pct) / 100 if pct else DROP_CAP
     return max(SIZE_CAP["down"], realistic)
 
 
@@ -183,17 +156,10 @@ def _set_sim_size(spec: StorySpec, i: int, j: int, value: float) -> bool:
     return capped
 
 
-def _measure_all(spec: StorySpec, seed: int, twin_ks) -> dict[tuple[int, int], Measure]:
-    story_ks = world_kpis(simulate(spec, seed=seed))
-    out = {}
-    for i, j in _slots(spec):
-        ev = spec.events[i]
-        eff = ev.effects[j]
-        day = pd.Timestamp(ev.start) + pd.Timedelta(days=eff.lag_days)
-        ramp = 0 if ev.type == EventType.churn_shock else eff.ramp_days
-        up = _sim_size(spec, i, j) > 0 if ev.type != EventType.churn_shock else True
-        out[(i, j)] = _measure(twin_ks, story_ks, eff.metric, kpi_segment(ev.target), day, ramp, up)
-    return out
+def _measure_all(spec: StorySpec, seed: int, twin: Twin) -> dict[tuple[int, int], Measure]:
+    story_con = verify.world_con(simulate(spec, seed=seed))
+    return {(i, j): _measure(twin, story_con, verify.hypothesis(spec, spec.events[i], spec.events[i].effects[j]))
+            for i, j in _slots(spec)}
 
 
 def _at_cap(spec: StorySpec, i: int) -> StorySpec:
@@ -227,7 +193,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
         return spec, pd.DataFrame(columns=cols)
 
     goal = target_d(spec.meta.difficulty)
-    twin_ks = world_kpis(simulate(without_story(spec), seed=seed))
+    twin = Twin(simulate(without_story(spec), seed=seed))
     orig_size = {(i, j): (spec.events[i].params.churn_pct if spec.events[i].type == EventType.churn_shock
                           else spec.events[i].effects[j].size) for i, j in slots}
     story_size = {k: _sim_size(spec, *k) for k in slots}
@@ -235,7 +201,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     capped: set[tuple[int, int]] = set()
     widened: set[int] = set()
 
-    first = _measure_all(spec, seed, twin_ks)
+    first = _measure_all(spec, seed, twin)
 
     # 1. Widen first. An event whose target stays below half the goal even at the
     # size cap (or is not visible in any scanned KPI) loses one key, the option with the
@@ -244,7 +210,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     for i in sorted({i for i, _ in slots}):
         own = [k for k in slots if k[0] == i]
         at_cap = _at_cap(spec, i)
-        m_cap = _measure_all(at_cap, seed, twin_ks)
+        m_cap = _measure_all(at_cap, seed, twin)
         here = min((m_cap[k].d or 0.0) for k in own)
         if all(first[k].d is not None for k in own) and here >= WIDEN_BELOW * goal:
             continue  # reachable, or a near miss: a near miss stays below_target, not a new story
@@ -252,7 +218,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
         for opt in _widen_options(spec.events[i].target):
             trial = at_cap.model_copy(deep=True)
             trial.events[i].target = opt
-            mt = _measure_all(trial, seed, twin_ks)
+            mt = _measure_all(trial, seed, twin)
             d = min((mt[k].d or 0.0) for k in own)
             if best is None or d > best[0]:
                 best = (d, opt)
@@ -262,7 +228,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
 
     # 2. Scale, both ways. Below the goal a size grows; above goal * BAND it steps
     # back down, but never below the story's own size and never past the cap.
-    m = _measure_all(spec, seed, twin_ks)
+    m = _measure_all(spec, seed, twin)
     for _ in range(ITERATIONS):
         off = [k for k in slots if m[k].d is not None and (
             (m[k].d < goal and k not in capped)
@@ -278,7 +244,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
                 capped.add(k)
             else:
                 capped.discard(k)
-        m = _measure_all(spec, seed, twin_ks)
+        m = _measure_all(spec, seed, twin)
 
     rows = []
     for k in slots:
