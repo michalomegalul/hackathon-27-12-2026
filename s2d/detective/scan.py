@@ -97,13 +97,18 @@ def prepare(s: pd.Series) -> Prepared | None:
     res = STL(v, period=7, robust=True).fit()
     x = res.trend + res.resid
     r = res.resid
-    scale = 1.4826 * np.median(np.abs(r - np.median(r)))
+    # Noise scale of x itself. The STL residual is too small for this: the trend
+    # soaks up the slow part of the noise. First differences see all of it and are
+    # robust to level shifts: sd = 1.4826 * MAD(diff) / sqrt(2).
+    d = np.diff(x)
+    scale = 1.4826 * np.median(np.abs(d - np.median(d))) / math.sqrt(2)
     if scale <= 1e-9:
-        scale = float(np.std(r))
+        scale = float(np.std(d)) / math.sqrt(2)
     if scale <= 1e-9:
         return None
+    rscale = 1.4826 * np.median(np.abs(r - np.median(r))) or scale
     z = (x - np.median(x)) / scale
-    return Prepared(s, x, z, (r - np.median(r)) / scale, scale)
+    return Prepared(s, x, z, (r - np.median(r)) / rscale, scale)
 
 
 def breakpoints(z: np.ndarray) -> list[int]:
