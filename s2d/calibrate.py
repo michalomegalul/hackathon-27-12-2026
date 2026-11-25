@@ -36,7 +36,7 @@ import pandas as pd
 from s2d import verify
 from s2d.detective import scan
 from s2d.sim import simulate, without_story
-from s2d.sim.events import DIFFICULTY_SCALE, IMPLEMENTED_METRICS
+from s2d.sim.events import DIFFICULTY_SCALE, mechanism
 from s2d.spec import Difficulty, EventType, StorySpec, Target
 
 # Target d of the verifier's single test (DECISIONS 62). verify.Z_CONFIRM is 3:
@@ -116,12 +116,16 @@ def _measure(twin: Twin, story_con, h: verify.Hypothesis | None) -> Measure:
 
 
 def _slots(spec: StorySpec) -> list[tuple[int, int]]:
-    """(event index, effect index) of every effect the simulator implements."""
+    """(event index, effect index) of every effect the simulator applies as a curve.
+    Courier switches are stated facts and emergent effects have no size to scale."""
     out = []
     for i, ev in enumerate(spec.events):
         for j, eff in enumerate(ev.effects):
-            if eff.metric in IMPLEMENTED_METRICS:
-                out.append((i, j))
+            try:
+                if mechanism(spec, ev, eff) == "curve":
+                    out.append((i, j))
+            except NotImplementedError:
+                pass
     return out
 
 

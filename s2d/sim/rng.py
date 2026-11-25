@@ -18,6 +18,14 @@ STREAM_NAMES = (
     "churn",        # who leaves and when
     "payments",     # payment methods and failures
     "faker",        # seed for Faker (names, e-mail domains)
+    "deliveries",   # courier delays, satisfaction of each delivery
+    "tickets",      # who writes to support, queue handling times
+    "reviews",      # who reviews, ratings, topics
+    "service",      # leaving at the next purchase occasion after a bad experience
+    "subscriptions",  # subscription plans and schedules
+    "inventory",    # stock levels, supplier shipments
+    "dirt",         # the messiness layer of the export copy
+    "timestamps",   # times of day for reviews and tickets
 )
 
 

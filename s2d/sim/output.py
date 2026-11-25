@@ -12,7 +12,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-DATE_COLUMNS = {"signup_date", "order_date", "valid_from", "valid_to", "start_date", "date", "churn_date"}
+DATE_COLUMNS = {"signup_date", "order_date", "valid_from", "valid_to", "start_date", "date", "churn_date",
+                "shipped_date", "promised_date", "delivered_date", "review_date"}
 
 
 def _to_arrow(df: pd.DataFrame) -> pa.Table:

@@ -57,7 +57,8 @@ def test_same_seed_same_parquet(tmp_path):
     write_world(simulate(spec, seed=7), tmp_path / "two")
     write_world(simulate(spec, seed=8), tmp_path / "other")
     one, two = _hashes(tmp_path / "one"), _hashes(tmp_path / "two")
-    assert len(one) == 10 and one == two
+    assert {"deliveries.parquet", "reviews.parquet", "tickets.parquet"} <= set(one)
+    assert one == two
     assert one["orders.parquet"] != _hashes(tmp_path / "other")["orders.parquet"]
 
 
@@ -65,14 +66,28 @@ def test_foreign_keys():
     t = simulate(small_spec(), seed=3).tables
     for table, pk in [("customers", "customer_id"), ("products", "product_id"), ("orders", "order_id"),
                       ("order_items", "order_item_id"), ("payments", "payment_id"),
-                      ("product_prices", "price_id")]:
+                      ("product_prices", "price_id"), ("deliveries", "delivery_id"),
+                      ("reviews", "review_id"), ("tickets", "ticket_id")]:
         assert t[table][pk].is_unique, f"{table}.{pk} not unique"
     for child, col, parent, pk in [("orders", "customer_id", "customers", "customer_id"),
                                    ("order_items", "order_id", "orders", "order_id"),
                                    ("order_items", "product_id", "products", "product_id"),
                                    ("payments", "order_id", "orders", "order_id"),
-                                   ("product_prices", "product_id", "products", "product_id")]:
-        assert t[child][col].isin(t[parent][pk]).all(), f"{child}.{col} -> {parent}.{pk} broken"
+                                   ("product_prices", "product_id", "products", "product_id"),
+                                   ("deliveries", "order_id", "orders", "order_id"),
+                                   ("reviews", "order_id", "orders", "order_id"),
+                                   ("reviews", "customer_id", "customers", "customer_id"),
+                                   ("tickets", "order_id", "orders", "order_id"),
+                                   ("tickets", "customer_id", "customers", "customer_id")]:
+        assert t[child][col].dropna().isin(t[parent][pk]).all(), f"{child}.{col} -> {parent}.{pk} broken"
+    # a review or ticket belongs to the customer of its order; only completed, non-store orders ship
+    orders = t["orders"].set_index("order_id")
+    for name in ("reviews", "tickets"):
+        df = t[name].dropna(subset=["order_id"])
+        assert (orders.loc[df["order_id"].astype(int), "customer_id"].to_numpy() == df["customer_id"].to_numpy()).all()
+    shipped = orders.loc[t["deliveries"]["order_id"]]
+    assert (shipped["status"] == "completed").all() and (shipped["channel"] != "store").all()
+    assert t["deliveries"]["order_id"].is_unique
     # every order has at least one item, and its total matches the items
     items = t["order_items"].assign(line=lambda d: d.quantity * d.unit_price)
     totals = items.groupby("order_id")["line"].sum()

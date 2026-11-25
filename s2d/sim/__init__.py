@@ -57,6 +57,7 @@ def simulate(spec: StorySpec, seed: int | None = None, strict: bool = False) -> 
         "orders": result.orders,
         "order_items": result.order_items,
         "payments": result.payments,
+        **result.service,
     }
 
     start = np.datetime64(cal.dates[0], "D")
@@ -68,6 +69,7 @@ def simulate(spec: StorySpec, seed: int | None = None, strict: bool = False) -> 
         "customer_state": pd.DataFrame({
             "customer_id": pop.table["customer_id"],
             "churn_date": churn_date,
+            "churn_cause": result.churn_cause,
             "base_orders_per_day": pop.base_rate,
         }),
         "spec_yaml": pd.DataFrame({

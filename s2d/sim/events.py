@@ -21,8 +21,15 @@ from .calendar import Calendar
 # The spec's `difficulty` scales every relative effect size.
 DIFFICULTY_SCALE = {Difficulty.easy: 1.5, Difficulty.medium: 1.0, Difficulty.hard: 0.5}
 
-# Metrics the day loop knows how to apply today.
+# Metrics the day loop applies as multiplier curves.
 IMPLEMENTED_METRICS = {Metric.purchase_rate, Metric.churn_hazard, Metric.acquisition_rate}
+# Effect sizes in absolute units (report: "or absolute for rating/delivery_days").
+ABSOLUTE_METRICS = {Metric.delivery_days, Metric.rating_mean}
+# Metrics that follow from the service rules (s2d/sim/service.py) once an event changes
+# what drives them: worse ratings and customer-level churn after late deliveries.
+EMERGENT = {
+    EventType.courier_change: {Metric.rating_mean, Metric.churn_hazard, Metric.ticket_rate},
+}
 
 # Curves below this value are treated as "over" (keeps decay tails short).
 CURVE_EPSILON = 0.01
@@ -119,6 +126,35 @@ def _not_implemented(event: Event, start_idx: int) -> list[PriceChange]:
     raise NotImplementedError(f"event type '{event.type.value}' is not simulated yet")
 
 
+def mechanism(spec: StorySpec, event: Event, effect: Effect) -> str:
+    """How an effect is simulated:
+        curve     a multiplier curve in the day loop (purchase_rate, churn_hazard, acquisition_rate)
+        courier   a courier switch: delivery_days of a courier_change (service.courier_plan)
+        emergent  not applied; it follows from the service rules once a cause in the story
+                  changes their input (courier_change: ratings, tickets, churn of the customers
+                  whose parcel was late). Its size is the story's expectation, not an input.
+    Raises NotImplementedError for anything else."""
+    if event.type == EventType.courier_change:
+        if effect.metric == Metric.delivery_days:
+            return "courier"
+        if effect.metric in EMERGENT[event.type]:
+            from .service import courier_delay
+            if any(courier_delay(e) is not None for e in spec.events
+                   if e.type == EventType.courier_change and _covers(e.target, event.target)):
+                return "emergent"
+            raise NotImplementedError(
+                f"metric '{effect.metric.value}' of a courier_change only follows from a courier switch "
+                "(params.delivery_delay_days or a delivery_days effect) in the same cities")
+    if effect.metric in IMPLEMENTED_METRICS:
+        return "curve"
+    raise NotImplementedError(f"metric '{effect.metric.value}' is not simulated yet")
+
+
+def _covers(cause: Target, effect: Target) -> bool:
+    """The cause's cities include the effect's (no city = every city)."""
+    return not cause.city or bool(effect.city) and set(effect.city) <= set(cause.city)
+
+
 TYPE_HANDLERS = {
     EventType.price_change: _price_change,
     EventType.churn_shock: _effects_only,
@@ -127,7 +163,7 @@ TYPE_HANDLERS = {
     EventType.quality_issue: _effects_only,
     EventType.supplier_delay: _not_implemented,
     EventType.stockout: _not_implemented,
-    EventType.courier_change: _not_implemented,
+    EventType.courier_change: _effects_only,
     EventType.service_outage: _not_implemented,
     EventType.staff_shortage: _not_implemented,
     EventType.viral_spike: _not_implemented,
@@ -141,9 +177,10 @@ def _compile_event(event: Event, spec: StorySpec, cal: Calendar) -> tuple[list[C
 
     scale = DIFFICULTY_SCALE[spec.meta.difficulty]
     compiled = []
-    for eff in event.effects:
-        if eff.metric not in IMPLEMENTED_METRICS:
-            raise NotImplementedError(f"metric '{eff.metric.value}' is not simulated yet")
+    kinds = [mechanism(spec, event, eff) for eff in event.effects]  # raises before anything is added
+    for eff, kind in zip(event.effects, kinds):
+        if kind != "curve":
+            continue
 
         if event.type == EventType.churn_shock:
             # "churn_pct % of the target leaves within churn_window_days":
@@ -198,8 +235,16 @@ def compile_story(spec: StorySpec, cal: Calendar, strict: bool = False) -> Compi
             simulated = False
 
         for eff in event.effects:
+            try:
+                how = mechanism(spec, event, eff) if simulated else ""
+            except NotImplementedError:
+                how = ""
             if event.type == EventType.churn_shock:
                 magnitude = event.params.churn_pct
+            elif eff.metric in ABSOLUTE_METRICS:
+                magnitude = eff.size  # absolute units: days, rating points (not scaled, not %)
+            elif how == "emergent":
+                magnitude = eff.size * 100  # the story's expectation; nothing is scaled
             else:
                 magnitude = eff.size * scale * 100
             rows.append({
@@ -213,11 +258,12 @@ def compile_story(spec: StorySpec, cal: Calendar, strict: bool = False) -> Compi
                 "magnitude_pct": round(magnitude, 4),
                 "caused_by": event.caused_by,
                 "simulated": simulated,
+                "mechanism": how,
                 "narrative_cs": event.narrative_cs,
             })
     story.answer_key = pd.DataFrame(rows, columns=[
         "event_id", "type", "metric", "segment", "start_date", "lag_days",
-        "direction", "magnitude_pct", "caused_by", "simulated", "narrative_cs",
+        "direction", "magnitude_pct", "caused_by", "simulated", "mechanism", "narrative_cs",
     ])
 
     decoy_rows = []

@@ -5,7 +5,8 @@ State is a handful of numpy arrays with one entry per customer. Each day:
   1. churn:     who leaves today       (daily hazard, Bernoulli draw)
   2. purchases: how many orders each   (Poisson with rate λ[i,t])
   3. baskets:   what is in each order  (Zipf popularity, geometric size)
-then, after the loop, payments for every order.
+  4. payment:   paid or cancelled      (decided the same day)
+  5. service:   delivery, review, ticket (s2d/sim/service.py; feeds back into 1 and 2)
 
     λ[i,t] = base_rate[i] · day_factor[t] · holiday[i,t] · Π_e (1 + size_e · curve_e[t]) · alive[i]
     h[i,t] = base_hazard[i] · Π_e (1 + size_e · curve_e[t]) + Σ_shocks h_e · curve_e[t]
@@ -24,6 +25,7 @@ from .calendar import HOLIDAY_FACTOR_ONLINE, Calendar
 from .catalog import Catalog
 from .events import CompiledStory
 from .population import Population, target_mask
+from .service import Service
 
 BASKET_EXTRA_ITEM_P = 0.6   # geometric basket size: mean 1/0.6 ≈ 1.7 items
 QUANTITY_P = 0.8            # geometric quantity per line: mean 1.25
@@ -43,6 +45,7 @@ class _ActiveEffect:
     categories: np.ndarray | None  # bool per category, None = all categories
     price_sensitive: bool
     additive: bool
+    event_type: str = ""
 
 
 @dataclass
@@ -51,6 +54,8 @@ class SimResult:
     orders: pd.DataFrame
     order_items: pd.DataFrame
     payments: pd.DataFrame
+    service: dict[str, pd.DataFrame]  # deliveries, reviews, tickets
+    churn_cause: np.ndarray           # why each leaver left ('' = still active)
 
 
 def _prepare_effects(spec: StorySpec, story: CompiledStory, pop: Population, cat: Catalog, metric: Metric):
@@ -62,23 +67,15 @@ def _prepare_effects(spec: StorySpec, story: CompiledStory, pop: Population, cat
         out.append(_ActiveEffect(
             eff.size, eff.curve,
             target_mask(eff.target, spec, pop.segment, pop.city, pop.channel),
-            cats, eff.price_sensitive, eff.additive,
+            cats, eff.price_sensitive, eff.additive, eff.event_type,
         ))
     return out
 
 
 def churn_hazard_on_day(t: int, pop: Population, churn_effects: list[_ActiveEffect]) -> np.ndarray:
-    """Daily probability of leaving, per customer, on day t (ignores who is alive)."""
-    relative = np.ones(pop.n)
-    additive = np.zeros(pop.n)
-    for e in churn_effects:
-        strength = e.size * e.curve[t]
-        if strength == 0:
-            continue
-        if e.additive:
-            additive[e.customers] += strength
-        else:
-            relative[e.customers] *= max(1 + strength, 0)
+    """Daily probability of leaving from the story's churn effects, per customer, on day t
+    (ignores who is alive and the service state: open tickets, upset after a late parcel)."""
+    relative, additive = churn_multipliers(t, pop, churn_effects)
     return np.minimum(pop.base_hazard * relative + additive, 1.0)
 
 
@@ -92,24 +89,35 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
                  cat: Catalog, streams: dict[str, np.random.Generator]) -> SimResult:
     rng_churn = streams["churn"]
     rng_buy = streams["purchases"]
+    rng_pay = streams["payments"]
     n_cats = len(cat.category_ids)
 
     churn_effects = _prepare_effects(spec, story, pop, cat, Metric.churn_hazard)
     buy_effects = _prepare_effects(spec, story, pop, cat, Metric.purchase_rate)
     holiday_factor = _holiday_factor(spec, pop, cal)
+    is_store_cust = np.array([c.channel == Channel.store for c in spec.company.channels])[pop.channel]
+    svc = Service(spec, cal, pop.n, pop.city, streams)
 
     churn_day = np.full(pop.n, -1)
-    order_customer, order_day, order_category = [], [], []
+    churn_cause = np.full(pop.n, "", dtype=object)
+    order_customer, order_day, order_category, order_failed, order_retry = [], [], [], [], []
+    n_orders_so_far = 0
 
     for t in range(cal.n_days):
+        svc.start_day(t)
         alive = (pop.signup_day <= t) & (churn_day < 0)
 
         # 1. churn. Draw one uniform per customer (alive or not) so that the
         #    random numbers line up between runs with and without the story.
-        hazard = churn_hazard_on_day(t, pop, churn_effects)
+        relative, additive = churn_multipliers(t, pop, churn_effects)
+        ticket = svc.hazard_factor()
+        hazard = np.minimum(pop.base_hazard * relative * ticket + additive, 1.0)
         leaves = alive & (rng_churn.random(pop.n) < hazard)
         churn_day[leaves] = t
         alive &= ~leaves
+        if leaves.any():
+            churn_cause[leaves] = _churn_causes(np.flatnonzero(leaves), t, pop, churn_effects, ticket,
+                                                svc.rng_s)
 
         # 2. purchases. rate[i, c] = expected orders of customer i whose main item is in category c.
         lam = pop.base_rate * cal.day_factor[t] * alive
@@ -129,6 +137,13 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
         total = rate.sum(axis=1)
         n_orders = rng_buy.poisson(total)
         buyers = np.flatnonzero(n_orders)
+        # An upset customer may leave at this purchase occasion instead of ordering.
+        gone = buyers[svc.defect(buyers)]
+        if len(gone):
+            churn_day[gone] = t
+            churn_cause[gone] = "zpoždění"
+            n_orders[gone] = 0
+            buyers = np.flatnonzero(n_orders)
         who = np.repeat(buyers, n_orders[buyers])
 
         # main category of each order, in proportion to rate[i, c]
@@ -136,16 +151,74 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
         u = rng_buy.random(len(who))
         main_cat = np.minimum((cdf < u[:, None]).sum(axis=1), n_cats - 1)
 
+        # 3. payment (decided today, so a cancelled order is never shipped), then service.
+        failed = rng_pay.random(len(who)) < spec.baseline.payment_failure_rate
+        retry_ok = rng_pay.random(len(who)) < RETRY_SUCCESS_P
+        ids = np.arange(n_orders_so_far, n_orders_so_far + len(who))
+        n_orders_so_far += len(who)
+        svc.on_orders(t, ids, who, is_store_cust[who], failed & ~retry_ok)
+
         order_customer.append(who)
         order_day.append(np.full(len(who), t))
         order_category.append(main_cat)
+        order_failed.append(failed)
+        order_retry.append(retry_ok)
 
     orders, items = _build_orders(spec, cal, pop, cat,
                                   np.concatenate(order_customer), np.concatenate(order_day),
                                   np.concatenate(order_category), rng_buy)
-    payments, cancelled = _build_payments(spec, orders, streams["payments"])
+    payments, cancelled = _build_payments(spec, orders, rng_pay,
+                                          np.concatenate(order_failed), np.concatenate(order_retry))
     orders["status"] = np.where(cancelled, "cancelled", "completed")
-    return SimResult(churn_day, orders, items, payments)
+    service = svc.tables(np.datetime64(cal.dates[0], "D"), orders, streams["timestamps"])
+    return SimResult(churn_day, orders, items, payments, service, churn_cause)
+
+
+CAUSE_OF_EVENT = {
+    "price_change": "cena", "quality_issue": "kvalita", "competitor_entry": "konkurence",
+    "courier_change": "zpoždění", "supplier_delay": "vyprodáno", "stockout": "vyprodáno",
+}
+
+
+def churn_multipliers(t: int, pop: Population, churn_effects: list[_ActiveEffect]) -> tuple[np.ndarray, np.ndarray]:
+    relative = np.ones(pop.n)
+    additive = np.zeros(pop.n)
+    for e in churn_effects:
+        strength = e.size * e.curve[t]
+        if strength == 0:
+            continue
+        if e.additive:
+            additive[e.customers] += strength
+        else:
+            relative[e.customers] *= max(1 + strength, 0)
+    return relative, additive
+
+
+def _churn_causes(idx: np.ndarray, t: int, pop: Population, churn_effects: list[_ActiveEffect],
+                  ticket: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Why each leaver left: one cause drawn in proportion to its share of their hazard
+    (baseline, each story event, an open ticket). Becomes subscriptions.cancel_reason."""
+    base = pop.base_hazard[idx]
+    parts = [("jiné", base)]
+    rel = np.ones(len(idx))
+    for e in churn_effects:
+        strength = e.size * e.curve[t]
+        if strength == 0:
+            continue
+        hit = e.customers[idx]
+        if e.additive:
+            parts.append((CAUSE_OF_EVENT.get(e.event_type, "jiné"), np.where(hit, strength, 0.0)))
+        else:
+            parts.append((CAUSE_OF_EVENT.get(e.event_type, "jiné"),
+                          np.where(hit, base * rel * max(strength, 0), 0.0)))
+            rel = rel * np.where(hit, max(1 + strength, 0), 1.0)
+    tk = ticket[idx]
+    parts.append(("podpora", base * rel * (tk - 1)))
+    w = np.stack([p for _, p in parts], axis=1)
+    w = w / np.maximum(w.sum(axis=1, keepdims=True), 1e-12)
+    pick = (w.cumsum(axis=1) < rng.random(len(idx))[:, None]).sum(axis=1)
+    names = np.array([n for n, _ in parts], dtype=object)
+    return names[np.minimum(pick, len(parts) - 1)]
 
 
 def _build_orders(spec, cal, pop, cat, customer, day, main_cat, rng):
@@ -217,9 +290,11 @@ PAYMENT_METHODS = {
 RETRY_SUCCESS_P = 0.6
 
 
-def _build_payments(spec: StorySpec, orders: pd.DataFrame, rng: np.random.Generator):
+def _build_payments(spec: StorySpec, orders: pd.DataFrame, rng: np.random.Generator,
+                    failed: np.ndarray, retry_ok: np.ndarray):
     """One payment attempt per order. A failed attempt is retried once, which
-    succeeds with RETRY_SUCCESS_P. If the retry also fails the order is cancelled."""
+    succeeds with RETRY_SUCCESS_P. If the retry also fails the order is cancelled.
+    `failed` and `retry_ok` were drawn in the day loop."""
     n = len(orders)
     is_store = (orders["channel"] == Channel.store.value).to_numpy()
     method = np.empty(n, dtype=object)
@@ -227,8 +302,6 @@ def _build_payments(spec: StorySpec, orders: pd.DataFrame, rng: np.random.Genera
         names, p = PAYMENT_METHODS[kind]
         method[sel] = np.array(names, dtype=object)[rng.choice(len(names), size=sel.sum(), p=p)]
 
-    failed = rng.random(n) < spec.baseline.payment_failure_rate
-    retry_ok = rng.random(n) < RETRY_SUCCESS_P
     delay = rng.integers(60, 6 * 3600, n).astype("timedelta64[s]")
 
     ts = orders["order_ts"].to_numpy()
