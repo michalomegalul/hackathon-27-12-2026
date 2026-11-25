@@ -405,3 +405,84 @@ the top of `s2d/detective/scan.py`.
     positive. Fixing that needs either a scorer that accepts consequences of a true event
     (same segment family and window, linked by caused_by), or a detector that attributes
     them (control-group contamination, churn vs frequency), not more threshold tuning.
+
+## Detective, round 3: hierarchy, realistic sizes, consequences
+
+57. **Hierarchical scan** (`scan.scan`). Level 0 (everyone) and level 1 (one dimension:
+    city, channel, segment, category; courier once deliveries exist) are always scanned.
+    A pair (city=Brno;channel=store, category × dimension) is scanned only under a
+    level-0/1 change of the **same metric** that is *confirmed* in decision 38's sense
+    (DiD CI excludes 0 and placebo z ≥ `Z_DRILL` = 4), and only its shifts whose ramp
+    [t0, t1] lies within `DRILL_DAYS` = 21 days of that change are tested. The parent
+    does not have to be reportable: it is diluted by its other half (Brno stores −50 %
+    is Brno −24 %, z 5.85 against the pair's 11), and requiring z ≥ Z_REPORT for it
+    hid pair events. The ±21 days are measured to the ramp interval, not its start: a
+    long ramp's fitted start can lie 26 days before the parent's onset that it contains.
+    - **Tests actually run** (per no-story twin, Example A, 10k customers; `scan_stats`
+      in detective.json): flat scan ~143 series, ~670 DiD tests; hierarchical ~76 series,
+      ~293 tests (~265 at level 1, ~27 pair tests).
+    - **Threshold reset on twins seeds 1–10 (18.3 twin-years): `Z_REPORT` = 5.25,
+      0.98 false events a year** (was 6.5). Not the 4–4.5 hoped for: level-1 series carry
+      ~90 % of the tests (about six PELT breaks each), so dropping pairs cuts the test count
+      ~2.3×, not 5×, and the placebo null has a heavy tail. Grid (pair gate at z ≥ 4):
+
+      | Z_REPORT | 4.5 | 5.0 | **5.25** | 5.5 | 6.0 |
+      |---|---|---|---|---|---|
+      | false events / year | 1.91 | 1.14 | **0.98** | 0.98 | 0.87 |
+
+      With the stricter gate (parent must be reported) 5.0 gave 0.98; the looser gate costs
+      0.25 in z and buys pair recall. 10 of the 18 events are the viral-spike decoy (one in
+      every twin, 0.55 / year); the rest are level-1 shifts in Sept–Dec 2025 (Black Friday
+      and Christmas move first orders and churn estimates by segment differently).
+    - Shifts compare z with Z_REPORT directly. Before, the rounded confidence was compared
+      with 0.5, so z 4.99 passed at a threshold of 5.
+58. **Calibration, round 3** (`s2d/calibrate.py`).
+    - **Targets d = Z_REPORT + 1.5 / 0 / −1.25** (easy / medium / hard: 6.75 / 5.25 / 4.0).
+      On Example A at 10k customers d ≈ 5 corresponds to E1 −20 to −25 % and E5 −25 to
+      −30 %; the old medium target (9.0) needed −37 to −61 %.
+    - **Realism caps on drops**, times the difficulty scale (×1.5 / ×1 / ×0.5): a price
+      response at most 4/3 of the price change (15 % dearer → −20 % at medium), any other
+      purchase or acquisition drop −30 % at medium. An event that cannot reach its target
+      under its cap stays `below_target` and is listed as such. Rises keep the old cap (×5).
+    - **Widen first, then scale.** Widening is judged with the event at its cap, before any
+      scaling, and only if even then d < ½ target (a near miss is not a new story). Then
+      scaling runs both ways: d > 1.25 × target steps the size back down, never below the
+      story's own size. This fixes the overshoot of decision 56 (E5 at −84 % at hard).
+    - Measured d is noisy (same seed, size −0.25 → d 5.9, −0.30 → d 4.7 for E5): the
+      paired story − twin difference is not noise-free once other events move the same
+      customers. Medium sizes over seeds 42, 1–5: E1 −20 % in all (d 2.5–5.5), E5 −28 to
+      −30 % (d 4.0–5.7; once widened to all stores), E2 ×2.7–4.4 hazard, E4 ×2.9–5 on
+      all of Brno.
+59. **Scorer: consequences ("důsledky").** An unmatched reported detection is a consequence
+    of a matched answer-key event, not an FP, if it starts in [start, start + lag + 60 d]
+    and either shares a key=value with it (or one side is everyone) and moves the bad way
+    for its metric (fewer orders, more churn, ...), or is its mirror control (same
+    dimension, other value, same metric, opposite direction: accessories up while coffee
+    falls). Strict precision = TP / reported; with consequences = TP / (TP + FP). Both F1s
+    and both placebo p values are in the scorecard, sweep, curve and app. A reported decoy
+    stays an FP unless it falls in a matched event's family and window (in Example A it is
+    in Oct 2025, before every event).
+60. **What the simulator would need for E2 and E4 to be distinguishable** (not done here;
+    `s2d/sim/` belongs to feat/sim-full).
+    - **Churn is never observed, only inferred** (decision 29: inactivity; decision 51:
+      repeat rate). Both read *buying less often* as *leaving*. E1 makes students buy less
+      from 03-01, so "student churn" appears five weeks before E2 (04-12) and E2's own onset
+      is absorbed into that ramp. No detector on orders alone can tell "still a customer,
+      buys less" from "gone" within a few weeks; it needs many months of gaps.
+    - **A `subscriptions` table** (subscription_id, customer_id, plan, started_at,
+      cancelled_at, cancel_reason) for the predplatitel segment, with subscription orders
+      generated on schedule and stopping at cancelled_at. Churn of subscribers becomes a
+      dated, observed count: cancellations / active subscriptions per day, per city. E4
+      (Brno subscribers) becomes directly measurable instead of d = 0. Rough power: Brno
+      subscribers ≈ 750 at 10k customers, 2 %/month → 0.5 cancellations a day; a ×1.8
+      hazard for 30 days gives z ≈ 2–3. It still needs ~40k customers or ×3 hazard for
+      z ≥ 5.25, but it is a power problem then, not an identification problem.
+    - **For non-subscribers (E2, students):** an explicit exit signal for some share of the
+      churners, e.g. `customers.closed_at` / account deletion or a `newsletter_unsubscribes`
+      table (customer_id, unsubscribed_at) written for, say, 30 % of churners at their churn
+      date plus noise. A frequency drop (E1) produces no such events, so the two separate.
+    - **Tickets and reviews with customer_id and topic** (E3 → E4): lets the detective
+      condition churn on customers who complained, which is the causal chain the story
+      tells, and gives the lag search a customer-level anchor.
+    - Keep `_truth.customer_state.churn_date` as it is: the scorer can then check that a
+      `cancelled_at` table agrees with the hidden churn dates.
