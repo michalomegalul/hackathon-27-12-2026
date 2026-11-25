@@ -21,18 +21,28 @@ MIN_EVENTS = 30          # skip a segment series with fewer events in total
 CHURN_MIN_DAYS = 60      # a customer is churned after max(60, 3 x median gap) idle days
 CHURN_GAP_FACTOR = 3
 CHURN_EDGE_DAYS = 90     # churn KPI: only customers with threshold <= 90 d, cut 90 d before the end
+REPEAT_ACTIVE_DAYS = 60  # repeat rate: customers with an order in the 60 days before the anchor ...
+REPEAT_NEXT_DAYS = 30    # ... who order again in the 30 days after it
+REPEAT_MIN_ACTIVE = 100  # skip a repeat-rate segment with fewer active customers on an average day
 
 METRIC = {
     "orders": "purchase_rate",
     "revenue": "purchase_rate",
     "new_customers": "acquisition_rate",
     "churn_onsets": "churn_hazard",
+    "repeat_rate": "churn_hazard",
     "late_rate": "delivery_days",
     "rating_mean": "rating_mean",
     "tickets": "ticket_rate",
 }
 # KPIs that are a ratio, not a count. Their segment value is not additive.
-RATIO_KPIS = {"late_rate", "rating_mean"}
+RATIO_KPIS = {"late_rate", "rating_mean", "repeat_rate"}
+# KPIs that move the opposite way to their metric: fewer repeat buyers = more churn.
+INVERSE_KPIS = {"repeat_rate"}
+# Rolling KPIs: one day's event moves them for this many days.
+SMEAR_DAYS = {"repeat_rate": REPEAT_NEXT_DAYS}
+# Shares of "bought within N days": the DiD runs on cloglog(share) (see scan.cloglog).
+CLOGLOG_KPIS = {"repeat_rate"}
 
 
 @dataclass
@@ -45,6 +55,9 @@ class KPISet:
     valid_until: dict[str, pd.Timestamp] = field(default_factory=dict)
     valid_from: dict[str, pd.Timestamp] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    # Numerator and denominator of ratio KPIs that have them: (kpi, segment) -> (num, den).
+    # Lets the DiD compare a segment with the complement instead of with everyone.
+    parts: dict[tuple[str, str], tuple[pd.Series, pd.Series]] = field(default_factory=dict)
 
     def get(self, kpi: str, segment: str = "") -> pd.Series | None:
         return self.series.get((kpi, segment))
@@ -132,6 +145,7 @@ def build(con: duckdb.DuckDBPyConnection) -> KPISet:
 
     _acquisition(ks, con, cust_cols, dims, pref_col)
     _churn(ks, con, cust_cols, dims, pref_col)
+    _repeat(ks, con, cust_cols, dims, pref_col)
     _later_tables(ks, con, have)
     return ks
 
@@ -220,6 +234,55 @@ def _churn(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str) -> N
     ks.valid_from["churn_onsets"] = start
     if len(ev) >= MIN_EVENTS:
         _add_counts(ks, "churn_onsets", ev, dims)
+
+
+def _repeat(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str) -> None:
+    """Repeat-purchase rate: of the customers with an order in [d-90, d-30), the
+    share who order again in [d-30, d). A churn KPI that does not depend on the
+    inactivity estimate. It is dated at the end of the 30-day window, so a churn
+    increase on day T starts to lower it on T, not 30 days earlier."""
+    seg_col = "c.segment" if "segment" in cust_cols else "NULL"
+    df = con.execute(f"""
+        SELECT o.customer_id, o.order_date AS date, any_value(c.city) AS city,
+               any_value({pref_col}) AS channel, any_value({seg_col}) AS segment
+        FROM orders o LEFT JOIN customers c USING (customer_id) GROUP BY ALL""").df()
+    if df.empty:
+        return
+    a, f = REPEAT_ACTIVE_DAYS, REPEAT_NEXT_DAYS
+    n_days = len(ks.dates)
+    if n_days <= a + f + 28:
+        return
+    cust, ci = np.unique(df["customer_id"].to_numpy(), return_inverse=True)
+    day = (pd.to_datetime(df["date"]) - ks.dates[0]).dt.days.to_numpy()
+    # cum[i, t] = number of order days of customer i before day t
+    cum = np.zeros((len(cust), n_days + 1), dtype=np.int16)
+    np.add.at(cum, (ci, day + 1), 1)
+    np.cumsum(cum, axis=1, out=cum)
+    t = np.arange(a, n_days - f + 1)              # anchor: active in [t-a, t), buys in [t, t+f)
+    active = (cum[:, t] - cum[:, t - a]) > 0
+    again = active & ((cum[:, t + f] - cum[:, t]) > 0)
+    idx = ks.dates[t + f - 1]                     # dated at the last day of the 30-day window
+    info = df.groupby("customer_id")[[d for d in dims]].first().reindex(cust)
+
+    def put(seg: str, rows: np.ndarray) -> None:
+        if not len(rows):
+            return
+        den = active[rows].sum(0).astype(float)
+        if den.mean() < REPEAT_MIN_ACTIVE:
+            return
+        num = again[rows].sum(0).astype(float)
+        num_s, den_s = pd.Series(num, idx), pd.Series(den, idx)
+        ks.parts[("repeat_rate", seg)] = (num_s, den_s)
+        ks.series[("repeat_rate", seg)] = (num_s / den_s.where(den_s > 0)).interpolate(limit_direction="both")
+
+    ks.dims["repeat_rate"] = dims
+    ks.valid_from["repeat_rate"] = idx[0]
+    put("", np.arange(len(cust)))
+    groups = [(d,) for d in dims] + list(combinations(dims, 2))
+    for keys in groups:
+        for vals, g in info.groupby(list(keys)):
+            vals = vals if isinstance(vals, tuple) else (vals,)
+            put(seg_text(keys, vals), np.flatnonzero(info.index.isin(g.index)))
 
 
 def _later_tables(ks: KPISet, con, have: dict[str, set[str]]) -> None:

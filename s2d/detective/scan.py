@@ -25,7 +25,7 @@ import pandas as pd
 import ruptures as rpt
 from statsmodels.tsa.seasonal import STL
 
-from .kpis import METRIC, RATIO_KPIS, KPISet
+from .kpis import CLOGLOG_KPIS, INVERSE_KPIS, METRIC, RATIO_KPIS, SMEAR_DAYS, KPISet
 
 # ---------------------------------------------------------------- global parameters
 
@@ -89,6 +89,7 @@ class Prepared:
     z: np.ndarray           # standardized x
     resid_z: np.ndarray     # standardized residual (for spikes)
     scale: float
+    clean: np.ndarray | None = None  # s with spike days replaced by trend + seasonal
 
 
 def prepare(s: pd.Series) -> Prepared | None:
@@ -109,7 +110,17 @@ def prepare(s: pd.Series) -> Prepared | None:
         return None
     rscale = 1.4826 * np.median(np.abs(r - np.median(r))) or scale
     z = (x - np.median(x)) / scale
-    return Prepared(s, x, z, (r - np.median(r)) / rscale, scale)
+    rz = (r - np.median(r)) / rscale
+    clean = np.where(np.abs(rz) > SPIKE_Z, res.trend + res.seasonal, v)
+    return Prepared(s, x, z, rz, scale, clean)
+
+
+def despike(s: pd.Series, pr: Prepared | None = None) -> np.ndarray:
+    """The series with spike days (|STL residual z| > SPIKE_Z) replaced by trend +
+    seasonal. Shift statistics run on this: a few days of a viral spike inside a
+    28-day window are not a level shift, and the spike has its own detector."""
+    pr = pr or prepare(s)
+    return s.to_numpy(float) if pr is None else pr.clean
 
 
 def breakpoints(z: np.ndarray) -> list[int]:
@@ -168,12 +179,13 @@ def did(seg: np.ndarray, rest: np.ndarray | None, before: slice, after: slice,
     from a 7-day moving-block bootstrap. For ratio KPIs, differences of means.
     Without a control (rest is None) it is a plain before/after change."""
     def eff(bs, as_, br, ar):
+        m = lambda a: np.nanmean(a, -1)  # holiday days are NaN  # noqa: E731
         if ratio:
-            d = as_.mean(-1) - bs.mean(-1)
-            return d - (ar.mean(-1) - br.mean(-1)) if br is not None else d
-        e = as_.mean(-1) / np.maximum(bs.mean(-1), 1e-9)
+            d = m(as_) - m(bs)
+            return d - (m(ar) - m(br)) if br is not None else d
+        e = m(as_) / np.maximum(m(bs), 1e-9)
         if br is not None:
-            e = e / np.maximum(ar.mean(-1) / np.maximum(br.mean(-1), 1e-9), 1e-9)
+            e = e / np.maximum(m(ar) / np.maximum(m(br), 1e-9), 1e-9)
         return e - 1
 
     sb, sa = seg[before], seg[after]
@@ -181,15 +193,17 @@ def did(seg: np.ndarray, rest: np.ndarray | None, before: slice, after: slice,
     point = float(eff(sb, sa, rb, ra))
     ib, ia = _block_idx(len(sb), rng, BOOT), _block_idx(len(sa), rng, BOOT)
     boot = eff(sb[ib], sa[ia], rb[ib] if rb is not None else None, ra[ia] if ra is not None else None)
-    lo, hi = np.percentile(boot, [2.5, 97.5])
-    sd = float(np.std(boot)) or 1e-9
+    lo, hi = np.nanpercentile(boot, [2.5, 97.5])
+    sd = float(np.nanstd(boot)) or 1e-9
     return point, (float(lo), float(hi)), abs(point) / sd
 
 
 def _window_means(v: np.ndarray, length: int) -> np.ndarray:
-    """m[t] = mean(v[t:t+length]) for every t where the window fits."""
-    c = np.concatenate([[0.0], np.cumsum(v)])
-    return (c[length:] - c[:-length]) / length
+    """m[t] = mean(v[t:t+length]) for every t where the window fits, NaN days left out."""
+    ok = ~np.isnan(v)
+    c = np.concatenate([[0.0], np.cumsum(np.where(ok, v, 0.0))])
+    k = np.concatenate([[0], np.cumsum(ok)])
+    return (c[length:] - c[:-length]) / np.maximum(k[length:] - k[:-length], 1)
 
 
 def placebo_z(seg: np.ndarray, rest: np.ndarray | None, t0: int, t1: int, nb: int, na: int,
@@ -254,14 +268,15 @@ def calendar_reason(day: pd.Timestamp, span_end: pd.Timestamp | None = None) -> 
     return None
 
 
-def calendar_applies(kind: str, start: str, end: str | None, has_control: bool) -> bool:
+def calendar_applies(kind: str, start: str, end: str | None, has_control: bool, smear: int = 0) -> bool:
     """Can a calendar date explain this candidate away? Only a spike or a change
     that is over within CALENDAR_MAX_DAYS. A lasting shift measured against a
     control group cannot be the calendar: the control has the same holidays, so
-    the DiD has already removed them."""
+    the DiD has already removed them. `smear` is the window of a KPI that is a
+    rolling measure (repeat rate: 30 days): one holiday moves it for that long."""
     if kind != "shift":
         return True
-    if end is not None and (pd.Timestamp(end) - pd.Timestamp(start)).days < CALENDAR_MAX_DAYS:
+    if end is not None and (pd.Timestamp(end) - pd.Timestamp(start)).days - smear < CALENDAR_MAX_DAYS:
         return True
     return not has_control
 
@@ -280,6 +295,19 @@ def onset_series(x: np.ndarray, seg: np.ndarray, rest: np.ndarray | None, ratio:
     return pd.Series(share).interpolate(limit_direction="both").to_numpy()
 
 
+def cloglog(v: np.ndarray) -> np.ndarray:
+    v = np.clip(v, 1e-6, 1 - 1e-6)
+    return np.log(-np.log(1 - v))
+
+
+def holiday_mask(index: pd.DatetimeIndex) -> np.ndarray:
+    """True on CZ public holidays. Shift statistics on counts leave these days out:
+    stores close and the e-shop does not, so a channel's control has a different
+    holiday response and the DiD alone does not cancel it."""
+    cz = holidays.CZ(years=sorted(set(index.year)))
+    return np.isin(index.normalize(), pd.DatetimeIndex(list(cz.keys())))
+
+
 # ---------------------------------------------------------------- the scan
 
 
@@ -290,6 +318,8 @@ def _rest(ks: KPISet, kpi: str, seg: str, s: pd.Series) -> pd.Series | None:
     like, so channel- or segment-specific seasonality cancels too."""
     if not seg:
         return None
+    if (kpi, seg) in ks.parts:
+        return _rest_ratio(ks, kpi, seg, s)
     if kpi in RATIO_KPIS:
         return ks.get(kpi, "")
     parts = seg.split(";")
@@ -303,6 +333,24 @@ def _rest(ks: KPISet, kpi: str, seg: str, s: pd.Series) -> pd.Series | None:
     if total is None:
         return None
     return (total.reindex(s.index) - s).clip(lower=0)
+
+
+def _rest_ratio(ks: KPISet, kpi: str, seg: str, s: pd.Series) -> pd.Series | None:
+    """Control for a ratio KPI with numerator and denominator: the same ratio
+    over the complement (pair segment: the siblings, as in _rest)."""
+    parts = seg.split(";")
+    if len(parts) == 2:
+        first_dim, second = parts[0].split("=")[0], parts[1]
+        sib = [v for (k, sg), v in ks.parts.items()
+               if k == kpi and sg.endswith(";" + second) and sg.startswith(first_dim + "=") and sg != seg]
+        if sib:
+            num, den = sum(p[0] for p in sib), sum(p[1] for p in sib)
+            return (num / den.where(den > 0)).reindex(s.index).interpolate(limit_direction="both")
+    if (kpi, "") not in ks.parts:
+        return ks.get(kpi, "")
+    num = ks.parts[(kpi, "")][0] - ks.parts[(kpi, seg)][0]
+    den = ks.parts[(kpi, "")][1] - ks.parts[(kpi, seg)][1]
+    return (num / den.where(den > 0)).reindex(s.index).interpolate(limit_direction="both")
 
 
 def _windows(n: int, t0: int, t1: int, end: int | None = None) -> tuple[slice, slice] | None:
@@ -391,6 +439,7 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
     rng = np.random.default_rng(seed)  # bootstrap only; fixed so a run is repeatable
     raw: list[Candidate] = []
     preps: dict[tuple[str, str], Prepared] = {}
+    clean_rest: dict[tuple, np.ndarray] = {}
     n_id = 0
 
     def new_id() -> str:
@@ -405,6 +454,8 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         preps[(kpi, seg)] = pr
         if kpi not in RATIO_KPIS and s.mean() < MIN_MEAN:
             continue  # kept in preps for spikes; too sparse for shifts
+        if (kpi, seg) in ks.parts and not seg:
+            continue  # a share of everyone has no control; its segments are scanned directly
         n = len(s)
         bks = breakpoints(pr.z)
         levels = []
@@ -470,11 +521,30 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
                     raw.insert(0, fb)
                 continue
         rest = _rest(ks, c.kpi, c.segment, s)
-        sv = s.to_numpy(float)
-        rv = None if rest is None else rest.reindex(s.index).to_numpy(float)
         ratio = c.kpi in RATIO_KPIS
-        nb, na = before.stop - before.start, after.stop - after.start
         pr = preps.get((c.kpi, c.segment)) or prepare(s)
+        sv = s.to_numpy(float) if ratio else despike(s, pr)
+        if rest is None:
+            rv = None
+        else:
+            rest = rest.reindex(s.index)
+            if ratio:
+                rv = rest.to_numpy(float)
+            else:
+                ck = (c.kpi, c.segment, "rest")
+                if ck not in clean_rest:
+                    clean_rest[ck] = despike(rest)
+                rv = clean_rest[ck]
+        raw_sv, raw_rv = sv, rv
+        if c.kpi in CLOGLOG_KPIS:
+            # P(buy in 30 d) = 1 - exp(-30 * rate) for a Poisson buyer, so cloglog(r) =
+            # log(30 * rate): a seasonal multiplier common to every segment becomes
+            # an additive constant and cancels in the DiD, whatever the base rate
+            sv, rv = cloglog(sv), (None if rv is None else cloglog(rv))
+        if not ratio:
+            hol = holiday_mask(s.index)
+            sv = np.where(hol, np.nan, sv)
+            rv = None if rv is None else np.where(hol, np.nan, rv)
         b = c.extra["t0"]
         t0, t1 = ramp_onset(onset_series(pr.x, sv, rv, ratio), b,
                             max(c.extra["lo"], b - 60), min(c.extra["right"], b + 60))
@@ -497,11 +567,13 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         c.confidence = round(confidence_from_z(z), 2)
         c.evidence = (f"{c.kpi} {c.segment or 'vše'}: {c.raw_change_pct:+.1f} % (28 d po vs před), "
                       f"proti zbytku {c.magnitude_pct:+.1f} %, 95% CI {c.ci[0]:+.1f}..{c.ci[1]:+.1f} %")
+        if c.kpi in INVERSE_KPIS:
+            _invert(c, raw_sv, raw_rv, before, after)
         if ci[0] <= 0 <= ci[1]:
             c.status = "not_confirmed"
         elif c.confidence < MIN_CONFIDENCE:
             c.status = "not_confirmed"
-        elif (calendar_applies(c.kind, c.start_date, c.end_date, rv is not None)
+        elif (calendar_applies(c.kind, c.start_date, c.end_date, rv is not None, SMEAR_DAYS.get(c.kpi, 0))
               and (reason := calendar_reason(pd.Timestamp(c.start_date)))):
             c.status = "explained_by_calendar"
             c.evidence += f"; {reason}"
@@ -518,6 +590,23 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         c.id = new_id()
     lag_search([c for c in out if c.status == "reported"], ks, preps)
     return sorted(out, key=lambda c: c.id)
+
+
+def _invert(c: Candidate, sv: np.ndarray, rv: np.ndarray | None, before: slice, after: slice) -> None:
+    """Repeat rate -> churn: fewer repeat buyers is more churn. The magnitude is
+    the relative DiD change of the lapse share (1 - repeat rate), the part of the
+    active customers who did not come back; the CI and z stay those of the
+    repeat-rate DiD (in percentage points)."""
+    def lapse(v, w):
+        return 1 - float(np.nanmean(v[w]))
+    rel = lapse(sv, after) / max(lapse(sv, before), 1e-9)
+    if rv is not None:
+        rel /= max(lapse(rv, after) / max(lapse(rv, before), 1e-9), 1e-9)
+    c.direction = "down" if c.direction == "up" else "up"
+    c.extra["repeat_rate_pp"] = c.magnitude_pct
+    c.magnitude_pct = round(100 * (rel - 1), 1)
+    c.evidence = (f"opakované nákupy {c.segment}: {c.extra['repeat_rate_pp']:+.1f} p.b. proti zbytku "
+                  f"(95% CI {c.ci[0]:+.1f}..{c.ci[1]:+.1f} p.b.), podíl neopakujících {c.magnitude_pct:+.1f} %")
 
 
 # ---------------------------------------------------------------- price changes
@@ -590,7 +679,7 @@ def merge(cands: list[Candidate]) -> list[Candidate]:
         if price:
             best = price[0]
         else:
-            g.sort(key=lambda c: (len(_seg_keys(c.segment)), c.kpi != "orders", -c.confidence))
+            g.sort(key=lambda c: (len(_seg_keys(c.segment)), c.kpi != "orders", -c.extra.get("z", 0)))
             best = g[0]
             changed = True
             while changed:
@@ -642,7 +731,8 @@ def lag_search(cands: list[Candidate], ks: KPISet, preps: dict) -> None:
                 if t < WINDOW or t + WINDOW > len(idx):
                     continue
                 tstat = (pr.z[t:t + WINDOW].mean() - pr.z[t - WINDOW:t].mean()) / math.sqrt(2 / WINDOW)
-                if np.sign(tstat) != (1 if c.direction == "up" else -1):
+                want = (1 if c.direction == "up" else -1) * (-1 if c.kpi in INVERSE_KPIS else 1)
+                if np.sign(tstat) != want:
                     continue
                 if abs((a_day + pd.Timedelta(days=lag) - onset).days) > LAG_MATCH_DAYS:
                     continue
@@ -663,7 +753,7 @@ def spikes(ks: KPISet, preps: dict) -> list[Candidate]:
     for (kpi, seg), pr in preps.items():
         # churn onsets are estimated (last order + gap), so a 1-3 day churn spike is
         # an artefact of that estimate, not something the data can show
-        if kpi in ("revenue", "churn_onsets") or ";" in seg:
+        if kpi in ("revenue", "churn_onsets", "repeat_rate") or ";" in seg:
             continue
         hot = np.abs(pr.resid_z) > SPIKE_Z
         i, n = 0, len(hot)

@@ -209,3 +209,51 @@ def test_ramp_onset_is_ramp_start_and_scores_on_start_plus_lag():
         assert late["timing"] == 0.0 and score.pair_score(late) == 0.0
     assert abs(np.median(errs)) <= 3, errs
     assert matched >= 7, errs
+
+
+# ---------------------------------------------------------------- repeat-purchase rate
+
+
+def _churn_world(seed: int, mult: float = 3.0, onset: int = 300, days: int = 600):
+    """Two segments x two cities, 3000 customers each, 1.5 orders a month and 3 % monthly
+    churn. Students get `mult` x the churn hazard for 60 days from `onset`."""
+    rng = np.random.default_rng(seed)
+    n = 3000
+    seg = np.repeat(["student", "bezny"], 2 * n)
+    city = np.tile(np.repeat(["Praha", "Brno"], n), 2)
+    h = np.full((len(seg), days), 1 - 0.97 ** (1 / 30.4))
+    h[seg == "student", onset:onset + 60] *= mult
+    alive = np.cumprod(rng.random(h.shape) >= h, axis=1).astype(bool)
+    buys = alive & (rng.random(h.shape) < 1.5 / 30.4)
+    ci, di = np.nonzero(buys)
+    dates = pd.Timestamp("2025-01-01") + pd.to_timedelta(di, unit="D")
+    con = duckdb.connect()
+    con.register("c_df", pd.DataFrame({"customer_id": np.arange(len(seg)), "city": city, "segment": seg}))
+    con.register("o_df", pd.DataFrame({"order_id": np.arange(len(ci)), "customer_id": ci, "order_date": dates.date,
+                                       "city": city[ci], "channel": "eshop", "total_czk": 300.0}))
+    con.execute("CREATE TABLE customers AS SELECT * FROM c_df")
+    con.execute("CREATE TABLE orders AS SELECT * FROM o_df")
+    from s2d.detective import kpis
+    return kpis.build(con), pd.Timestamp("2025-01-01") + pd.Timedelta(days=onset)
+
+
+def test_repeat_rate_drops_when_a_segment_churns():
+    ks, onset = _churn_world(1)
+    stu, rest = ks.get("repeat_rate", "segment=student"), ks.get("repeat_rate", "segment=bezny")
+    gap = stu - rest
+    before = gap[onset - pd.Timedelta(days=60):onset - pd.Timedelta(days=1)].mean()
+    after = gap[onset + pd.Timedelta(days=60):onset + pd.Timedelta(days=88)].mean()
+    assert after < before - 0.02, (before, after)
+    num, den = ks.parts[("repeat_rate", "segment=student")]
+    assert np.allclose((num / den).dropna(), stu.dropna())
+
+
+def test_repeat_rate_is_reported_as_more_churn():
+    """Fewer repeat buyers maps to churn_hazard going up, not down."""
+    ks, onset = _churn_world(2)
+    found = [c for c in scan.scan(ks) if c.kpi == "repeat_rate" and c.segment == "segment=student"
+             and c.status == "reported"]
+    assert found, "student churn not found in the repeat rate"
+    c = found[0]
+    assert c.metric == "churn_hazard" and c.direction == "up" and c.magnitude_pct > 0
+    assert abs((pd.Timestamp(c.start_date) - onset).days) <= 21, c.start_date

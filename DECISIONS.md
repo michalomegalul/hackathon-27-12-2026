@@ -240,3 +240,29 @@ the top of `s2d/detective/scan.py`.
     decoy is a false positive and is labelled as one.
 50. **Twin** = same spec and seed with `--no-story`. The sim keeps decoys in the twin,
     so a reported decoy counts against the twin too.
+
+## Detective, round 2: churn power, recoverability, false-positive budget
+
+51. **Second churn KPI: repeat-purchase rate** (`repeat_rate`). Of the customers with an
+    order in the 60 days before an anchor day, the share who order again in the next 30
+    days, dated at the last day of those 30. It does not depend on the inactivity
+    estimate of decision 29. Same segments as the other KPIs, skipped below 100 active
+    customers on an average day. It maps to `churn_hazard` in the **opposite** direction
+    (fewer repeat buyers = more churn). The reported magnitude is the DiD relative change
+    of the lapse share (1 − repeat rate); the CI and z are those of the repeat-rate DiD.
+    Both churn KPIs are scanned; when both see the same event, the merge keeps the one
+    with the larger placebo z (decision 40 now sorts by z, not confidence).
+    - **Control** for a ratio KPI with numerator and denominator is the same ratio over
+      the complement (not over everyone, which contains the segment).
+    - **The DiD runs on cloglog(share).** For a Poisson buyer P(buy in 30 d) =
+      1 − exp(−30·rate), so cloglog is log(30·rate) and a seasonal multiplier common to
+      all segments cancels whatever the segment's base rate.
+    - **Calendar smear:** a holiday moves a 30-day rolling KPI for 30 days, so the
+      "change shorter than 10 days" rule of decision 43 subtracts the 30 days.
+    - Spikes are never reported on it (it is a rolling mean).
+52. **Shift statistics on counts leave out spike days and CZ public holidays.** Spike days
+    (|STL residual z| > 3.5) are replaced by trend + seasonal before the DiD and the
+    placebo, so a few days of a viral spike inside a 28-day window are not a level shift
+    (the spike has its own detector). Holidays are NaN in both segment and control:
+    stores close and the e-shop does not, so a channel's control has a different holiday
+    response and the DiD alone does not cancel it.
