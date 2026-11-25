@@ -20,9 +20,10 @@ calibration only reads them, it never changes the detective.
 
 Difficulty sets the target d relative to the detective's reporting threshold
 scan.Z_REPORT (see TARGET_OFFSET). An effect below its target has its `size`
-(churn_shock: `churn_pct`) scaled up, keeping its direction. Stated facts such as
-`price_change_pct` are never touched. If the size hits its plausibility cap, the
-event's target is widened by dropping one key. Whatever still cannot reach its
+(churn_shock: `churn_pct`) scaled up, keeping its direction; one far above it is
+scaled back down, never below the story's own size. Stated facts such as
+`price_change_pct` are never touched. If even the plausibility cap cannot reach
+the target, the event's target is widened by dropping one key, before any scaling. Whatever still cannot reach its
 target is left as it is and listed with a warning.
 
 This module only edits the spec. It runs the simulator as a black box (feat/sim-full
@@ -45,10 +46,11 @@ from s2d.sim.events import DIFFICULTY_SCALE, IMPLEMENTED_METRICS
 from s2d.sim.output import DATE_COLUMNS
 from s2d.spec import Difficulty, EventType, Metric, StorySpec, Target
 
-# target d = scan.Z_REPORT + offset. Measured on synthetic store series only (24 seeds,
-# step and 30-day ramp, DECISIONS 54): at d = Z_REPORT about half the events are
-# reported with the right onset, at Z + 2.5 about 3 in 4, at Z + 4 about 9 in 10.
-TARGET_OFFSET = {Difficulty.easy: 4.0, Difficulty.medium: 2.5, Difficulty.hard: 0.5}
+# target d = scan.Z_REPORT + offset. Chosen so medium sizes stay realistic (DECISIONS 57):
+# on Example A at 10k customers, d = Z_REPORT means roughly a -20 to -25 % price
+# response (E1) and a -25 to -30 % drop of Brno stores (E5). Easy is about 1.5x
+# that size, hard sits below the threshold (found in a minority of runs).
+TARGET_OFFSET = {Difficulty.easy: 1.5, Difficulty.medium: 0.0, Difficulty.hard: -1.25}
 # The KPIs a detector can see a metric in. churn_hazard has two; the stronger counts.
 KPIS = {
     Metric.purchase_rate: ["orders"],
@@ -58,7 +60,14 @@ KPIS = {
 # Plausibility caps on the simulated size (relative multiplier - 1, or churn_pct).
 SIZE_CAP = {"down": -0.85, "up": 4.0}
 CHURN_PCT_CAP = 60.0
-ITERATIONS = 4
+# Realism caps on a drop, at medium; times the difficulty scale (x1.5 / x1 / x0.5).
+# A price response is at most PRICE_ELASTICITY_CAP x the price change (15 % dearer ->
+# at most -20 % orders); any other purchase or acquisition drop at most DROP_CAP.
+PRICE_ELASTICITY_CAP = 4 / 3
+DROP_CAP = -0.30
+WIDEN_BELOW = 0.5            # widen only if even at the cap d < WIDEN_BELOW x target
+ITERATIONS = 6
+BAND = 1.25                  # above goal * BAND a scaled size steps back down
 OVERSHOOT = 1.05             # aim 5 % above the target, d is not exactly linear in size
 SEED_OFFSET = 7919           # calibrate on another seed than the run itself
 KEY_ORDER = ("category", "city", "channel", "segment")  # how the KPI series name pairs
@@ -146,6 +155,20 @@ def _sim_size(spec: StorySpec, i: int, j: int) -> float:
     return ev.effects[j].size * DIFFICULTY_SCALE[spec.meta.difficulty]
 
 
+def size_cap(spec: StorySpec, i: int, j: int, up: bool) -> float:
+    """The largest simulated size (after difficulty scaling) calibration may set."""
+    if up:
+        return SIZE_CAP["up"]
+    ev = spec.events[i]
+    scale = DIFFICULTY_SCALE[spec.meta.difficulty]
+    pct = ev.params.price_change_pct if ev.type == EventType.price_change else None
+    if pct:
+        realistic = -PRICE_ELASTICITY_CAP * abs(pct) / 100 * scale
+    else:
+        realistic = DROP_CAP * scale
+    return max(SIZE_CAP["down"], realistic)
+
+
 def _set_sim_size(spec: StorySpec, i: int, j: int, value: float) -> bool:
     """Set the simulated size (after difficulty scaling). True if it hit the cap."""
     ev = spec.events[i]
@@ -153,7 +176,7 @@ def _set_sim_size(spec: StorySpec, i: int, j: int, value: float) -> bool:
         capped = value >= CHURN_PCT_CAP
         ev.params.churn_pct = round(min(value, CHURN_PCT_CAP), 2)
         return capped
-    cap = SIZE_CAP["up"] if value > 0 else SIZE_CAP["down"]
+    cap = size_cap(spec, i, j, up=value > 0)
     capped = abs(value) >= abs(cap)
     v = cap if capped else value
     ev.effects[j].size = round(v / DIFFICULTY_SCALE[spec.meta.difficulty], 4)
@@ -173,6 +196,17 @@ def _measure_all(spec: StorySpec, seed: int, twin_ks) -> dict[tuple[int, int], M
     return out
 
 
+def _at_cap(spec: StorySpec, i: int) -> StorySpec:
+    """A copy of the spec with every simulated effect of event i at its size cap."""
+    out = spec.model_copy(deep=True)
+    for k in _slots(out):
+        if k[0] == i:
+            v = _sim_size(out, *k)
+            _set_sim_size(out, *k, CHURN_PCT_CAP if out.events[i].type == EventType.churn_shock
+                          else size_cap(out, *k, up=v > 0))
+    return out
+
+
 def _widen_options(target: Target) -> list[Target]:
     keys = [k for k in ("city", "segment", "channel", "category") if getattr(target, k)]
     if len(keys) < 2:
@@ -181,7 +215,7 @@ def _widen_options(target: Target) -> list[Target]:
 
 
 def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[StorySpec, pd.DataFrame]:
-    """Scale effects up until each one has d >= its difficulty's target. Returns the
+    """Scale effects until each one has d in [target, target * BAND]. Returns the
     calibrated spec (a copy) and one row per effect for _truth.calibration."""
     say = log or (lambda m: print(m, file=sys.stderr))
     seed = (spec.meta.seed if seed is None else seed) + SEED_OFFSET
@@ -201,41 +235,50 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     capped: set[tuple[int, int]] = set()
     widened: set[int] = set()
 
-    m = _measure_all(spec, seed, twin_ks)
-    first = dict(m)
-    for _ in range(ITERATIONS):
-        low = [k for k in slots if m[k].d is not None and m[k].d < goal and k not in capped]
-        if not low:
-            break
-        for k in low:
-            factor = goal * OVERSHOOT / max(m[k].d, goal / 8)  # at most 8x per step
-            if _set_sim_size(spec, *k, _sim_size(spec, *k) * factor):
-                capped.add(k)
-        m = _measure_all(spec, seed, twin_ks)
+    first = _measure_all(spec, seed, twin_ks)
 
-    # Still short at the cap, or not visible in any scanned KPI: widen the target
-    # by one key, the option that gives the largest d.
-    for i in sorted({i for i, j in slots if m[(i, j)].d is None or m[(i, j)].d < goal}):
+    # 1. Widen first. An event whose target stays below half the goal even at the
+    # size cap (or is not visible in any scanned KPI) loses one key, the option with the
+    # largest d at the cap. Judged at the cap, before any scaling, so a later
+    # widening cannot leave another event's earlier scaling stale (DECISIONS 56).
+    for i in sorted({i for i, _ in slots}):
+        own = [k for k in slots if k[0] == i]
+        at_cap = _at_cap(spec, i)
+        m_cap = _measure_all(at_cap, seed, twin_ks)
+        here = min((m_cap[k].d or 0.0) for k in own)
+        if all(first[k].d is not None for k in own) and here >= WIDEN_BELOW * goal:
+            continue  # reachable, or a near miss: a near miss stays below_target, not a new story
         best = None
         for opt in _widen_options(spec.events[i].target):
-            trial = spec.model_copy(deep=True)
+            trial = at_cap.model_copy(deep=True)
             trial.events[i].target = opt
             mt = _measure_all(trial, seed, twin_ks)
-            ds = [mt[k].d or 0.0 for k in slots if k[0] == i]
-            if best is None or min(ds) > best[0]:
-                best = (min(ds), opt, mt)
-        if best is not None and best[0] > min((m[k].d or 0.0) for k in slots if k[0] == i):
+            d = min((mt[k].d or 0.0) for k in own)
+            if best is None or d > best[0]:
+                best = (d, opt)
+        if best is not None and best[0] > here:
             spec.events[i].target = best[1]
             widened.add(i)
-            m = best[2]
-            for k in [k for k in slots if k[0] == i]:
+
+    # 2. Scale, both ways. Below the goal a size grows; above goal * BAND it steps
+    # back down, but never below the story's own size and never past the cap.
+    m = _measure_all(spec, seed, twin_ks)
+    for _ in range(ITERATIONS):
+        off = [k for k in slots if m[k].d is not None and (
+            (m[k].d < goal and k not in capped)
+            or (m[k].d > goal * BAND and abs(_sim_size(spec, *k)) > abs(story_size[k]) + 1e-9))]
+        if not off:
+            break
+        for k in off:
+            factor = float(np.clip(goal * OVERSHOOT / max(m[k].d, 1e-9), 1 / 4, 8))
+            new = _sim_size(spec, *k) * factor
+            if abs(new) < abs(story_size[k]):
+                new = story_size[k]
+            if _set_sim_size(spec, *k, new):
+                capped.add(k)
+            else:
                 capped.discard(k)
-                for _ in range(ITERATIONS):
-                    if m[k].d is None or m[k].d >= goal or k in capped:
-                        break
-                    if _set_sim_size(spec, *k, _sim_size(spec, *k) * goal * OVERSHOOT / max(m[k].d, goal / 8)):
-                        capped.add(k)
-                    m = _measure_all(spec, seed, twin_ks)
+        m = _measure_all(spec, seed, twin_ks)
 
     rows = []
     for k in slots:

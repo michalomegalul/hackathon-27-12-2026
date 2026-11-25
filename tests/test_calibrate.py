@@ -15,7 +15,7 @@ def test_kpi_segment_uses_the_detective_key_order():
 
 def test_targets_follow_the_reporting_threshold():
     d = {lvl: calibrate.target_d(lvl) for lvl in Difficulty}
-    assert d[Difficulty.hard] >= scan.Z_REPORT
+    assert d[Difficulty.medium] >= scan.Z_REPORT
     assert d[Difficulty.easy] > d[Difficulty.medium] > d[Difficulty.hard]
 
 
@@ -56,3 +56,20 @@ def test_no_events_no_calibration():
     out, table = calibrate.calibrate(spec, seed=1)
     assert table.empty and out.events == []
     assert isinstance(table, pd.DataFrame)
+
+
+def test_realism_caps_follow_difficulty():
+    spec = load_spec("examples/a.yaml")
+    e1 = next(i for i, e in enumerate(spec.events) if e.id == "E1")
+    e5 = next(i for i, e in enumerate(spec.events) if e.id == "E5")
+    assert calibrate.size_cap(spec, e1, 0, up=False) == pytest.approx(-0.20)  # 15 % dearer -> at most -20 %
+    assert calibrate.size_cap(spec, e5, 0, up=False) == pytest.approx(-0.30)
+    spec.meta.difficulty = Difficulty.easy
+    assert calibrate.size_cap(spec, e5, 0, up=False) == pytest.approx(-0.45)
+
+
+def test_calibration_steps_back_down_but_not_below_the_story(example_a):
+    _, out, table = example_a
+    for r in table.itertuples():
+        if r.status == "scaled":
+            assert r.d <= r.target_d * calibrate.BAND + 1e-9 or abs(r.simulated_size) == abs(r.story_size)
