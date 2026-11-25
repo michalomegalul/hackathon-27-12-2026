@@ -104,3 +104,119 @@ file together.
     Columns named `*_date`, `valid_from` and `valid_to` are stored as `DATE`.
 25. **No PK/FK DDL in DuckDB yet.** Tests check key integrity instead. Constraints come
     with the exporter (stage 5).
+
+## Detective
+
+Everything below is global: the same code and the same numbers run on every
+dataset, on every no-story twin and on every seed. Thresholds were set by looking
+at no-story twins (null data) only, never at an answer key. The constants are at
+the top of `s2d/detective/scan.py`.
+
+### Blindness
+
+26. **The detective holds an in-memory DuckDB with copies of the `main` tables only.**
+    `data.open_analyst` attaches the run read-only, copies schema `main`, and detaches.
+    `tests/test_detective.py` fails if any file in `s2d/detective/` names the hidden
+    schema, the answer key or the spec. `s2d/score.py` is the only reader of `_truth`.
+
+### KPIs
+
+27. **Orders and revenue → `purchase_rate`; first orders → `acquisition_rate`; churn
+    onsets → `churn_hazard`.** Series run overall, per value of city, channel and
+    segment, per pair of those dimensions, and per category (alone and paired with each
+    dimension). An order counts once for every category it contains.
+28. **A segment series needs ≥ 30 events in total; shifts are only scanned on count
+    series with ≥ 2 events a day.** Below that the relative change of a 28-day mean is
+    dominated by Poisson noise. This rules out e.g. Brno × predplatitel churn
+    (0.6/day), which is where Example A's E4 lives.
+29. **Churn is inferred:** no order for max(60, 3 × median gap) days. **The onset is the
+    last order plus the customer's mean gap, not the last order.** With memoryless
+    ordering the expected time from the last order to the real churn day is one mean
+    gap; using the last order would put every churn wave ~3 weeks early.
+30. **Churn edges.** Only customers whose threshold is ≤ 90 days feed the churn KPI
+    (73 % in Example A), and the series drops the first and the last 90 days. At the
+    right edge these customers cannot be called churned yet; at the left edge their
+    last order was before the data. A data-driven cut (90th percentile of thresholds)
+    was tried first and cut 183 days, which hid every 2026 event.
+31. **Acquisition drops the first 90 days** for the same warm-up reason (a new
+    customer's first order comes about one gap after signup), and counts only
+    customers whose `signup_date` is inside the data.
+
+### Scan
+
+32. **Noise scale from first differences:** `1.4826 · MAD(diff(x)) / √2` on
+    x = STL trend + residual. The STL residual alone underestimates the noise in x
+    (the trend absorbs the slow part), which made PELT fire on pure Poisson noise.
+33. **Binseg confirms with half the PELT penalty.** Deviation from the brief. On a
+    gradual rise the greedy Binseg puts its top break elsewhere (Example A student
+    churn: PELT 2026-04-26, Binseg 2026-04-11) but does find the PELT break at lower
+    rank. "Both algorithms agree on the location" is the test, ±3 days unchanged.
+34. **Onset = start of a fitted ramp,** not the PELT location. Each break is refit as
+    level → linear ramp (0-35 days) → level, all (t0, t1) solved in closed form; the
+    reported start is t0. PELT puts a ramp's break in its middle.
+35. **An up break followed by a down break in the same series within 150 days is one
+    temporary event** (end_date = the second break), not two events.
+36. **Seasonality cannot be removed from an everyone-level series** (< 2 years of data).
+    So every reported shift needs a control group: Adtributor picks the segment for an
+    overall break (EP ≥ 0.3 per value up to 0.8, dimension with the highest JS
+    surprise); if the surprise is < 0.002 the change is uniform and is not reported
+    (`uniform_change`). Price: a story event that hits literally everyone is invisible.
+37. **Control group.** Single-key segment: everyone else. Pair segment
+    (city=Brno;channel=store): the same second key in the other values of the first
+    key (stores in other cities), so channel- or segment-specific seasonality (store
+    holiday closures) cancels too.
+38. **Confirmation = DiD CI excludes 0 AND placebo-in-time z ≥ 4.** Deviation: the
+    7-day block bootstrap on 28 + 28 days is kept for the CI, but alone it was
+    overconfident (twin: ~10 false events a year), because the series wander on a
+    monthly scale that 7-day blocks do not see. The placebo test computes the same DiD
+    statistic at every other date of the same series (> 56 days away) and asks how
+    unusual this one is (robust z). It carries each series' own autocorrelation and
+    sparsity. confidence = clip((z − 2)/4, 0, 1); reported events need ≥ 0.5.
+39. **Magnitude is the DiD effect** (relative change vs the control), not the raw
+    28-day before/after change. The raw change is kept as `raw_change_pct`.
+40. **Merging.** Candidates with the same metric and direction within 14 days are one
+    event. Start from the broadest segment; move to a narrower one only if it contains
+    the broader one's values and its effect is ≥ 1.5× larger. A price-response
+    candidate wins its group.
+41. **Price changes in `product_prices` are visible data.** For each change date the
+    orders of the repriced categories are tested against the other categories (DiD,
+    one week to settle). They are also anchors for the lag search.
+42. **Lag search** for churn and rating events: anchors are earlier reported events and
+    price changes; lags {0, 7, 14, 28, 42}; keep the (anchor, lag) with the largest
+    |t| in the event's direction, if |t| ≥ 3 and anchor + lag is within 14 days of the
+    onset.
+43. **Calendar:** CZ public holidays ±3 days, Black Friday −7…+4 days, and 1 Dec –
+    7 Jan. December is the whole season, not just its end: the sim's December
+    multiplier starts on the 1st.
+44. **Spikes** are runs of residual |z| > 3.5. One- and two-day blips are `transient`
+    and not reported (story events are lasting changes). Churn spikes are never
+    reported: churn dates are estimates. **Three-day spikes are reported, so the
+    Example A viral-spike decoy (a 1-day ×2.5 with a 2-day half-life, 4 days above
+    3.5) is a false positive.** Raising the minimum run to 5 days would hide it, but
+    that would be fitting the decoy, so it stays.
+45. **Stockouts:** ≥ 3 days without a sale of a SKU that sold ≥ 5 units a day over the
+    previous 28 days; several SKUs of one category at once are one stockout.
+46. **Tables of the full sim** (deliveries, reviews, tickets) are picked up if they
+    exist; their column names are guessed (`delivered_date`/`promised_date`/`late`,
+    `courier`, `rating`, `topic`). Check them when feat/sim-full lands.
+
+### Narrator
+
+47. **One LLM call** (`step="detective"`, temperature 0.1, think false, schema). It
+    sees only the reported candidates and may accept, reject or merge them and write
+    `narrative_cs`. Unknown ids → the whole answer is rejected and the template
+    narrative is used (every candidate with confidence ≥ 0.5). Ids the model skips
+    keep the scan's decision.
+
+### Scoring
+
+48. **Gate = metric and direction match AND timing > 0.** Deviation from the brief.
+    With 0.4 timing + 0.4 segment + 0.2 magnitude and a match at 0.5, a detection with
+    the right segment and size on a completely wrong date scored 0.6 and matched. The
+    date-shuffle placebo found it: its p-value could never fall below 1. Set
+    `score.TIME_GATE = False` for the original formula.
+49. **The scorecard scores the scan's reported events** (`--llm` to score after the
+    narrator), so it does not depend on the LLM. Decoys are not excluded; a reported
+    decoy is a false positive and is labelled as one.
+50. **Twin** = same spec and seed with `--no-story`. The sim keeps decoys in the twin,
+    so a reported decoy counts against the twin too.
