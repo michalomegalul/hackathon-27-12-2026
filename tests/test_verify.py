@@ -170,3 +170,27 @@ def test_fit_windows_extends_the_data_for_a_late_event():
         assert fitted.meta.start <= first and last <= fitted.meta.end, h.event_id
     assert verify.fit_windows(load_spec("examples/a.yaml"))[1] == []  # A and B already fit
     assert verify.fit_windows(load_spec("examples/b.yaml"))[1] == []
+
+
+TICKETS = {"event_id": "E1", "kpi": "tickets", "segment": "supplier=S_POL", "T": "2026-04-01", "measured_pct": 5.04,
+           "ci_pct": [3.0, 7.4], "z": 19.16, "measured_unit": "/den", "claim_cs": "Kamion stál na hranicích.",
+           "confirmed": True, "direction": "up"}
+
+
+def test_narrator_gets_the_unit_and_the_template_uses_it():
+    assert verify._fact(TICKETS)["zmena"] == "+5.04 tiketu denně"
+    assert "5.04 tiketu denně" in verify.narrative_cs({"tests": [TICKETS]})
+
+
+def test_check_numbers_catches_a_wrong_unit_and_invented_numbers():
+    assert verify.check_numbers("Od 1. 4. 2026 přibylo 5,04 tiketu denně (z = 19,2).", [TICKETS]) == []
+    assert "wrong unit" in verify.check_numbers("Tikety vzrostly o +5.04 %.", [TICKETS])[0]
+    assert verify.check_numbers("Tržby klesly o 37 %.", [TICKETS])
+
+
+def test_narrate_falls_back_when_the_llm_mixes_units(monkeypatch):
+    from s2d import llm
+    monkeypatch.setattr(llm, "complete", lambda *a, **k: "Od 1. 4. 2026 vzrostly tikety o 5,04 %.")
+    out = verify.narrate({"tests": [TICKETS]})
+    assert out["source"].startswith("template (LLM failed: numbers do not match")
+    assert "5.04 tiketu denně" in out["text"]

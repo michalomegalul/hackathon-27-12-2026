@@ -995,6 +995,27 @@ def format_table(res: dict) -> str:
     return "\n".join(lines)
 
 
+# How a measured change reads in Czech, by unit (and KPI for counts a day).
+PER_DAY_CS = {"tickets": "tiketu denně", "orders": "objednávky denně", "leavers": "odchodu denně",
+              "new_customers": "nového zákazníka denně"}
+
+
+def size_cs(r: dict) -> str:
+    """The measured change with its unit, in Czech: 'o 12 %', 'o 5.1 p. b.', 'o 5.04 tiketu denně'."""
+    v, mu = abs(r["measured_pct"]), r.get("measured_unit", "%")
+    if mu == "%":
+        return f"o {v:.0f} %"
+    if mu == "pp":
+        return f"o {v:.1f} p. b."
+    if mu == "b.":
+        return f"o {v:.2f} bodu"
+    if mu == "‰/den":
+        return f"o {v:.2f} zrušení na 1000 aktivních předplatných denně"
+    if mu == "/den":
+        return f"o {v:.2f} {PER_DAY_CS.get(r['kpi'], 'denně')}"
+    return f"o {v:.2f} {mu}"
+
+
 def narrative_cs(res: dict) -> str:
     """Czech description of the confirmed events only (template: every number from the table)."""
     verbs = {("orders", "down"): "klesly", ("orders", "up"): "vzrostly",
@@ -1011,9 +1032,7 @@ def narrative_cs(res: dict) -> str:
     for r in sorted((r for r in res["tests"] if r["confirmed"]), key=lambda r: r["T"]):
         who = _segment_cs(r["segment"])
         what = verbs[(r["kpi"], r["direction"])]
-        mu = r.get("measured_unit", "%")
-        size = (f"o {abs(r['measured_pct']):.0f} %" if mu == "%" else
-                f"o {abs(r['measured_pct']):.1f} p. b." if mu == "pp" else f"o {abs(r['measured_pct']):.2f} bodu")
+        size = size_cs(r)
         if r["kpi"] == "late_churn":
             g = r["groups"]
             s = (f"Od {_date_cs(r['T'])} {_segment_cs(r['segment'])} odešlo {LAG_FROM}–{LAG_TO} dní po pozdní zásilce "
@@ -1041,26 +1060,80 @@ def narrate(res: dict, on_status=None) -> dict:
     rows = [r for r in res["tests"] if r["confirmed"]]
     if not rows:
         return {"text": template, "source": "template (nothing confirmed)"}
-    facts = "\n".join(json.dumps({k: r.get(k) for k in ("event_id", "claim_cs", "kpi", "segment", "T",
-                                                         "measured_pct", "ci_pct", "z")}
-                                   | ({"price_pct": r["price"]["measured_pct"]} if "price" in r else {}),
-                                   ensure_ascii=False) for r in rows)
+    facts = "\n".join(json.dumps(_fact(r), ensure_ascii=False) for r in rows)
     prompt = f"""Jsi datový analytik. Tyto události příběhu firmy byly v datech potvrzeny testem
 (rozdíl v rozdílech proti kontrolní skupině, 28 dní po vs. 28 dní před):
 {facts}
 
 Napiš 3 až 5 vět česky: co se stalo, kdy, u koho a jak velký byl naměřený efekt.
 Pravidla: jen tyto události, žádné jiné. Každé datum a číslo musí pocházet z tabulky.
+Velikost efektu piš přesně jako v poli "zmena", s jeho jednotkou: "%" jen tam, kde jednotka je "%";
+"p. b." jsou procentní body, "/den" je počet za den, ne procenta.
 Nevymýšlej příčiny, které nejsou v claim_cs. Odpověz jen textem."""
     try:
         text = str(llm.complete("detective", prompt, on_status=on_status)).strip()
         if not text:
             raise ValueError("empty")
+        problems = check_numbers(text, rows)
+        if problems:
+            raise ValueError("numbers do not match the table: " + "; ".join(problems[:3]))
         info = llm.last_call()
         return {"text": text, "source": f"{info.backend} {info.model}" + (" (cache)" if info.cached else ""),
                 "template": template}
     except (llm.LLMError, ValueError) as e:
         return {"text": template, "source": f"template (LLM failed: {e})"}
+
+
+def _fact(r: dict) -> dict:
+    """One confirmed row for the narrator, with its unit spelled out."""
+    f = {k: r.get(k) for k in ("event_id", "claim_cs", "kpi", "segment", "T", "measured_pct", "ci_pct", "z")}
+    f["jednotka"] = r.get("measured_unit", "%")
+    f["zmena"] = ("+" if r["measured_pct"] > 0 else "-") + size_cs(r).removeprefix("o ")
+    if "price" in r:
+        f["price_pct"] = r["price"]["measured_pct"]
+    if "groups" in r:
+        f["late_left_pct"], f["on_time_left_pct"] = r["groups"]["late_left_pct"], r["groups"]["on_time_left_pct"]
+    return f
+
+
+_NUM = r"(?<![\w.,])[-+−]?\d+(?:[.,]\d+)?"
+
+
+def check_numbers(text: str, rows: list[dict]) -> list[str]:
+    """Every number in the narrator's text must come from the confirmed rows (at the
+    precision it is written with), and a number written with '%' must be one whose unit
+    is %. Dates, small counts (0-10), the windows and constants are allowed too."""
+    import re
+    pct, other = set(), {float(WINDOW), float(LAG_FROM), float(LAG_TO), 1000.0} | {float(i) for i in range(11)}
+    for r in rows:
+        unit_pct = r.get("measured_unit", "%") == "%"
+        vals = [r.get("measured_pct"), *(r.get("ci_pct") or [])]
+        (pct if unit_pct else other).update(abs(v) for v in vals if v is not None)
+        other.add(abs(r.get("z") or 0))
+        for v in ([r["price"]["measured_pct"]] if "price" in r else []) + \
+                 ([r["groups"]["late_left_pct"], r["groups"]["on_time_left_pct"]] if "groups" in r else []):
+            pct.add(abs(v))
+        d = date.fromisoformat(r["T"])
+        other.update({float(d.day), float(d.month), float(d.year)})
+        for m in re.findall(_NUM, r.get("claim_cs") or ""):
+            other.add(abs(float(m.replace(",", ".").replace("−", "-"))))
+            pct.add(abs(float(m.replace(",", ".").replace("−", "-"))))
+
+    def known(raw: str, pool: set[float]) -> bool:
+        x = abs(float(raw.replace(",", ".").replace("−", "-")))
+        dec = len(raw.split(",")[-1].split(".")[-1]) if ("," in raw or "." in raw) else 0
+        tol = 0.5 * 10 ** -dec + 1e-9
+        return any(abs(x - v) <= tol for v in pool)
+
+    problems = []
+    for m in re.finditer(_NUM + r"(\s*(?:%|procent))?", text):
+        raw, is_pct = re.match(_NUM, m.group(0)).group(0), bool(m.group(1))
+        if is_pct and not known(raw, pct):
+            problems.append(f"'{m.group(0).strip()}' is not a % value of the table"
+                            + (" (wrong unit)" if known(raw, other) else ""))
+        elif not is_pct and not known(raw, pct | other):
+            problems.append(f"'{raw}' is not in the table")
+    return problems
 
 
 def _date_cs(iso: str) -> str:
