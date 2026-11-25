@@ -8,7 +8,8 @@ Pair score  s = gate(metric, direction) x (0.4 timing + 0.4 segment Jaccard + 0.
   timing    = max(0, 1 - |pred.start - (true.start + lag)| / tau), tau 7 (shift) or 2 (spike)
   segment   = Jaccard over key=value pairs ('category=a,b' is two pairs)
   magnitude = max(0, 1 - |log(pred/true)| / log 2)
-Hungarian matching; a pair counts when s >= 0.5. Answer-key rows with
+The gate is metric and direction match and, unlike the original formula, timing > 0
+(TIME_GATE, see DECISIONS.md). Hungarian matching; a pair counts when s >= 0.5. Answer-key rows with
 simulated = false are left out. Reported decoys are false positives.
 """
 
@@ -32,6 +33,10 @@ MATCH = 0.5
 TAU = {"shift": 7, "spike": 2, "stockout": 2}
 W_TIME, W_SEG, W_MAG = 0.4, 0.4, 0.2
 LAG_TOLERANCE = 7
+# The formula as specified lets segment + magnitude alone reach 0.6 >= 0.5, so a
+# detection on the wrong date still matched and the date-shuffle placebo could
+# never reject. With TIME_GATE the gate also needs timing > 0 (|delta| < tau).
+TIME_GATE = True
 
 
 def load_truth(run_dir: str | Path) -> dict:
@@ -77,7 +82,8 @@ def slots(pred: dict, true: pd.Series) -> dict:
 
 
 def pair_score(sl: dict) -> float:
-    return sl["gate"] * (W_TIME * sl["timing"] + W_SEG * sl["segment"] + W_MAG * sl["magnitude"])
+    gate = sl["gate"] * (sl["timing"] > 0 if TIME_GATE else 1)
+    return gate * (W_TIME * sl["timing"] + W_SEG * sl["segment"] + W_MAG * sl["magnitude"])
 
 
 def score(events: list[dict], truth: dict) -> dict:
