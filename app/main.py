@@ -359,6 +359,10 @@ def _verify_section(run_dir: str) -> None:
     if "twin_confirmed" in ver:
         c2.metric("Dvojče bez příběhu: potvrzeno", f"{ver['twin_confirmed']}/{ver['n']}",
                   help="the same tests on a run with the same seed and no events: should be 0")
+    for u in ver.get("untested", []):
+        st.warning(f"{u['event_id']} ({u['type']}): {u['claim_cs']} Neověřeno: {u['reason']}.")
+    if ver["n"] == 0:
+        st.info("Příběh nemá žádnou událost, kterou by šlo v datech ověřit.")
     st.caption("One test per event, built from the event itself: its KPI in its target vs the other values "
                "of the same dimension, 28 days after start + lag vs 28 before. Confirmed = 95 % CI excludes 0, "
                "direction as in the story, placebo z ≥ 3.")

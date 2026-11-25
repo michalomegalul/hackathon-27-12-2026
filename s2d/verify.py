@@ -890,7 +890,8 @@ def verify_con(con, spec: StorySpec, key: pd.DataFrame | None, twin_con=None, ch
     lo, hi = _range(con)
     hyps = [h if h.kpi == "late_churn" else resolve(con, h, lo, hi) for h in hypotheses(spec, key)]
     rows = [test(con, h, lo, hi, check_sql=check_sql) for h in hyps]
-    res = {"tests": rows, "n": len(rows), "confirmed": sum(r["confirmed"] for r in rows)}
+    res = {"tests": rows, "n": len(rows), "confirmed": sum(r["confirmed"] for r in rows),
+           "untested": untested(spec, key)}
     if twin_con is not None:
         tlo, thi = _range(twin_con)
         twin = [test(twin_con, h, tlo, thi, check_sql=check_sql) for h in hyps]
@@ -900,6 +901,26 @@ def verify_con(con, spec: StorySpec, key: pd.DataFrame | None, twin_con=None, ch
                                                  "placebo_before", "sql_result")}
         res["twin_confirmed"] = sum(t["confirmed"] for t in twin)
     return res
+
+
+def untested(spec: StorySpec, key: pd.DataFrame | None = None) -> list[dict]:
+    """Story events and effects with no test: the simulator does not support them (so
+    they are not in the data), or the verifier has no KPI for their metric."""
+    from s2d.sim.events import unsupported_reason
+    simulated = None if key is None else {(r.event_id, r.metric) for r in key.itertuples() if bool(r.simulated)}
+    out = []
+    for ev in spec.events:
+        reason = unsupported_reason(spec, ev)
+        if reason is not None or (simulated is not None and not any((ev.id, e.metric.value) in simulated
+                                                                    for e in ev.effects)):
+            out.append({"event_id": ev.id, "type": ev.type.value, "claim_cs": ev.narrative_cs or "",
+                        "reason": f"simulátor tuto událost nepodporuje ({reason or 'not simulated'})"})
+            continue
+        for eff in ev.effects:
+            if KPI.get(eff.metric.value) is None:
+                out.append({"event_id": ev.id, "type": ev.type.value, "claim_cs": ev.narrative_cs or "",
+                            "reason": f"ověřovač nemá test pro metriku {eff.metric.value}"})
+    return out
 
 
 def load_run(run_dir: str | Path) -> tuple[duckdb.DuckDBPyConnection, StorySpec, pd.DataFrame]:
@@ -991,6 +1012,8 @@ def format_table(res: dict) -> str:
         elif "sql_matches" in r:
             lines.append(f"      SQL gives {r['sql_result']['did_pct']:+.2f} {mu}: "
                          f"{'same as the test' if r['sql_matches'] else 'MISMATCH'}")
+    for u in res.get("untested", []):
+        lines.append(f"{u['event_id']:<5} not tested: {u['reason']}")
     lines.append(summary_line(res))
     return "\n".join(lines)
 

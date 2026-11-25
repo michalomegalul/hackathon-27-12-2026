@@ -180,6 +180,17 @@ TYPE_HANDLERS = {
 }
 
 
+def unsupported_reason(spec: StorySpec, event: Event) -> str | None:
+    """Why the simulator skips this event (None if it is simulated)."""
+    try:
+        TYPE_HANDLERS[event.type](event, 0)
+        for eff in event.effects:
+            mechanism(spec, event, eff)
+    except NotImplementedError as err:
+        return str(err)
+    return None
+
+
 def _compile_event(event: Event, spec: StorySpec, cal: Calendar) -> tuple[list[CompiledEffect], list[PriceChange]]:
     """Compile one event. Raises NotImplementedError for anything unsupported."""
     start_idx = cal.index_of(event.start)
