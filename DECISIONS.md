@@ -50,16 +50,19 @@ file together.
     so the population average is still `size` but students react more. A
     `price_change` without a pct (like E2 in example A) only carries effects.
 13. **Which events run today.**
-    - With extra mechanics: `price_change`.
+    - With extra mechanics: `price_change`, `courier_change` (decisions 67–69),
+      `supplier_delay` and `stockout` (decision 73).
     - Effects-only (they just apply their curves): `churn_shock`, `competitor_entry`,
       `campaign`, `quality_issue`.
-    - Stubs that raise `NotImplementedError`: `supplier_delay`, `stockout`,
-      `courier_change`, `service_outage`, `staff_shortage`, `viral_spike`.
+    - Stubs that raise `NotImplementedError` (out of scope): `service_outage`,
+      `staff_shortage`, `viral_spike`.
 
-    Only the metrics `purchase_rate`, `churn_hazard` and `acquisition_rate` are
-    simulated. Any other metric also raises. By default the runner skips the whole
-    event, prints a warning and writes `simulated = false` in `_answer_key`. Use
-    `--strict` to fail instead. In example A, E3 is skipped. In example B, only E3 runs.
+    The metrics `purchase_rate`, `churn_hazard` and `acquisition_rate` are simulated as
+    curves; `delivery_days` drives a courier switch; `rating_mean`, `ticket_rate` (and churn
+    or purchases of the event types above) are emergent (decision 69). Any other metric
+    raises. By default the runner skips the whole event, prints a warning and writes
+    `simulated = false` in `_answer_key`. Use `--strict` to fail instead. In examples A and
+    B every event runs now.
 14. **The answer key has one row per effect, not one per event.** An event with two
     effects (example B, E1) gets two rows, because `metric` is a scored slot.
     `segment` is the whole target written as text, e.g. `city=Brno;segment=predplatitel`.
