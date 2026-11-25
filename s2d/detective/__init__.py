@@ -25,7 +25,8 @@ def run(run_dir: str | Path, *, narrate: bool = True, on_status=None) -> dict:
     ks = kpis_mod.build(con)
     t1 = time.perf_counter()
     say(f"{len(ks.series)} series, scanning")
-    cands = scan_mod.scan(ks)
+    stats: dict = {}
+    cands = scan_mod.scan(ks, stats=stats)
     t2 = time.perf_counter()
     rows = [c.row() for c in cands]
     reported = [r for r in rows if r["status"] == "reported"]
@@ -35,6 +36,7 @@ def run(run_dir: str | Path, *, narrate: bool = True, on_status=None) -> dict:
         "days": len(ks.dates),
         "kpis": sorted({k for k, _ in ks.series}),
         "n_series": len(ks.series),
+        "scan_stats": stats,
         "notes": ks.notes,
         "candidates": rows,
         "events": reported,

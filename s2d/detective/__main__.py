@@ -19,7 +19,9 @@ def main(argv=None) -> int:
 
     res = run(args.run_dir, narrate=not args.no_llm, on_status=lambda m: print(f"  {m}", file=sys.stderr))
     t = res["timing"]
-    print(f"{res['n_series']} series, {len(res['candidates'])} candidates {res['status_counts']}")
+    st = res["scan_stats"]
+    print(f"{res['n_series']} series ({st['scanned_total']} scanned, {st['tests_total']} DiD tests), "
+          f"{len(res['candidates'])} candidates {res['status_counts']}")
     print(f"kpis {t['kpis_s']}s, scan {t['scan_s']}s, total {t['total_s']}s")
     if res["events"]:
         cols = ["id", "metric", "segment", "start_date", "end_date", "direction", "magnitude_pct",

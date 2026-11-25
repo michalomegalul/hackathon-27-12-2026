@@ -258,3 +258,14 @@ def test_repeat_rate_is_reported_as_more_churn():
     c = found[0]
     assert c.metric == "churn_hazard" and c.direction == "up" and c.magnitude_pct > 0
     assert abs((pd.Timestamp(c.start_date) - onset).days) <= 21, c.start_date
+
+
+def test_pairs_are_only_drilled_under_a_confirmed_parent():
+    """Hierarchical scan: city=Brno;channel=store is tested because city=Brno has a
+    confirmed drop at the same time; without a story no pair is scanned at all."""
+    st = {}
+    found = _brno_store(scan.scan(_store_world(1, size=-0.5), stats=st))
+    assert st["tests"][2] >= 1 and any(c.status == "reported" for c in found)
+    st = {}
+    scan.scan(_store_world(1, size=0.0), stats=st)
+    assert st["scanned"][2] == 0 and st["tests"][2] == 0, st

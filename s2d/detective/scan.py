@@ -10,7 +10,9 @@ Pipeline per series:
   onset = start of the ramp (piecewise ramp fit), not the PELT midpoint
   drill-down (Adtributor) for everyone-level breaks
   DiD vs the rest of the population, 7-day moving-block bootstrap, 95 % CI
-Then: merge duplicates across series, lag search for churn, calendar filter,
+Hierarchy: everyone and single-dimension series are always scanned; a pair of
+dimensions only under a parent with a confirmed change in the same metric
+(within DRILL_DAYS). Then: merge duplicates across series, lag search for churn, calendar filter,
 spikes and stockouts.
 """
 
@@ -39,8 +41,8 @@ MIN_MEAN = 2.0            # shifts are only scanned on count series with >= 2 ev
 PAIR_MAX_DAYS = 150       # an up break and a later down break within this are one event
 BOOT = 200                # bootstrap resamples
 BLOCK = 7                 # bootstrap block length (days)
-Z_REPORT = 6.5            # reported shifts need placebo z >= this (set on no-story twins, DECISIONS 55)
-MIN_CONFIDENCE = 0.5      # = confidence at Z_REPORT
+Z_REPORT = 5.0            # reported shifts need placebo z >= this (hierarchical scan, set on no-story twins, DECISIONS 57)
+MIN_CONFIDENCE = 0.5      # = confidence at Z_REPORT (spikes; shifts compare z itself)
 EP_MIN, EP_CUM = 0.3, 0.8  # Adtributor: per-value and cumulative explanatory power
 MIN_SURPRISE = 0.002      # below this JS divergence a change counts as uniform
 SPECIFIC_GAIN = 1.5       # prefer a narrower segment if its effect is 1.5x larger
@@ -51,6 +53,7 @@ STOCKOUT_RUN, STOCKOUT_MIN_RATE = 3, 5.0
 LAGS = (0, 7, 14, 28, 42)
 LAG_MIN_T = 3.0
 LAG_MATCH_DAYS = 14
+DRILL_DAYS = 21           # a pair is tested only within this of a confirmed parent change
 CALENDAR_MAX_DAYS = 10    # only spikes and temporary changes shorter than this can be "just the calendar"
 
 
@@ -509,11 +512,71 @@ def _shift(kpi: str, seg: str, s: pd.Series, b: int, level: float, lo: int, righ
         extra={"t0": b, "t1": b, "lo": lo, "right": right, "before": w[0], "after": w[1]})
 
 
-def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
+def _level(seg: str) -> int:
+    """0 = everyone, 1 = one dimension (city=Brno, category=a,b), 2 = a pair."""
+    return 0 if not seg else seg.count(";") + 1
+
+
+def _series_breaks(kpi: str, seg: str, s: pd.Series, pr: Prepared) -> list[Candidate]:
+    """Shift candidates of one series: confirmed breaks, ramps joined, up/down pairs
+    as temporary events (the end break kept as a fallback onset of its own)."""
+    n = len(s)
+    bks = breakpoints(pr.z)
+    levels = []
+    for b in bks:
+        lo, hi = max(0, b - WINDOW), min(n, b + WINDOW)
+        levels.append(pr.x[b:hi].mean() - pr.x[lo:b].mean())
+    # PELT cuts a long ramp into steps: same-direction breaks closer than
+    # RAMP_MAX are one ramp, starting at the first of them
+    keep = [i for i in range(len(bks)) if i == 0 or not (
+        bks[i] - bks[i - 1] <= RAMP_MAX and np.sign(levels[i]) == np.sign(levels[i - 1]))]
+    bks, levels = [bks[i] for i in keep], [levels[i] for i in keep]
+    # pair an up break with a later opposite break: a temporary event
+    out, used = [], set()
+    for i, b in enumerate(bks):
+        if i in used:
+            continue
+        end = None
+        for j in range(i + 1, len(bks)):
+            if j not in used and np.sign(levels[j]) == -np.sign(levels[i]) and bks[j] - b <= PAIR_MAX_DAYS:
+                end = j
+                break
+        if end is not None:
+            used.add(end)
+        right = bks[end] if end is not None else n
+        lo = bks[i - 1] if i > 0 else 0
+        c = _shift(kpi, seg, s, b, levels[i], lo, right, bks[end] if end is not None else None)
+        if end is not None:
+            # if the pair is not confirmed as one temporary event, its end
+            # break is still a candidate onset of its own
+            nxt = bks[end + 1] if end + 1 < len(bks) else n
+            fb = _shift(kpi, seg, s, bks[end], levels[end], b, nxt, None)
+            if c is None:
+                c = fb
+            elif fb is not None:
+                c.extra["fallback"] = fb
+        if c is not None:
+            out.append(c)
+    return out
+
+
+def _parent_of(parent: Candidate, kpi: str, seg: str) -> bool:
+    """Is `parent` (a confirmed level-0/1 change) above the pair `seg` of `kpi`?
+    Same metric, and the pair contains one of the parent's key=value items
+    (everyone is above every pair)."""
+    return parent.metric == METRIC[kpi] and (not parent.segment or bool(_seg_keys(parent.segment) & _seg_keys(seg)))
+
+
+def scan(ks: KPISet, seed: int = 0, stats: dict | None = None) -> list[Candidate]:
+    """Hierarchical scan. Level 0 (everyone) and level 1 (one dimension) series are
+    always scanned. A pair (city=Brno;channel=store) is scanned only under a parent
+    with a confirmed change in the same metric, and only its shifts that start
+    within DRILL_DAYS of that change are tested. `stats` receives how many series
+    and DiD tests that took."""
     rng = np.random.default_rng(seed)  # bootstrap only; fixed so a run is repeatable
-    raw: list[Candidate] = []
     preps: dict[tuple[str, str], Prepared] = {}
     clean_rest: dict[tuple, np.ndarray] = {}
+    st = {"series": len(ks.series), "scanned": {0: 0, 1: 0, 2: 0}, "tests": {0: 0, 1: 0, 2: 0}, "price_tests": 0}
     n_id = 0
 
     def new_id() -> str:
@@ -523,123 +586,114 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
 
     for (kpi, seg), s in ks.series.items():
         pr = prepare(s, SMEAR_DAYS.get(kpi, 0))
-        if pr is None:
-            continue
-        preps[(kpi, seg)] = pr
-        if kpi not in RATIO_KPIS and s.mean() < MIN_MEAN:
-            continue  # kept in preps for spikes; too sparse for shifts
-        if (kpi, seg) in ks.parts and not seg:
-            continue  # a share of everyone has no control; its segments are scanned directly
-        n = len(s)
-        bks = breakpoints(pr.z)
-        levels = []
-        for b in bks:
-            lo, hi = max(0, b - WINDOW), min(n, b + WINDOW)
-            levels.append(pr.x[b:hi].mean() - pr.x[lo:b].mean())
-        # PELT cuts a long ramp into steps: same-direction breaks closer than
-        # RAMP_MAX are one ramp, starting at the first of them
-        keep = [i for i in range(len(bks)) if i == 0 or not (
-            bks[i] - bks[i - 1] <= RAMP_MAX and np.sign(levels[i]) == np.sign(levels[i - 1]))]
-        bks, levels = [bks[i] for i in keep], [levels[i] for i in keep]
-        # pair an up break with a later opposite break: a temporary event
-        used = set()
-        for i, b in enumerate(bks):
-            if i in used:
-                continue
-            end = None
-            for j in range(i + 1, len(bks)):
-                if j not in used and np.sign(levels[j]) == -np.sign(levels[i]) and bks[j] - b <= PAIR_MAX_DAYS:
-                    end = j
-                    break
-            if end is not None:
-                used.add(end)
-            right = bks[end] if end is not None else n
-            lo = bks[i - 1] if i > 0 else 0
-            c = _shift(kpi, seg, s, b, levels[i], lo, right, bks[end] if end is not None else None)
-            if end is not None:
-                # if the pair is not confirmed as one temporary event, its end
-                # break is still a candidate onset of its own
-                nxt = bks[end + 1] if end + 1 < len(bks) else n
-                fb = _shift(kpi, seg, s, bks[end], levels[end], b, nxt, None)
-                if c is None:
-                    c = fb
-                elif fb is not None:
-                    c.extra["fallback"] = fb
-            if c is not None:
-                raw.append(c)
+        if pr is not None:
+            preps[(kpi, seg)] = pr  # spikes use every series
 
-    out: list[Candidate] = []
-    while raw:
-        c = raw.pop(0)
-        fb = c.extra.pop("fallback", None)
-        s = ks.get(c.kpi, c.segment)
-        before, after = c.extra["before"], c.extra["after"]
-        raw_change = s.iloc[after].mean() / max(s.iloc[before].mean(), 1e-9) - 1
-        c.raw_change_pct = round(100 * raw_change, 1)
-        if not c.segment:
-            seg, surprise = adtributor(ks, c.kpi, before, after)
-            if surprise < MIN_SURPRISE or not seg:
-                c.status = "uniform_change"
-                c.evidence = "změna stejná ve všech segmentech, od sezónnosti ji nejde odlišit"
-                out.append(c)
+    def breaks(keys) -> list[Candidate]:
+        raw = []
+        for kpi, seg in keys:
+            pr, s = preps.get((kpi, seg)), ks.series[(kpi, seg)]
+            if pr is None or (kpi not in RATIO_KPIS and s.mean() < MIN_MEAN):
+                continue  # too sparse for shifts
+            if (kpi, seg) in ks.parts and not seg:
+                continue  # a share of everyone has no control; its segments are scanned directly
+            st["scanned"][_level(seg)] += 1
+            raw += _series_breaks(kpi, seg, s, pr)
+        return raw
+
+    def evaluate(raw: list[Candidate], gate=None) -> list[Candidate]:
+        """Onset fit, DiD, placebo z and status for each raw candidate. `gate(c)`
+        (after the onset fit) decides whether a drilled candidate is tested at all."""
+        out: list[Candidate] = []
+        while raw:
+            c = raw.pop(0)
+            fb = c.extra.pop("fallback", None)
+            s = ks.get(c.kpi, c.segment)
+            before, after = c.extra["before"], c.extra["after"]
+            raw_change = s.iloc[after].mean() / max(s.iloc[before].mean(), 1e-9) - 1
+            c.raw_change_pct = round(100 * raw_change, 1)
+            if not c.segment:
+                seg, surprise = adtributor(ks, c.kpi, before, after)
+                if surprise < MIN_SURPRISE or not seg:
+                    c.status = "uniform_change"
+                    c.evidence = "změna stejná ve všech segmentech, od sezónnosti ji nejde odlišit"
+                    out.append(c)
+                    if fb is not None:
+                        raw.insert(0, fb)
+                    continue
+                c.segment = seg
+                c.extra["surprise"] = surprise
+                s = _union_series(ks, c.kpi, seg)
+                if s is None:
+                    c.status = "uniform_change"
+                    out.append(c)
+                    if fb is not None:
+                        raw.insert(0, fb)
+                    continue
+            ratio = c.kpi in RATIO_KPIS
+            pr = preps.get((c.kpi, c.segment)) or prepare(s)
+            ta = test_arrays(ks, c.kpi, c.segment, s, pr, clean_rest)
+            sv, rv, raw_sv, raw_rv = ta.seg, ta.rest, ta.raw_seg, ta.raw_rest
+            b = c.extra["t0"]
+            t0, t1 = ramp_onset(onset_series(pr.x, sv, rv, ratio), b,
+                                max(c.extra["lo"], b - 60), min(c.extra["right"], b + 60))
+            w = _windows(len(s), t0, t1, c.extra["right"])
+            if w is None or (gate is not None and not gate(c, s.index[t0], s.index[t1])):
                 if fb is not None:
                     raw.insert(0, fb)
                 continue
-            c.segment = seg
-            c.extra["surprise"] = surprise
-            s = _union_series(ks, c.kpi, seg)
-            if s is None:
-                c.status = "uniform_change"
-                out.append(c)
-                if fb is not None:
-                    raw.insert(0, fb)
-                continue
-        ratio = c.kpi in RATIO_KPIS
-        pr = preps.get((c.kpi, c.segment)) or prepare(s)
-        ta = test_arrays(ks, c.kpi, c.segment, s, pr, clean_rest)
-        sv, rv, raw_sv, raw_rv = ta.seg, ta.rest, ta.raw_seg, ta.raw_rest
-        b = c.extra["t0"]
-        t0, t1 = ramp_onset(onset_series(pr.x, sv, rv, ratio), b,
-                            max(c.extra["lo"], b - 60), min(c.extra["right"], b + 60))
-        w = _windows(len(s), t0, t1, c.extra["right"])
-        if w is None:
-            if fb is not None:
+            before, after = w
+            nb, na = before.stop - before.start, after.stop - after.start
+            c.start_date = str(s.index[t0].date())
+            c.extra.update(t0=t0, t1=t1, before=before, after=after)
+            st["tests"][_level(c.series.split("|", 1)[1])] += 1
+            point, ci, _ = did(sv, rv, before, after, rng, ratio=ratio)
+            z = placebo_z(sv, rv, t0, t1, nb, na, ratio)
+            c.extra["z"] = round(z, 2)
+            c.extra["max_ratio"] = round(_last_placebo.get("max_ratio", 0), 2)
+            c.ci = (round(100 * ci[0], 1), round(100 * ci[1], 1))
+            c.magnitude_pct = round(100 * point, 1)
+            c.direction = "up" if point > 0 else "down"
+            c.confidence = round(confidence_from_z(z), 2)
+            c.evidence = (f"{c.kpi} {c.segment or 'vše'}: {c.raw_change_pct:+.1f} % (28 d po vs před), "
+                          f"proti zbytku {c.magnitude_pct:+.1f} %, 95% CI {c.ci[0]:+.1f}..{c.ci[1]:+.1f} %")
+            if c.kpi in INVERSE_KPIS:
+                _invert(c, raw_sv, raw_rv, before, after)
+            if ci[0] <= 0 <= ci[1]:
+                c.status = "not_confirmed"
+            elif z < Z_REPORT:  # not the rounded confidence: z 4.99 is below 5
+                c.status = "not_confirmed"
+            elif (calendar_applies(c.kind, c.start_date, c.end_date, rv is not None, SMEAR_DAYS.get(c.kpi, 0))
+                  and (reason := calendar_reason(pd.Timestamp(c.start_date)))):
+                c.status = "explained_by_calendar"
+                c.evidence += f"; {reason}"
+            out.append(c)
+            if fb is not None and c.status != "reported":
                 raw.insert(0, fb)
-            continue
-        before, after = w
-        nb, na = before.stop - before.start, after.stop - after.start
-        c.start_date = str(s.index[t0].date())
-        c.extra.update(t0=t0, t1=t1, before=before, after=after)
-        point, ci, _ = did(sv, rv, before, after, rng, ratio=ratio)
-        z = placebo_z(sv, rv, t0, t1, nb, na, ratio)
-        c.extra["z"] = round(z, 2)
-        c.extra["max_ratio"] = round(_last_placebo.get("max_ratio", 0), 2)
-        c.ci = (round(100 * ci[0], 1), round(100 * ci[1], 1))
-        c.magnitude_pct = round(100 * point, 1)
-        c.direction = "up" if point > 0 else "down"
-        c.confidence = round(confidence_from_z(z), 2)
-        c.evidence = (f"{c.kpi} {c.segment or 'vše'}: {c.raw_change_pct:+.1f} % (28 d po vs před), "
-                      f"proti zbytku {c.magnitude_pct:+.1f} %, 95% CI {c.ci[0]:+.1f}..{c.ci[1]:+.1f} %")
-        if c.kpi in INVERSE_KPIS:
-            _invert(c, raw_sv, raw_rv, before, after)
-        if ci[0] <= 0 <= ci[1]:
-            c.status = "not_confirmed"
-        elif c.confidence < MIN_CONFIDENCE:
-            c.status = "not_confirmed"
-        elif (calendar_applies(c.kind, c.start_date, c.end_date, rv is not None, SMEAR_DAYS.get(c.kpi, 0))
-              and (reason := calendar_reason(pd.Timestamp(c.start_date)))):
-            c.status = "explained_by_calendar"
-            c.evidence += f"; {reason}"
-        out.append(c)
-        if fb is not None and c.status != "reported":
-            raw.insert(0, fb)
+        return out
 
+    out = evaluate(breaks([k for k in ks.series if _level(k[1]) <= 1]))
     prices = price_candidates(ks, rng)
+    st["price_tests"] = len(prices)
+    # drill-down: pairs under a confirmed level-0/1 change of the same metric
+    parents = [c for c in out + prices if c.status == "reported" and c.kind == "shift"]
+    pair_keys = [(kpi, seg) for kpi, seg in ks.series
+                 if _level(seg) == 2 and any(_parent_of(p, kpi, seg) for p in parents)]
+
+    def near_parent(c: Candidate, t0: pd.Timestamp, t1: pd.Timestamp) -> bool:
+        # distance from the parent's onset to the pair's ramp [t0, t1]: a long ramp
+        # whose fitted start is early still contains the parent's change
+        def dist(p):
+            d = pd.Timestamp(p.start_date)
+            return 0 if t0 <= d <= t1 else min(abs((d - t0).days), abs((d - t1).days))
+        return any(_parent_of(p, c.kpi, c.segment) and dist(p) <= DRILL_DAYS for p in parents)
+
+    out += evaluate(breaks(pair_keys), gate=near_parent)
     out += prices
     # a significant price response below the z threshold can still be corroborated
     # by a confirmed shift at the same time (see merge)
-    pool = [c for c in out if c.status == "reported"] + [
-        c for c in prices if c.status == "not_confirmed" and c.extra.get("significant")]
+    pool = [c for c in out if c.status == "reported" and c.extra.get("source") != "price"] + [
+        c for c in prices if c.status == "reported" or (c.status == "not_confirmed" and c.extra.get("significant"))]
     reported = merge(pool)
     mirrors(reported)
     churn_consequences(reported)
@@ -649,6 +703,10 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
     for c in sorted(out, key=lambda c: (c.status != "reported", c.start_date, c.metric)):
         c.id = new_id()
     lag_search([c for c in out if c.status == "reported"], ks, preps)
+    st["tests_total"] = sum(st["tests"].values()) + st["price_tests"]
+    st["scanned_total"] = sum(st["scanned"].values())
+    if stats is not None:
+        stats.update(st)
     return sorted(out, key=lambda c: c.id)
 
 
@@ -707,7 +765,7 @@ def price_candidates(ks: KPISet, rng) -> list[Candidate]:
             series="orders|category=" + ",".join(cats), ci=(round(100 * ci[0], 1), round(100 * ci[1], 1)),
             extra={"source": "price", "price_pct": pct, "z": round(z, 2), "max_ratio": round(mr, 2)})
         c.extra["significant"] = not ci[0] <= 0 <= ci[1]
-        if not c.extra["significant"] or c.confidence < MIN_CONFIDENCE:
+        if not c.extra["significant"] or z < Z_REPORT:
             c.status = "not_confirmed"
         out.append(c)
     return out
