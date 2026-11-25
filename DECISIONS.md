@@ -604,6 +604,8 @@ the top of `s2d/detective/scan.py`.
     target against its control at its date; it does not show that nothing else did (that is
     the detective's job) and it does not separate causes that share target and date: E2
     (student churn) is tested 42 days after E1 and with a KPI that frequency drops do not
-    move, but a world with E1 alone has not been run through the E2 test yet. The detective
+    move. Checked on seed 42 (medium, calibrated spec): a world **without E2** gives E2's test
+    −8.4 %, z 0.8, not confirmed (E1 alone does not pass as E2); a world **without E1** gives
+    E2 +52 %, z 4.2, confirmed, and E1's test +0.4 %, z 0.3. One seed only. The detective
     (bonus) now runs on data calibrated for the verifier, i.e. smaller effects in its terms
     than in rounds 2–3.
