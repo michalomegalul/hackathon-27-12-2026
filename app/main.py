@@ -319,9 +319,15 @@ with t_score:
         card = json.loads(card_path.read_text("utf-8"))
         sc = card["score"]
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Precision", f"{sc['precision']:.2f}")
+        has_cons = "precision_cons" in sc  # scorecards written before the consequence status
+        c1.metric("Precision", f"{sc['precision']:.2f}",
+                  help="strict: every unmatched detection is a false positive")
+        if has_cons:
+            c1.caption(f"s důsledky: {sc['precision_cons']:.2f}")
         c2.metric("Recall", f"{sc['recall']:.2f}")
         c3.metric("F1", f"{sc['f1']:.2f}")
+        if has_cons:
+            c3.caption(f"s důsledky: {sc['f1_cons']:.2f}")
         if "twin" in card:
             c4.metric("Twin: false events / year", card["twin"]["false_events_per_year"])
         st.caption(f"Placebo (200 shuffles of the answer-key dates): p = {card['placebo']['p_value']}. "
@@ -349,6 +355,9 @@ with t_score:
             return "background-color: #d5f0d5" if v >= 0.5 else "background-color: #f6d5d5"
         st.dataframe(table.style.map(color, subset=["date", "segment", "magnitude", "lag", "score"]),
                      hide_index=True)
+        if sc.get("consequences"):
+            st.write("Důsledky (consequences of a matched event: neither TP nor FP in the second variant)")
+            st.dataframe(pd.DataFrame(sc["consequences"]), hide_index=True)
         if sc["false_positives"]:
             st.write("False positives")
             st.dataframe(pd.DataFrame(sc["false_positives"]), hide_index=True)

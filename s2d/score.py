@@ -33,6 +33,10 @@ MATCH = 0.5
 TAU = {"shift": 7, "spike": 2, "stockout": 2}
 W_TIME, W_SEG, W_MAG = 0.4, 0.4, 0.2
 LAG_TOLERANCE = 7
+CONSEQUENCE_DAYS = 60
+# Which way is bad: purchases and new customers falling, churn rising, ...
+ADVERSE_UP = {"purchase_rate": False, "acquisition_rate": False, "rating_mean": False,
+              "churn_hazard": True, "delivery_days": True, "ticket_rate": True}
 # The formula as specified lets segment + magnitude alone reach 0.6 >= 0.5, so a
 # detection on the wrong date still matched and the date-shuffle placebo could
 # never reject. With TIME_GATE the gate also needs timing > 0 (|delta| < tau).
@@ -86,6 +90,30 @@ def pair_score(sl: dict) -> float:
     return gate * (W_TIME * sl["timing"] + W_SEG * sl["segment"] + W_MAG * sl["magnitude"])
 
 
+def _dims(pairs: set[str]) -> set[str]:
+    return {p.split("=", 1)[0] for p in pairs}
+
+
+def consequence_of(e: dict, true: pd.Series) -> bool:
+    """Is unmatched detection e a consequence of matched answer-key event `true`?
+    In its segment family, within [start, start + lag + CONSEQUENCE_DAYS], in the
+    expected direction:
+      - shares a key=value with it (or one side is everyone): moves the bad way,
+        whatever the metric (a price rise -> fewer orders -> more churn);
+      - or is its mirror control (same dimension, another value: Praha stores while
+        Brno stores fall): same metric, opposite direction."""
+    start = true["start_date"]
+    day = pd.Timestamp(e["start_date"])
+    lag = int(true["lag_days"] or 0)
+    if not start <= day <= start + pd.Timedelta(days=lag + CONSEQUENCE_DAYS):
+        return False
+    a, b = seg_pairs(e["segment"]), seg_pairs(true["segment"])
+    bad = lambda metric, direction: (direction == "up") == ADVERSE_UP.get(metric, False)  # noqa: E731
+    if (not a or not b or a & b) and bad(e["metric"], e["direction"]) == bad(true["metric"], true["direction"]):
+        return True
+    return bool(_dims(a) & _dims(b)) and not a & b and e["metric"] == true["metric"] and e["direction"] != true["direction"]
+
+
 def score(events: list[dict], truth: dict) -> dict:
     key = truth["scored"]
     n_p, n_t = len(events), len(key)
@@ -115,9 +143,14 @@ def score(events: list[dict], truth: dict) -> dict:
                        **{k: (round(v, 3) if isinstance(v, float) else v) for k, v in sl.items()},
                        "caused_by_ok": cb})
     matched_p = {i for i, _ in matches}
-    fps = []
+    fps, cons = [], []
     for i, e in enumerate(events):
         if i in matched_p:
+            continue
+        of = next((key.iloc[j]["event_id"] for _, j in matches if consequence_of(e, key.iloc[j])), None)
+        if of is not None:
+            cons.append({"pred_id": e["id"], "metric": e["metric"], "segment": e["segment"],
+                         "start_date": e["start_date"], "direction": e["direction"], "of": of})
             continue
         day = pd.Timestamp(e["start_date"])
         near = truth["decoys"][(truth["decoys"]["date"] - day).abs() <= pd.Timedelta(days=3)]
@@ -125,10 +158,15 @@ def score(events: list[dict], truth: dict) -> dict:
                     "start_date": e["start_date"], "decoy": near.iloc[0]["type"] if len(near) else None})
     matched_t = {j for _, j in matches}
     misses = [key.iloc[j]["event_id"] for j in range(n_t) if j not in matched_t]
+    # with consequences: a consequence is neither a TP nor an FP, precision = TP / (TP + FP)
+    p_c = tp / (tp + len(fps)) if tp + len(fps) else 0.0
+    f1_c = 2 * p_c * recall / (p_c + recall) if p_c + recall else 0.0
     slot_mean = {k: round(float(np.mean([d[k] for d in detail])), 3) if detail else None
                  for k in ("timing", "segment", "magnitude", "lag")}
     return {"precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3),
+            "precision_cons": round(p_c, 3), "f1_cons": round(f1_c, 3), "n_fp": len(fps),
             "tp": tp, "n_pred": n_p, "n_true": n_t, "matches": detail, "false_positives": fps,
+            "consequences": cons,
             "missed": misses, "slots": slot_mean,
             "caused_by_bonus": {"hit": cb_hit, "possible": cb_possible},
             "excluded": truth["key"][~truth["key"]["simulated"]]["event_id"].tolist(),
@@ -139,9 +177,10 @@ def placebo(events: list[dict], truth: dict, n: int = 200, seed: int = 0) -> dic
     """Shuffle the answer-key dates n times. How often does a random key score as
     well as the real one? p = (1 + #(F1_placebo >= F1_real)) / (1 + n)."""
     rng = np.random.default_rng(seed)
-    real = score(events, truth)["f1"]
+    sc = score(events, truth)
+    real, real_c = sc["f1"], sc["f1_cons"]
     days = (truth["end"] - truth["start"]).days
-    f1s = []
+    f1s, f1s_c = [], []
     for _ in range(n):
         fake = dict(truth)
         k = truth["scored"].copy()
@@ -149,10 +188,13 @@ def placebo(events: list[dict], truth: dict, n: int = 200, seed: int = 0) -> dic
         offs = rng.integers(0, np.maximum(days - lag, 1))
         k["start_date"] = truth["start"] + pd.to_timedelta(offs, unit="D")
         fake["scored"] = k
-        f1s.append(score(events, fake)["f1"])
-    f1s = np.array(f1s)
+        ps = score(events, fake)
+        f1s.append(ps["f1"])
+        f1s_c.append(ps["f1_cons"])
+    f1s, f1s_c = np.array(f1s), np.array(f1s_c)
     return {"f1": real, "placebo_f1": f1s.round(3).tolist(),
-            "p_value": round(float((1 + np.sum(f1s >= real)) / (1 + n)), 4)}
+            "p_value": round(float((1 + np.sum(f1s >= real)) / (1 + n)), 4),
+            "f1_cons": real_c, "p_value_cons": round(float((1 + np.sum(f1s_c >= real_c)) / (1 + n)), 4)}
 
 
 def twin_rate(events: list[dict], days: int) -> float:
@@ -220,6 +262,9 @@ def sweep(spec_path: str | Path, seeds: list[int], n: int | None = 10000, diffic
             if kind == "story":
                 sc = score(det["events"], load_truth(out))
                 row.update(f1=sc["f1"], precision=sc["precision"], recall=sc["recall"],
+                           f1_cons=sc["f1_cons"], precision_cons=sc["precision_cons"],
+                           n_fp=sc["n_fp"], n_cons=len(sc["consequences"]),
+                           matched=",".join(m["event_id"] for m in sc["matches"]),
                            scan_s=det["timing"]["total_s"])
             else:
                 row.update(twin_events=len(det["events"]),
@@ -227,8 +272,9 @@ def sweep(spec_path: str | Path, seeds: list[int], n: int | None = 10000, diffic
         rows.append(row)
         print(json.dumps(row), file=sys.stderr)
     df = pd.DataFrame(rows)
+    num = df.select_dtypes("number")
     summary = {c: {"mean": round(float(df[c].mean()), 3), "sd": round(float(df[c].std(ddof=1)), 3) if len(df) > 1 else 0.0}
-               for c in df.columns if c != "seed"}
+               for c in num.columns if c != "seed"}
     return {"spec": str(spec_path), "difficulty": difficulty, "n_customers": n, "runs": rows, "summary": summary}
 
 
@@ -240,7 +286,7 @@ def curve(spec_path: str | Path, out_png: str | Path, seeds: list[int], n: int |
     levels = ["easy", "medium", "hard"]
     res = {lvl: sweep(spec_path, seeds, n, difficulty=lvl, twin=False) for lvl in levels}
     fig, ax = plt.subplots(figsize=(6, 4))
-    for metric, style in (("f1", "o-"), ("recall", "s--"), ("precision", "^:")):
+    for metric, style in (("f1", "o-"), ("f1_cons", "o-."), ("recall", "s--"), ("precision", "^:")):
         m = [res[lvl]["summary"][metric]["mean"] for lvl in levels]
         sd = [res[lvl]["summary"][metric]["sd"] for lvl in levels]
         ax.errorbar(levels, m, yerr=sd, fmt=style, capsize=3, label=metric)
@@ -261,8 +307,10 @@ def curve(spec_path: str | Path, out_png: str | Path, seeds: list[int], n: int |
 
 def _print_card(card: dict) -> None:
     s = card["score"]
-    print(f"precision {s['precision']}  recall {s['recall']}  F1 {s['f1']}  "
+    print(f"strict:            precision {s['precision']}  recall {s['recall']}  F1 {s['f1']}  "
           f"({s['tp']} matched / {s['n_pred']} reported / {s['n_true']} in the key)")
+    print(f"with consequences: precision {s['precision_cons']}  recall {s['recall']}  F1 {s['f1_cons']}  "
+          f"({s['tp']} TP, {s['n_fp']} FP, {len(s['consequences'])} důsledky)")
     if s["excluded"]:
         print(f"excluded (simulated = false): {', '.join(s['excluded'])}")
     for m in s["matches"]:
@@ -273,8 +321,11 @@ def _print_card(card: dict) -> None:
     for fp in s["false_positives"]:
         print(f"  false positive {fp['pred_id']} {fp['metric']} {fp['segment'] or 'everyone'} {fp['start_date']}"
               + (f"  (decoy: {fp['decoy']})" if fp["decoy"] else ""))
+    for c in s["consequences"]:
+        print(f"  důsledek {c['pred_id']} {c['metric']} {c['direction']} {c['segment'] or 'everyone'} "
+              f"{c['start_date']}  (of {c['of']})")
     print(f"slots {s['slots']}  caused_by bonus {s['caused_by_bonus']['hit']}/{s['caused_by_bonus']['possible']}")
-    print(f"placebo: p = {card['placebo']['p_value']} "
+    print(f"placebo: p = {card['placebo']['p_value']} (with consequences {card['placebo']['p_value_cons']}) "
           f"(placebo F1 mean {np.mean(card['placebo']['placebo_f1']):.3f}, max {max(card['placebo']['placebo_f1']):.3f})")
     if "twin" in card:
         t = card["twin"]

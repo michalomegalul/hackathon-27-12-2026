@@ -80,3 +80,22 @@ def test_placebo_p_value_is_small_for_a_perfect_detector():
 
 def test_twin_rate():
     assert score.twin_rate([{}] * 2, 730) == pytest.approx(1.0, abs=0.01)
+
+
+def test_consequences_are_neither_tp_nor_fp():
+    """E1 (coffee categories down) is matched. Unmatched detections in its family,
+    within start + lag + 60 days and in the expected direction, are consequences:
+    a mirror (accessories up against falling coffee), a same-key drop. Wrong
+    direction, outside the window or with no shared key or dimension stays an FP."""
+    ev = [_ev("C1", "purchase_rate", "category=etiopie,kolumbie", "2026-03-01", "down", -6.0),
+          _ev("C2", "purchase_rate", "category=prislusenstvi", "2026-03-03", "up", 30.0),          # mirror
+          _ev("C3", "purchase_rate", "category=etiopie;segment=student", "2026-03-20", "down", -20.0),  # same key
+          _ev("C4", "purchase_rate", "category=etiopie", "2026-03-20", "up", 20.0),               # wrong direction
+          _ev("C5", "purchase_rate", "category=kolumbie", "2026-06-01", "down", -10.0),           # too late
+          _ev("C6", "acquisition_rate", "city=Praha", "2026-03-10", "down", -10.0)]               # other family
+    s = score.score(ev, _truth())
+    assert s["tp"] == 1
+    assert {c["pred_id"] for c in s["consequences"]} == {"C2", "C3"}
+    assert {f["pred_id"] for f in s["false_positives"]} == {"C4", "C5", "C6"}
+    assert s["precision"] == pytest.approx(1 / 6, abs=1e-3)       # strict
+    assert s["precision_cons"] == pytest.approx(1 / 4, abs=1e-3)  # TP / (TP + FP)
