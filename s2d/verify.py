@@ -911,13 +911,16 @@ def untested(spec: StorySpec, key: pd.DataFrame | None = None) -> list[dict]:
     out = []
     for ev in spec.events:
         reason = unsupported_reason(spec, ev)
-        if reason is not None or (simulated is not None and not any((ev.id, e.metric.value) in simulated
-                                                                    for e in ev.effects)):
+        if reason is not None:
             out.append({"event_id": ev.id, "type": ev.type.value, "claim_cs": ev.narrative_cs or "",
-                        "reason": f"simulátor tuto událost nepodporuje ({reason or 'not simulated'})"})
+                        "reason": f"simulátor tuto událost nepodporuje ({reason})"})
             continue
         for eff in ev.effects:
-            if KPI.get(eff.metric.value) is None:
+            why = unsupported_reason(spec, ev, eff)
+            if why is not None or (simulated is not None and (ev.id, eff.metric.value) not in simulated):
+                out.append({"event_id": ev.id, "type": ev.type.value, "claim_cs": ev.narrative_cs or "",
+                            "reason": f"simulátor nepodporuje efekt {eff.metric.value} ({why or 'not simulated'})"})
+            elif KPI.get(eff.metric.value) is None:
                 out.append({"event_id": ev.id, "type": ev.type.value, "claim_cs": ev.narrative_cs or "",
                             "reason": f"ověřovač nemá test pro metriku {eff.metric.value}"})
     return out

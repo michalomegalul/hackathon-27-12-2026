@@ -6,7 +6,9 @@ strong the effect is on day t, between 0 and 1) plus who it applies to.
 Event *types* can also have side effects outside the multipliers. For example,
 `price_change` writes new rows into product_prices. Types we have not built yet
 raise NotImplementedError. The runner catches that, skips the event, and marks
-it `simulated = False` in the answer key (or stops, with --strict).
+it `simulated = False` in the answer key (or stops, with --strict). An unsupported
+metric next to supported ones skips only that effect (its answer-key row is
+`simulated = False`, the rest of the event runs).
 """
 
 from dataclasses import dataclass, field
@@ -180,25 +182,44 @@ TYPE_HANDLERS = {
 }
 
 
-def unsupported_reason(spec: StorySpec, event: Event) -> str | None:
-    """Why the simulator skips this event (None if it is simulated)."""
+def unsupported_reason(spec: StorySpec, event: Event, effect: Effect | None = None) -> str | None:
+    """Why the simulator skips this event (effect=None: the event type itself, or every one
+    of its effects) or this one effect of it. None if it is simulated."""
     try:
         TYPE_HANDLERS[event.type](event, 0)
-        for eff in event.effects:
-            mechanism(spec, event, eff)
     except NotImplementedError as err:
         return str(err)
-    return None
+    reasons = []
+    for eff in [effect] if effect is not None else event.effects:
+        try:
+            mechanism(spec, event, eff)
+        except NotImplementedError as err:
+            reasons.append(str(err))
+    if effect is None and len(reasons) < len(event.effects):
+        return None  # some effects are simulated
+    return reasons[0] if reasons else None
+
+
+def _kind(spec: StorySpec, event: Event, eff: Effect) -> str | None:
+    """mechanism(), or None if this effect is not simulated."""
+    try:
+        return mechanism(spec, event, eff)
+    except NotImplementedError:
+        return None
 
 
 def _compile_event(event: Event, spec: StorySpec, cal: Calendar) -> tuple[list[CompiledEffect], list[PriceChange]]:
-    """Compile one event. Raises NotImplementedError for anything unsupported."""
+    """Compile one event. Raises NotImplementedError if its type is unsupported or none of
+    its effects is; an unsupported effect next to supported ones is left out (a quality
+    issue's lost orders are simulated, its rating drop is not)."""
     start_idx = cal.index_of(event.start)
     side_effects = TYPE_HANDLERS[event.type](event, start_idx)
 
     scale = DIFFICULTY_SCALE[spec.meta.difficulty]
     compiled = []
-    kinds = [mechanism(spec, event, eff) for eff in event.effects]  # raises before anything is added
+    kinds = [_kind(spec, event, eff) for eff in event.effects]
+    if all(k is None for k in kinds):
+        mechanism(spec, event, event.effects[0])  # raises with the reason
     for eff, kind in zip(event.effects, kinds):
         if kind != "curve":
             continue
@@ -256,10 +277,12 @@ def compile_story(spec: StorySpec, cal: Calendar, strict: bool = False) -> Compi
             simulated = False
 
         for eff in event.effects:
-            try:
-                how = mechanism(spec, event, eff) if simulated else ""
-            except NotImplementedError:
-                how = ""
+            how = (_kind(spec, event, eff) or "") if simulated else ""
+            if simulated and not how:
+                if strict:
+                    raise NotImplementedError(unsupported_reason(spec, event, eff))
+                story.skipped.append(f"{event.id} ({event.type.value}) {eff.metric.value}: "
+                                     f"{unsupported_reason(spec, event, eff)}")
             if event.type == EventType.churn_shock:
                 magnitude = event.params.churn_pct
             elif eff.metric in ABSOLUTE_METRICS:
@@ -278,7 +301,7 @@ def compile_story(spec: StorySpec, cal: Calendar, strict: bool = False) -> Compi
                 "direction": "up" if magnitude > 0 else "down",
                 "magnitude_pct": round(magnitude, 4),
                 "caused_by": event.caused_by,
-                "simulated": simulated,
+                "simulated": bool(how),
                 "mechanism": how,
                 "narrative_cs": event.narrative_cs,
             })

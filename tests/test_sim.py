@@ -225,3 +225,21 @@ def test_dirt_only_touches_the_export_copy():
     assert high["orders"]["customer_id"].isin(high["customers"]["customer_id"]).all()
     assert high["payments"]["order_id"].isin(high["orders"]["order_id"]).all()
     assert (high["customers"]["city"] != clean["customers"]["city"].reindex(high["customers"].index)).any()
+
+
+def test_unsupported_effect_skips_only_itself():
+    """A quality issue's rating drop is not simulated (only a courier switch moves ratings),
+    its lost orders are: the event runs with one effect, the key says which."""
+    from s2d.sim.calendar import build_calendar
+    from s2d.sim.events import compile_story, unsupported_reason
+    from s2d.spec import Effect, Event, EventType, Metric, Target
+    spec = load_spec("examples/a.yaml")
+    ev = Event(id="Q", type=EventType.quality_issue, start=spec.events[0].start, target=Target(city=["Brno"]),
+               effects=[Effect(metric=Metric.rating_mean, size=-0.5), Effect(metric=Metric.purchase_rate, size=-0.2)])
+    spec.events = [ev]
+    story = compile_story(spec, build_calendar(spec))
+    key = story.answer_key.set_index("metric")["simulated"]
+    assert not key["rating_mean"] and key["purchase_rate"]
+    assert [e.metric for e in story.effects if not e.is_decoy] == [Metric.purchase_rate]
+    assert unsupported_reason(spec, ev) is None and "rating_mean" in unsupported_reason(spec, ev, ev.effects[0])
+    assert any("rating_mean" in s for s in story.skipped)
