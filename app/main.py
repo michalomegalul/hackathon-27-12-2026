@@ -88,6 +88,11 @@ def run_sim(spec_yaml: str, n_customers: int | None):
         db = write_world(world, out)
         job.log("no-story twin (same seed, no events)")
         write_world(simulate(without_story(spec)), out / "twin")
+        from s2d import verify
+        job.log("verification: one test per event, story and twin")
+        ver = verify.verify(out, out / "twin")
+        (out / "verify.json").write_text(json.dumps(ver, ensure_ascii=False, default=str), "utf-8")
+        job.log(verify.summary_line(ver))
         job.log(f"done in {time.perf_counter() - t0:.1f} s")
         return {"dir": str(out), "db": str(db), "twin": str(out / "twin"),
                 "rows": {name: len(df) for name, df in world.tables.items()},
@@ -232,7 +237,7 @@ with t_data:
     if not ss.spec_yaml:
         st.write("Validate a spec first.")
     else:
-        n = st.number_input("Customers (0 = from spec)", value=0, step=1000, min_value=0)
+        n = st.number_input("Customers (0 = from spec)", value=40000, step=1000, min_value=0)
         sim_state = jobs.read(_job_id("sim_job") or "")
         busy = sim_state and sim_state["status"] in ("queued", "running")
         if st.button("Simulate", type="primary", disabled=bool(busy)):
@@ -310,60 +315,143 @@ with t_detective:
             with st.expander("All candidates, including rejected ones"):
                 st.dataframe(pd.DataFrame(res["candidates"])[cols + ["status"]], hide_index=True)
 
+def _verify_chart(r: dict):
+    """Treated series and the control scaled to the treated level before T (7-day means),
+    with the before and after windows shaded."""
+    import altair as alt
+
+    sr = r["series"]
+    df = pd.DataFrame({"date": pd.to_datetime(sr["day"]), "cílová skupina": sr["treated"]})
+    b0, b1 = pd.Timestamp(r["before"][0]), pd.Timestamp(r["before"][1])
+    if sr["control"] is not None:
+        ctl = pd.Series(sr["control"], index=df.index)
+        in_before = (df["date"] >= b0) & (df["date"] <= b1)
+        scale = df.loc[in_before, "cílová skupina"].mean() / max(ctl[in_before].mean(), 1e-9)
+        df["kontrola (přeškálovaná)"] = ctl * scale
+    long = df.set_index("date").rolling(7, center=True, min_periods=1).mean().reset_index().melt(
+        "date", var_name="řada", value_name="7denní průměr")
+    lines = alt.Chart(long).mark_line().encode(x="date:T", y="7denní průměr:Q",
+                                               color=alt.Color("řada:N", legend=alt.Legend(orient="bottom")))
+    win = pd.DataFrame({"start": pd.to_datetime([r["before"][0], r["after"][0]]),
+                        "end": pd.to_datetime([r["before"][1], r["after"][1]]),
+                        "okno": ["před", "po"]})
+    band = alt.Chart(win).mark_rect(opacity=0.15).encode(
+        x="start:T", x2="end:T", color=alt.Color("okno:N", scale=alt.Scale(range=["#888", "#c0392b"]), legend=None))
+    return alt.layer(band, lines).properties(height=260)
+
+
+def _verify_section(run_dir: str) -> None:
+    path = Path(run_dir) / "verify.json"
+    if not path.exists():
+        st.write("No verification for this run (simulate again).")
+        return
+    ver = json.loads(path.read_text("utf-8"))
+    st.subheader("Ověření příběhu")
+    c1, c2 = st.columns(2)
+    c1.metric("Příběh: potvrzeno", f"{ver['confirmed']}/{ver['n']}")
+    if "twin_confirmed" in ver:
+        c2.metric("Dvojče bez příběhu: potvrzeno", f"{ver['twin_confirmed']}/{ver['n']}",
+                  help="the same tests on a run with the same seed and no events: should be 0")
+    st.caption("One test per event, built from the event itself: its KPI in its target vs the other values "
+               "of the same dimension, 28 days after start + lag vs 28 before. Confirmed = 95 % CI excludes 0, "
+               "direction as in the story, placebo z ≥ 3.")
+
+    def fmt(v):
+        return "–" if v is None else f"{v:+.1f} %"
+    rows = []
+    for r in ver["tests"]:
+        tw = r.get("twin", {})
+        rows.append({
+            "událost": r["event_id"], "tvrzení": r["claim_cs"],
+            "test": f"{r['kpi']} · {r['segment'] or 'všichni'} · od {r['T']}",
+            "příběh": fmt(r["story_pct"]), "v okně": fmt(r["expected_pct"]),
+            "naměřeno": fmt(r.get("measured_pct")),
+            "95% CI": (f"[{r['ci_pct'][0]:+.1f}, {r['ci_pct'][1]:+.1f}]" if r.get("ci_pct") else "–"),
+            "z": r.get("z"), "p (placebo)": r.get("p_placebo"),
+            "příběh ✓": "✅" if r["confirmed"] else "❌",
+            "dvojče z": tw.get("z"), "dvojče ✓": ("✅" if tw.get("confirmed") else "❌") if tw else "",
+        })
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
+    for r in ver["tests"]:
+        if "series" not in r:
+            continue
+        mark = "✅" if r["confirmed"] else "❌"
+        with st.expander(f"{mark} {r['event_id']}: {r['claim_cs']}"):
+            st.altair_chart(_verify_chart(r), width="stretch")
+            if "price" in r:
+                st.write(f"Ceny dotčených produktů: {fmt(r['price']['measured_pct'])} "
+                         f"(příběh {fmt(r['price']['story_pct'])}, {r['price']['products']} produktů)")
+            ok = "same DiD as the test" if r.get("sql_matches") else "DIFFERENT from the test"
+            st.caption(f"Run it on story.duckdb (DuckDB). Gives did_pct = {r['sql_result']['did_pct']:+.2f} %: {ok}.")
+            st.code(r["sql"], language="sql")
+            if "price" in r:
+                st.code(r["price"]["sql"], language="sql")
+
+
+def _detective_section(run_dir: str, card_path: Path) -> None:
+    if not card_path.exists():
+        st.write("Run the detective (Detective tab) to score it.")
+        return
+    card = json.loads(card_path.read_text("utf-8"))
+    sc = card["score"]
+    c1, c2, c3, c4 = st.columns(4)
+    has_cons = "precision_cons" in sc  # scorecards written before the consequence status
+    c1.metric("Precision", f"{sc['precision']:.2f}",
+              help="strict: every unmatched detection is a false positive")
+    if has_cons:
+        c1.caption(f"s důsledky: {sc['precision_cons']:.2f}")
+    c2.metric("Recall", f"{sc['recall']:.2f}")
+    c3.metric("F1", f"{sc['f1']:.2f}")
+    if has_cons:
+        c3.caption(f"s důsledky: {sc['f1_cons']:.2f}")
+    if "twin" in card:
+        c4.metric("Twin: false events / year", card["twin"]["false_events_per_year"])
+    st.caption(f"Placebo (200 shuffles of the answer-key dates): p = {card['placebo']['p_value']}. "
+               f"Bonus caused_by: {sc['caused_by_bonus']['hit']}/{sc['caused_by_bonus']['possible']}.")
+
+    by_true = {m["event_id"]: m for m in sc["matches"]}
+    events = {e["id"]: e for e in card["events"]}
+    rows = []
+    for t in card["answer_key"]:
+        m = by_true.get(t["event_id"])
+        e = events.get(m["pred_id"]) if m else None
+        rows.append({
+            "event": t["event_id"], "true": f"{t['metric']} {t['direction']} {t['segment']}",
+            "true start+lag": str((pd.Timestamp(t["start_date"]) + pd.Timedelta(days=int(t["lag_days"] or 0))).date()),
+            "true size %": t["magnitude_pct"],
+            "found": f"{e['id']} {e['segment'] or 'vše'}" if e else ("not simulated" if not t["simulated"] else "missed"),
+            "date": m["timing"] if m else None, "segment": m["segment"] if m else None,
+            "magnitude": m["magnitude"] if m else None, "lag": m["lag"] if m else None,
+            "score": m["score"] if m else None})
+    table = pd.DataFrame(rows)
+
+    def color(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        return "background-color: #d5f0d5" if v >= 0.5 else "background-color: #f6d5d5"
+    st.dataframe(table.style.map(color, subset=["date", "segment", "magnitude", "lag", "score"]),
+                 hide_index=True)
+    if sc.get("consequences"):
+        st.write("Důsledky (consequences of a matched event: neither TP nor FP in the second variant)")
+        st.dataframe(pd.DataFrame(sc["consequences"]), hide_index=True)
+    if sc["false_positives"]:
+        st.write("False positives")
+        st.dataframe(pd.DataFrame(sc["false_positives"]), hide_index=True)
+    chart = _event_chart(run_dir, card["events"], card["answer_key"])
+    if chart is not None:
+        st.altair_chart(chart, width="stretch")
+    st.write("Placebo F1 distribution (random answer-key dates) vs the real F1")
+    hist = pd.Series(card["placebo"]["placebo_f1"]).value_counts().sort_index()
+    st.bar_chart(hist.rename_axis("F1").rename("count"))
+
+
 with t_score:
     run_dir = _run_dir()
-    card_path = Path(run_dir) / "scorecard.json" if run_dir else None
-    if not card_path or not card_path.exists():
-        st.write("Run the detective first.")
+    if not run_dir:
+        st.write("Simulate data first.")
     else:
-        card = json.loads(card_path.read_text("utf-8"))
-        sc = card["score"]
-        c1, c2, c3, c4 = st.columns(4)
-        has_cons = "precision_cons" in sc  # scorecards written before the consequence status
-        c1.metric("Precision", f"{sc['precision']:.2f}",
-                  help="strict: every unmatched detection is a false positive")
-        if has_cons:
-            c1.caption(f"s důsledky: {sc['precision_cons']:.2f}")
-        c2.metric("Recall", f"{sc['recall']:.2f}")
-        c3.metric("F1", f"{sc['f1']:.2f}")
-        if has_cons:
-            c3.caption(f"s důsledky: {sc['f1_cons']:.2f}")
-        if "twin" in card:
-            c4.metric("Twin: false events / year", card["twin"]["false_events_per_year"])
-        st.caption(f"Placebo (200 shuffles of the answer-key dates): p = {card['placebo']['p_value']}. "
-                   f"Bonus caused_by: {sc['caused_by_bonus']['hit']}/{sc['caused_by_bonus']['possible']}.")
-
-        by_true = {m["event_id"]: m for m in sc["matches"]}
-        events = {e["id"]: e for e in card["events"]}
-        rows = []
-        for t in card["answer_key"]:
-            m = by_true.get(t["event_id"])
-            e = events.get(m["pred_id"]) if m else None
-            rows.append({
-                "event": t["event_id"], "true": f"{t['metric']} {t['direction']} {t['segment']}",
-                "true start+lag": str((pd.Timestamp(t["start_date"]) + pd.Timedelta(days=int(t["lag_days"] or 0))).date()),
-                "true size %": t["magnitude_pct"],
-                "found": f"{e['id']} {e['segment'] or 'vše'}" if e else ("not simulated" if not t["simulated"] else "missed"),
-                "date": m["timing"] if m else None, "segment": m["segment"] if m else None,
-                "magnitude": m["magnitude"] if m else None, "lag": m["lag"] if m else None,
-                "score": m["score"] if m else None})
-        table = pd.DataFrame(rows)
-
-        def color(v):
-            if v is None or (isinstance(v, float) and pd.isna(v)):
-                return ""
-            return "background-color: #d5f0d5" if v >= 0.5 else "background-color: #f6d5d5"
-        st.dataframe(table.style.map(color, subset=["date", "segment", "magnitude", "lag", "score"]),
-                     hide_index=True)
-        if sc.get("consequences"):
-            st.write("Důsledky (consequences of a matched event: neither TP nor FP in the second variant)")
-            st.dataframe(pd.DataFrame(sc["consequences"]), hide_index=True)
-        if sc["false_positives"]:
-            st.write("False positives")
-            st.dataframe(pd.DataFrame(sc["false_positives"]), hide_index=True)
-        chart = _event_chart(run_dir, card["events"], card["answer_key"])
-        if chart is not None:
-            st.altair_chart(chart, width="stretch")
-        st.write("Placebo F1 distribution (random answer-key dates) vs the real F1")
-        hist = pd.Series(card["placebo"]["placebo_f1"]).value_counts().sort_index()
-        st.bar_chart(hist.rename_axis("F1").rename("count"))
+        _verify_section(run_dir)
+        st.divider()
+        st.subheader("Slepý detektiv (bonus)")
+        st.caption("Hard mode: the detective searches every KPI and segment without the answer key.")
+        _detective_section(run_dir, Path(run_dir) / "scorecard.json")
