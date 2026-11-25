@@ -3,6 +3,8 @@
     python -m s2d.sim run examples/a.yaml --seed 42 --out data/a/
     python -m s2d.sim run examples/a.yaml --out data/a/ --check   # + no-story twin and churn report
     python -m s2d.sim run examples/a.yaml --out data/a_nostory/ --no-story
+    python -m s2d.sim run examples/b.yaml --out data/b/ --dirt medium --pg postgresql://u:pw@host/db
+    python -m s2d.sim pg data/b/ --pg postgresql://u:pw@host/db     # export an existing run
 
 Before simulating, s2d.calibrate scales up any effect that would be below its
 difficulty's recoverability target (--no-calibrate to skip). The result is in
@@ -12,6 +14,7 @@ _truth.calibration.
 import argparse
 import sys
 import time
+from pathlib import Path
 
 from s2d.spec import load_spec
 
@@ -34,7 +37,19 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--no-calibrate", action="store_true", help="skip the recoverability gate (s2d.calibrate)")
     run.add_argument("--dirt", choices=["none", "low", "medium", "high"], default=None,
                      help="messiness of the export copy (out/export*); default from the spec's noise.messiness")
+    run.add_argument("--pg", metavar="URL", help="also export to Postgres (with PK/FK); the dirty copy if --dirt")
+    run.add_argument("--pg-schema", default="public", help="Postgres schema for the analyst tables")
+    pgp = sub.add_parser("pg", help="export an existing run to Postgres")
+    pgp.add_argument("run_dir")
+    pgp.add_argument("--pg", metavar="URL", required=True)
+    pgp.add_argument("--pg-schema", default="public")
+    pgp.add_argument("--clean", action="store_true", help="export story.duckdb even if a dirty export.duckdb exists")
     args = parser.parse_args(argv)
+
+    if args.command == "pg":
+        run_dir = Path(args.run_dir)
+        db = run_dir / "story.duckdb" if args.clean or not (run_dir / "export.duckdb").exists() else run_dir / "export.duckdb"
+        return _pg(db, args.pg, args.pg_schema)
 
     spec = load_spec(args.spec)
     if args.n_customers:
@@ -66,9 +81,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"calibrated in {t_cal:.1f}s, simulated in {t_sim:.1f}s, written in {t_all - t_sim - t_cal:.1f}s -> {db}"
           + (f" (+ export copy, dirt {dirt})" if dirt != "none" else ""))
 
+    if args.pg:
+        _pg(Path(args.out) / ("export.duckdb" if dirt != "none" else "story.duckdb"), args.pg, args.pg_schema)
+
     if args.check:
         twin = simulate(without_story(spec), seed=args.seed)
         print(format_report(churn_report(world, twin)))
+    return 0
+
+
+def _pg(db: Path, url: str, schema: str) -> int:
+    from .pg import export
+    t0 = time.perf_counter()
+    rows = export(db, url, schema)
+    print(f"postgres: {len(rows)} tables from {db.name} -> schema {schema} (+ _truth) "
+          f"in {time.perf_counter() - t0:.1f}s, with primary and foreign keys")
     return 0
 
 

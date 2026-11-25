@@ -47,7 +47,9 @@ def stores_table(spec: StorySpec, cal: Calendar) -> pd.DataFrame:
             rows.append({"store_id": len(rows) + 1, "city": c.name,
                          "name": f"{spec.company.name} {c.name}" + (f" {j + 1}" if k > 1 else ""),
                          "opened_date": cal.dates[0] - timedelta(days=365 + 97 * len(rows))})
-    return pd.DataFrame(rows, columns=["store_id", "city", "name", "opened_date"])
+    df = pd.DataFrame(rows, columns=["store_id", "city", "name", "opened_date"])
+    # typed even when empty (Example B has no stores), so orders.store_id can reference it
+    return df.astype({"store_id": "int64", "city": object, "name": object, "opened_date": "datetime64[s]"})
 
 
 def _store_of_order(orders: pd.DataFrame, stores: pd.DataFrame, spec: StorySpec) -> pd.Series:

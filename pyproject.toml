@@ -32,4 +32,7 @@ package = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-markers = ["integration: needs the real homelab Ollama (skipped when unreachable)"]
+markers = [
+    "integration: needs the real homelab Ollama (skipped when unreachable)",
+    "postgres: needs S2D_TEST_PG (skipped otherwise)",
+]

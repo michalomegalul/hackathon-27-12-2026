@@ -107,8 +107,8 @@ file together.
     churn from inactivity. The real churn dates are in `_truth.customer_state`.
 24. **Parquet files have no pandas metadata**, so file hashes depend only on the data.
     Columns named `*_date`, `valid_from` and `valid_to` are stored as `DATE`.
-25. **No PK/FK DDL in DuckDB yet.** Tests check key integrity instead. Constraints come
-    with the exporter (stage 5).
+25. **No PK/FK DDL in DuckDB.** Tests check key integrity instead. The Postgres export
+    adds the constraints (decision 76).
 
 ## Detective
 
@@ -775,3 +775,19 @@ the top of `s2d/detective/scan.py`.
       columns, so the export keeps PK/FK constraints (decision 76). The `data_outage` decoy
       (Example B) is still not simulated: in the clean data it would be a real gap the
       detective should see, and the dirt layer does not reach the clean data.
+76. **Postgres export** (`s2d/sim/pg.py`; `python -m s2d.sim run … --pg URL`, or
+    `python -m s2d.sim pg RUN_DIR --pg URL` for an existing run). DuckDB's postgres extension
+    (`ATTACH … (TYPE postgres)`, binary COPY), so no new Python dependency; psycopg is not
+    installed. Analyst tables go to `--pg-schema` (default `public`), the hidden ones to
+    `_truth` (answer key, spec, customer state, calibration, dirt log). Tables of the same names
+    are dropped first (CASCADE), so a re-export replaces. Then every table gets its primary
+    key (`inventory_daily`: product_id + date) and the 19 foreign keys of `pg.FOREIGN_KEYS`;
+    Postgres validates them against the data when they are added. With a dirt level the
+    dirty copy is exported (its keys stay valid, decision 75), else the clean one.
+    `export.duckdb` now also carries the `_truth` tables so the Postgres copy has them.
+    - An empty `stores` table (Example B) is typed explicitly: an empty DataFrame column is
+      VARCHAR, and Postgres refused the `orders.store_id` FK (bigint vs varchar).
+    - Tested against an embedded Postgres 16 (`uv run --with pgserver`, not a project
+      dependency; Docker's daemon was not running): Example B, 40k customers, dirt medium:
+      19 tables in 1.3 s, row counts equal to DuckDB. `tests/test_pg.py` runs when
+      `S2D_TEST_PG` is set and is skipped otherwise.

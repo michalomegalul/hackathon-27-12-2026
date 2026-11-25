@@ -65,5 +65,5 @@ def write_world(world, out_dir: str | Path, dirt: str = "none") -> Path:
         ex.append(("_truth", "dirt_log", log, out / "export" / "_dirt_log.parquet"))
         for _, _, df, path in ex:
             pq.write_table(_to_arrow(df), path)
-        _write_db(out / "export.duckdb", ex)
+        _write_db(out / "export.duckdb", ex + [j for j in jobs if j[0] == "_truth"])
     return db_path
