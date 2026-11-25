@@ -31,20 +31,22 @@ from .kpis import CLOGLOG_KPIS, INVERSE_KPIS, METRIC, RATIO_KPIS, SMEAR_DAYS, KP
 
 PEN_FACTOR = 3.0          # PELT penalty = PEN_FACTOR * log(n)
 MIN_SIZE = 7              # shortest segment between breaks
-CONFIRM_DAYS = 3          # Binseg must find the same break within +-3 days
+RAMP_MAX = 35             # longest ramp the onset fit considers
+CONFIRM_DAYS = RAMP_MAX // 2  # Binseg must find a break within +-17 days (both inside one ramp)
 WINDOW = 28               # days before / after for size and DiD
 MIN_AFTER = 14            # an after-window shorter than this (data end) is not enough
 MIN_MEAN = 2.0            # shifts are only scanned on count series with >= 2 events a day
 PAIR_MAX_DAYS = 150       # an up break and a later down break within this are one event
-RAMP_MAX = 35             # longest ramp the onset fit considers
 BOOT = 200                # bootstrap resamples
 BLOCK = 7                 # bootstrap block length (days)
-MIN_CONFIDENCE = 0.5      # reported events need at least this (placebo z >= 4)
+Z_REPORT = 4.0            # reported shifts need placebo z >= this (set on no-story twins, DECISIONS 55)
+MIN_CONFIDENCE = 0.5      # = confidence at Z_REPORT
 EP_MIN, EP_CUM = 0.3, 0.8  # Adtributor: per-value and cumulative explanatory power
 MIN_SURPRISE = 0.002      # below this JS divergence a change counts as uniform
 SPECIFIC_GAIN = 1.5       # prefer a narrower segment if its effect is 1.5x larger
 MERGE_DAYS = 14           # candidates for one metric this close in time are one event
 SPIKE_Z, SPIKE_MIN_RUN = 3.5, 3
+SPIKE_MERGE_DAYS = 2      # spikes in several series starting this close are one spike
 STOCKOUT_RUN, STOCKOUT_MIN_RATE = 3, 5.0
 LAGS = (0, 7, 14, 28, 42)
 LAG_MIN_T = 3.0
@@ -76,6 +78,7 @@ class Candidate:
     def row(self) -> dict:
         d = asdict(self)
         d.pop("extra")
+        d["z"] = self.extra.get("z")
         return d
 
 
@@ -92,7 +95,7 @@ class Prepared:
     clean: np.ndarray | None = None  # s with spike days replaced by trend + seasonal
 
 
-def prepare(s: pd.Series) -> Prepared | None:
+def prepare(s: pd.Series, smear: int = 0) -> Prepared | None:
     v = s.to_numpy(dtype=float)
     if len(v) < 4 * WINDOW or np.nanstd(v) == 0:
         return None
@@ -101,17 +104,23 @@ def prepare(s: pd.Series) -> Prepared | None:
     r = res.resid
     # Noise scale of x itself. The STL residual is too small for this: the trend
     # soaks up the slow part of the noise. First differences see all of it and are
-    # robust to level shifts: sd = 1.4826 * MAD(diff) / sqrt(2).
-    d = np.diff(x)
+    # robust to level shifts: sd = 1.4826 * MAD(diff) / sqrt(2). A rolling KPI
+    # (repeat rate: `smear` = 30 days) is smooth from day to day, so its
+    # differences are taken `smear` days apart, where the windows do not overlap.
+    d = x[max(smear, 1):] - x[:-max(smear, 1)]
     scale = 1.4826 * np.median(np.abs(d - np.median(d))) / math.sqrt(2)
     if scale <= 1e-9:
         scale = float(np.std(d)) / math.sqrt(2)
     if scale <= 1e-9:
         return None
     rscale = 1.4826 * np.median(np.abs(r - np.median(r))) or scale
-    z = (x - np.median(x)) / scale
     rz = (r - np.median(r)) / rscale
-    clean = np.where(np.abs(rz) > SPIKE_Z, res.trend + res.seasonal, v)
+    spike = np.abs(rz) > SPIKE_Z
+    # break search and levels ignore spike days: a store closure on a holiday is
+    # one zero day, not the location of a level shift
+    x = np.where(spike, res.trend, x)
+    z = (x - np.median(x)) / scale
+    clean = np.where(spike, res.trend + res.seasonal, v)
     return Prepared(s, x, z, rz, scale, clean)
 
 
@@ -206,17 +215,13 @@ def _window_means(v: np.ndarray, length: int) -> np.ndarray:
     return (c[length:] - c[:-length]) / np.maximum(k[length:] - k[:-length], 1)
 
 
-def placebo_z(seg: np.ndarray, rest: np.ndarray | None, t0: int, t1: int, nb: int, na: int,
-              ratio: bool = False) -> float:
-    """How unusual is the DiD effect at (t0, t1) compared with the same statistic
-    at every other date of this series? Robust z against that placebo-in-time
-    distribution. This carries the series' own autocorrelation and sparsity,
-    which a 7-day bootstrap on 28 days does not see."""
-    gap = t1 - t0
-
+def did_effects(seg: np.ndarray, rest: np.ndarray | None, gap: int, nb: int = WINDOW, na: int = WINDOW,
+                ratio: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """The DiD statistic at every anchor t: before = [t-nb, t), after = [t+gap, t+gap+na).
+    Relative change vs the control for counts, difference for ratios. The placebo
+    test and the generator's recoverability gate (s2d/calibrate.py) both use it."""
     def effects(v):
         mb, ma = _window_means(v, nb), _window_means(v, na)
-        # anchor t: before = [t-nb, t), after = [t+gap, t+gap+na)
         t = np.arange(nb, len(v) - gap - na + 1)
         b, a = mb[t - nb], ma[t + gap]
         return t, (a - b) if ratio else a / np.maximum(b, 1e-9)
@@ -227,6 +232,22 @@ def placebo_z(seg: np.ndarray, rest: np.ndarray | None, t0: int, t1: int, nb: in
         e = es - er if ratio else es / np.maximum(er, 1e-9) - 1
     else:
         e = es if ratio else es - 1
+    return t, e
+
+
+def robust_sd(v: np.ndarray) -> float:
+    v = v[~np.isnan(v)]
+    sd = 1.4826 * float(np.median(np.abs(v - np.median(v)))) if len(v) else 0.0
+    return sd if sd > 1e-9 else (float(np.std(v)) if len(v) else 0.0) or 1e-9
+
+
+def placebo_z(seg: np.ndarray, rest: np.ndarray | None, t0: int, t1: int, nb: int, na: int,
+              ratio: bool = False) -> float:
+    """How unusual is the DiD effect at (t0, t1) compared with the same statistic
+    at every other date of this series? Robust z against that placebo-in-time
+    distribution. This carries the series' own autocorrelation and sparsity,
+    which a 7-day bootstrap on 28 days does not see."""
+    t, e = did_effects(seg, rest, t1 - t0, nb, na, ratio)
     here = e[t == t0]
     if len(here) == 0:
         return 0.0
@@ -235,9 +256,7 @@ def placebo_z(seg: np.ndarray, rest: np.ndarray | None, t0: int, t1: int, nb: in
     if len(null) < 20:
         return 0.0
     med = np.median(null)
-    sd = 1.4826 * np.median(np.abs(null - med))
-    if sd <= 1e-9:
-        sd = float(np.std(null)) or 1e-9
+    sd = robust_sd(null)
     _last_placebo["max_ratio"] = float(abs(here[0] - med) / (np.max(np.abs(null - med)) or 1e-9))
     return float(abs(here[0] - med) / sd)
 
@@ -246,7 +265,8 @@ _last_placebo: dict = {}
 
 
 def confidence_from_z(z: float) -> float:
-    return float(np.clip((z - 2.0) / 4.0, 0.0, 1.0))
+    """0.5 at the reporting threshold Z_REPORT, 0 two units below it, 1 two units above."""
+    return float(np.clip(0.5 + (z - Z_REPORT) / 4.0, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------- calendar
@@ -329,10 +349,64 @@ def _rest(ks: KPISet, kpi: str, seg: str, s: pd.Series) -> pd.Series | None:
                if k == kpi and sg.endswith(";" + second) and sg.startswith(first_dim + "=") and sg != seg]
         if sib:
             return sum(sib).reindex(s.index)
+    if len(parts) == 1 and seg.startswith("category="):
+        # an order counts once per category it contains, so "everyone minus these
+        # categories" is not a count of anything: compare with the other categories
+        cats = set(seg.split("=", 1)[1].split(","))
+        others = [v for (k, sg), v in ks.series.items()
+                  if k == kpi and sg.startswith("category=") and ";" not in sg and sg.split("=", 1)[1] not in cats]
+        return sum(others).reindex(s.index) if others else None
     total = ks.get(kpi, "")
     if total is None:
         return None
     return (total.reindex(s.index) - s).clip(lower=0)
+
+
+@dataclass
+class TestArrays:
+    seg: np.ndarray            # what the DiD and the placebo run on
+    rest: np.ndarray | None    # its control (None: no control group)
+    raw_seg: np.ndarray        # before the cloglog transform and the holiday mask
+    raw_rest: np.ndarray | None
+    ratio: bool
+    index: pd.DatetimeIndex
+
+
+def test_arrays(ks: KPISet, kpi: str, seg: str, s: pd.Series | None = None, pr: Prepared | None = None,
+                cache: dict | None = None) -> TestArrays | None:
+    """Segment and control arrays exactly as the shift test sees them: spike days
+    replaced (counts), cloglog (shares), holidays masked (counts)."""
+    s = s if s is not None else _union_series(ks, kpi, seg)
+    if s is None:
+        return None
+    ratio = kpi in RATIO_KPIS
+    rest = _rest(ks, kpi, seg, s)
+    sv = s.to_numpy(float) if ratio else despike(s, pr or prepare(s))
+    if rest is None:
+        rv = None
+    else:
+        rest = rest.reindex(s.index)
+        if ratio:
+            rv = rest.to_numpy(float)
+        else:
+            ck = (kpi, seg, "rest")
+            if cache is not None and ck in cache:
+                rv = cache[ck]
+            else:
+                rv = despike(rest)
+                if cache is not None:
+                    cache[ck] = rv
+    raw_sv, raw_rv = sv, rv
+    if kpi in CLOGLOG_KPIS:
+        # P(buy in 30 d) = 1 - exp(-30 * rate) for a Poisson buyer, so cloglog(r) =
+        # log(30 * rate): a seasonal multiplier common to every segment becomes
+        # an additive constant and cancels in the DiD, whatever the base rate
+        sv, rv = cloglog(sv), (None if rv is None else cloglog(rv))
+    if not ratio:
+        hol = holiday_mask(s.index)
+        sv = np.where(hol, np.nan, sv)
+        rv = None if rv is None else np.where(hol, np.nan, rv)
+    return TestArrays(sv, rv, raw_sv, raw_rv, ratio, s.index)
 
 
 def _rest_ratio(ks: KPISet, kpi: str, seg: str, s: pd.Series) -> pd.Series | None:
@@ -448,7 +522,7 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         return f"C{n_id:03d}"
 
     for (kpi, seg), s in ks.series.items():
-        pr = prepare(s)
+        pr = prepare(s, SMEAR_DAYS.get(kpi, 0))
         if pr is None:
             continue
         preps[(kpi, seg)] = pr
@@ -520,31 +594,10 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
                 if fb is not None:
                     raw.insert(0, fb)
                 continue
-        rest = _rest(ks, c.kpi, c.segment, s)
         ratio = c.kpi in RATIO_KPIS
         pr = preps.get((c.kpi, c.segment)) or prepare(s)
-        sv = s.to_numpy(float) if ratio else despike(s, pr)
-        if rest is None:
-            rv = None
-        else:
-            rest = rest.reindex(s.index)
-            if ratio:
-                rv = rest.to_numpy(float)
-            else:
-                ck = (c.kpi, c.segment, "rest")
-                if ck not in clean_rest:
-                    clean_rest[ck] = despike(rest)
-                rv = clean_rest[ck]
-        raw_sv, raw_rv = sv, rv
-        if c.kpi in CLOGLOG_KPIS:
-            # P(buy in 30 d) = 1 - exp(-30 * rate) for a Poisson buyer, so cloglog(r) =
-            # log(30 * rate): a seasonal multiplier common to every segment becomes
-            # an additive constant and cancels in the DiD, whatever the base rate
-            sv, rv = cloglog(sv), (None if rv is None else cloglog(rv))
-        if not ratio:
-            hol = holiday_mask(s.index)
-            sv = np.where(hol, np.nan, sv)
-            rv = None if rv is None else np.where(hol, np.nan, rv)
+        ta = test_arrays(ks, c.kpi, c.segment, s, pr, clean_rest)
+        sv, rv, raw_sv, raw_rv = ta.seg, ta.rest, ta.raw_seg, ta.raw_rest
         b = c.extra["t0"]
         t0, t1 = ramp_onset(onset_series(pr.x, sv, rv, ratio), b,
                             max(c.extra["lo"], b - 60), min(c.extra["right"], b + 60))
@@ -581,9 +634,16 @@ def scan(ks: KPISet, seed: int = 0) -> list[Candidate]:
         if fb is not None and c.status != "reported":
             raw.insert(0, fb)
 
-    out += price_candidates(ks, rng)
-    reported = merge([c for c in out if c.status == "reported"])
-    out = [c for c in out if c.status != "reported"] + reported
+    prices = price_candidates(ks, rng)
+    out += prices
+    # a significant price response below the z threshold can still be corroborated
+    # by a confirmed shift at the same time (see merge)
+    pool = [c for c in out if c.status == "reported"] + [
+        c for c in prices if c.status == "not_confirmed" and c.extra.get("significant")]
+    reported = merge(pool)
+    mirrors(reported)
+    churn_consequences(reported)
+    out = [c for c in out if not any(c is p for p in pool)] + pool
     out += spikes(ks, preps)
     out += stockouts(ks)
     for c in sorted(out, key=lambda c: (c.status != "reported", c.start_date, c.metric)):
@@ -624,20 +684,17 @@ def price_candidates(ks: KPISet, rng) -> list[Candidate]:
         cats = sorted(g["category"].unique())
         day = pd.Timestamp(day)
         seg_s = _union_series(ks, "orders", "category=" + ",".join(cats))
-        others = [ks.get("orders", f"category={c}") for c in by_cat["category"].unique() if c not in cats]
-        others = [o for o in others if o is not None]
-        if seg_s is None or not others:
-            continue
-        rest = sum(others)
+        ta = None if seg_s is None else test_arrays(ks, "orders", "category=" + ",".join(cats), seg_s)
+        if ta is None or ta.rest is None:
+            continue  # control = the other categories (see _rest)
         t0 = int(seg_s.index.get_indexer([day])[0])
         if t0 < 0:
             continue
         w = _windows(len(seg_s), t0, t0 + 7)  # allow one week for the response to settle
         if w is None:
             continue
-        point, ci, _ = did(seg_s.to_numpy(float), rest.to_numpy(float), *w, rng)
-        z = placebo_z(seg_s.to_numpy(float), rest.to_numpy(float), t0, t0 + 7,
-                      w[0].stop - w[0].start, w[1].stop - w[1].start)
+        point, ci, _ = did(ta.seg, ta.rest, *w, rng)
+        z = placebo_z(ta.seg, ta.rest, t0, t0 + 7, w[0].stop - w[0].start, w[1].stop - w[1].start)
         mr = _last_placebo.get("max_ratio", 0)
         pct = float(g["pct"].median())
         c = Candidate(
@@ -649,7 +706,8 @@ def price_candidates(ks: KPISet, rng) -> list[Candidate]:
                       f"kategorií proti ostatním {100 * point:+.1f} %, 95% CI {100 * ci[0]:+.1f}..{100 * ci[1]:+.1f} %"),
             series="orders|category=" + ",".join(cats), ci=(round(100 * ci[0], 1), round(100 * ci[1], 1)),
             extra={"source": "price", "price_pct": pct, "z": round(z, 2), "max_ratio": round(mr, 2)})
-        if ci[0] <= 0 <= ci[1] or c.confidence < MIN_CONFIDENCE:
+        c.extra["significant"] = not ci[0] <= 0 <= ci[1]
+        if not c.extra["significant"] or c.confidence < MIN_CONFIDENCE:
             c.status = "not_confirmed"
         out.append(c)
     return out
@@ -661,7 +719,9 @@ def price_candidates(ks: KPISet, rng) -> list[Candidate]:
 def merge(cands: list[Candidate]) -> list[Candidate]:
     """One event per (metric, direction, time). Inside a group, start from the
     broadest segment and move to a narrower one only if its effect is at least
-    SPECIFIC_GAIN times larger. A price-response candidate wins its group."""
+    SPECIFIC_GAIN times larger. A price-response candidate wins its group, and a
+    significant one below the z threshold is reported if a confirmed shift in the
+    same group corroborates it (two independent tests agree)."""
     cands = sorted(cands, key=lambda c: c.start_date)
     groups: list[list[Candidate]] = []
     for c in cands:
@@ -676,8 +736,15 @@ def merge(cands: list[Candidate]) -> list[Candidate]:
     out = []
     for g in groups:
         price = [c for c in g if c.extra.get("source") == "price"]
+        confirmed = [c for c in g if c.status == "reported"]
+        if price and not confirmed:
+            continue  # a weak price response alone stays not_confirmed
         if price:
             best = price[0]
+            if best.status != "reported":
+                best.status = "reported"
+                best.confidence = max(best.confidence, max(c.confidence for c in confirmed))
+                best.evidence += "; potvrzeno posunem ve stejném čase: " + ", ".join(c.series for c in confirmed)
         else:
             g.sort(key=lambda c: (len(_seg_keys(c.segment)), c.kpi != "orders", -c.extra.get("z", 0)))
             best = g[0]
@@ -701,6 +768,55 @@ def merge(cands: list[Candidate]) -> list[Candidate]:
         best.extra["also_seen_in"] = [c.series for c in g if c is not best]
         out.extend(g)
     return out
+
+
+def _in_control(a: str, b: str) -> bool:
+    """Is segment b part of segment a's DiD control (see _rest)? Same dimension,
+    other value (city=Praha vs city=Brno), or for a pair the same second key and
+    another value of the first (Praha stores vs Brno stores)."""
+    pa, pb = a.split(";"), b.split(";")
+    if len(pa) != len(pb) or a == b or "," in a + b:
+        return False
+    if len(pa) == 1:
+        return pa[0].split("=")[0] == pb[0].split("=")[0]
+    return pa[1] == pb[1] and pa[0].split("=")[0] == pb[0].split("=")[0]
+
+
+def mirrors(cands: list[Candidate]) -> None:
+    """A big drop in one segment makes its siblings look up against a control that
+    contains it (and the other way round). Of two reported shifts on the same KPI,
+    in opposite directions, within MERGE_DAYS, where each is in the other's
+    control, only the one with the larger placebo z is real."""
+    rep = [c for c in cands if c.status == "reported" and c.kind == "shift"]
+    for a in rep:
+        for b in rep:
+            if (a is not b and a.kpi == b.kpi and a.direction != b.direction and a.status == "reported"
+                    and b.status == "reported" and _in_control(a.segment, b.segment)
+                    and abs((pd.Timestamp(a.start_date) - pd.Timestamp(b.start_date)).days) <= MERGE_DAYS
+                    and a.extra.get("z", 0) < b.extra.get("z", 0)):
+                a.status = "mirror"
+                a.evidence += f"; zrcadlo změny v {b.series} (je v kontrolní skupině)"
+
+
+def _overlap(a: str, b: str) -> bool:
+    ka, kb = _seg_keys(a), _seg_keys(b)
+    return bool(ka & kb) or not ka or not kb
+
+
+def churn_consequences(cands: list[Candidate]) -> None:
+    """Customers who leave stop buying: a purchase drop in a segment that starts
+    from 21 days before to 60 days after a confirmed churn rise in an overlapping
+    segment is that churn's consequence, not an event of its own."""
+    churn = [c for c in cands if c.status == "reported" and c.metric == "churn_hazard" and c.direction == "up"]
+    for c in cands:
+        if c.status != "reported" or c.metric != "purchase_rate" or c.direction != "down" or c.kind != "shift":
+            continue
+        for r in churn:
+            dt = (pd.Timestamp(c.start_date) - pd.Timestamp(r.start_date)).days
+            if -21 <= dt <= 60 and _overlap(c.segment, r.segment):
+                c.status = "explained_by_churn"
+                c.evidence += f"; důsledek odchodu zákazníků ({r.series} od {r.start_date})"
+                break
 
 
 # ---------------------------------------------------------------- lag search
@@ -755,6 +871,8 @@ def spikes(ks: KPISet, preps: dict) -> list[Candidate]:
         # an artefact of that estimate, not something the data can show
         if kpi in ("revenue", "churn_onsets", "repeat_rate") or ";" in seg:
             continue
+        if kpi not in RATIO_KPIS and pr.s.mean() < MIN_MEAN:
+            continue  # 1 -> 5 new customers in a day is no spike; same rule as for shifts
         hot = np.abs(pr.resid_z) > SPIKE_Z
         i, n = 0, len(hot)
         while i < n:
@@ -777,23 +895,26 @@ def spikes(ks: KPISet, preps: dict) -> list[Candidate]:
                 series=f"{kpi}|{seg}")
             if j - i < SPIKE_MIN_RUN:
                 c.status = "transient"
+            elif c.confidence < MIN_CONFIDENCE:
+                c.status = "not_confirmed"
             elif reason := calendar_reason(day):
                 c.status = "explained_by_calendar"
                 c.evidence += f"; {reason}"
             out.append(c)
             i = j
-    # the same day in several series is one spike: keep the broadest reported one
-    seen: dict[tuple, Candidate] = {}
-    for c in out:
-        if c.status != "reported":
-            continue
-        k = (c.metric, c.start_date)
-        if k in seen and len(_seg_keys(seen[k].segment)) <= len(_seg_keys(c.segment)):
+    # the same spike in several series (start within SPIKE_MERGE_DAYS) is one
+    # spike: keep the broadest reported one
+    kept: list[Candidate] = []
+    for c in sorted((c for c in out if c.status == "reported"), key=lambda c: c.start_date):
+        same = [k for k in kept if k.metric == c.metric and abs(
+            (pd.Timestamp(k.start_date) - pd.Timestamp(c.start_date)).days) <= SPIKE_MERGE_DAYS]
+        if not same:
+            kept.append(c)
+        elif len(_seg_keys(same[0].segment)) <= len(_seg_keys(c.segment)):
             c.status = "merged"
         else:
-            if k in seen:
-                seen[k].status = "merged"
-            seen[k] = c
+            same[0].status = "merged"
+            kept[kept.index(same[0])] = c
     return out
 
 

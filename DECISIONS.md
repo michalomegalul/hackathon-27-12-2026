@@ -266,3 +266,31 @@ the top of `s2d/detective/scan.py`.
     (the spike has its own detector). Holidays are NaN in both segment and control:
     stores close and the e-shop does not, so a channel's control has a different holiday
     response and the DiD alone does not cancel it.
+53. **Detector fixes found while making Example A recoverable.** Each is structural; none
+    was fitted to an answer key, and the false-positive budget is re-set afterwards on
+    twins (decision 55).
+    - **Break confirmation ±17 days** (`CONFIRM_DAYS = RAMP_MAX // 2`, was ±3). On a 30-day
+      ramp PELT and Binseg cut at different points (Example A E5, calibrated: PELT 09-28,
+      Binseg 09-18), so the ramp was never a candidate. The ramp fit decides the onset anyway.
+    - **Break search ignores spike days** (x = trend there). A one-day store closure on a
+      holiday is not the location of a level shift.
+    - **Noise scale of a rolling KPI** (repeat rate) from differences 30 days apart, where
+      the windows do not overlap. Day-to-day differences of a 30-day rolling share are
+      tiny, and PELT then put a break every ten days.
+    - **Category control = the other categories.** An order counts once per category it
+      contains, so "everyone minus these categories" is not a count of anything. The price
+      test uses the same arrays as the shift test (spike days and holidays cleaned).
+    - **Mirrors.** A big drop in one segment makes its siblings look up against a control
+      that contains it (calibrated E5: Brno stores −39 % → Praha stores "+24.5 %"). Of two
+      reported shifts on one KPI, opposite directions, ≤ 14 days apart, each in the other's
+      control, only the one with the larger z is kept (`mirror`).
+    - **Churn consequences.** Customers who leave stop buying. A purchase drop that starts
+      21 days before to 60 days after a confirmed churn rise in an overlapping segment is
+      `explained_by_churn`, not an event of its own.
+    - **Price corroboration.** A price response whose CI excludes 0 but whose z is below
+      the threshold is reported if a confirmed shift with the same metric and direction in
+      the same 14-day group backs it (two independent tests agree). It then wins the group.
+    - **Spikes:** not on series too sparse for shifts (mean < 2/day: 1 → 5 new customers is
+      not a spike), spikes starting ≤ 2 days apart are one, and they need the global
+      confidence ≥ 0.5 like everything else (max |z| ≥ 5.5).
+    - **`z` is in every candidate row** (detective.json), next to the confidence.
