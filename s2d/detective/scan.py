@@ -12,7 +12,7 @@ Pipeline per series:
   DiD vs the rest of the population, 7-day moving-block bootstrap, 95 % CI
 Hierarchy: everyone and single-dimension series are always scanned; a pair of
 dimensions only under a parent with a confirmed change in the same metric
-(within DRILL_DAYS). Then: merge duplicates across series, lag search for churn, calendar filter,
+(CI excludes 0, z >= Z_DRILL, within DRILL_DAYS). Then: merge duplicates across series, lag search for churn, calendar filter,
 spikes and stockouts.
 """
 
@@ -41,7 +41,7 @@ MIN_MEAN = 2.0            # shifts are only scanned on count series with >= 2 ev
 PAIR_MAX_DAYS = 150       # an up break and a later down break within this are one event
 BOOT = 200                # bootstrap resamples
 BLOCK = 7                 # bootstrap block length (days)
-Z_REPORT = 5.0            # reported shifts need placebo z >= this (hierarchical scan, set on no-story twins, DECISIONS 57)
+Z_REPORT = 5.25           # reported shifts need placebo z >= this (hierarchical scan, set on no-story twins, DECISIONS 57)
 MIN_CONFIDENCE = 0.5      # = confidence at Z_REPORT (spikes; shifts compare z itself)
 EP_MIN, EP_CUM = 0.3, 0.8  # Adtributor: per-value and cumulative explanatory power
 MIN_SURPRISE = 0.002      # below this JS divergence a change counts as uniform
@@ -53,6 +53,7 @@ STOCKOUT_RUN, STOCKOUT_MIN_RATE = 3, 5.0
 LAGS = (0, 7, 14, 28, 42)
 LAG_MIN_T = 3.0
 LAG_MATCH_DAYS = 14
+Z_DRILL = 4.0             # a parent change this strong (and CI excluding 0) opens its pairs
 DRILL_DAYS = 21           # a pair is tested only within this of a confirmed parent change
 CALENDAR_MAX_DAYS = 10    # only spikes and temporary changes shorter than this can be "just the calendar"
 
@@ -570,8 +571,9 @@ def _parent_of(parent: Candidate, kpi: str, seg: str) -> bool:
 def scan(ks: KPISet, seed: int = 0, stats: dict | None = None) -> list[Candidate]:
     """Hierarchical scan. Level 0 (everyone) and level 1 (one dimension) series are
     always scanned. A pair (city=Brno;channel=store) is scanned only under a parent
-    with a confirmed change in the same metric, and only its shifts that start
-    within DRILL_DAYS of that change are tested. `stats` receives how many series
+    with a confirmed change in the same metric (CI excludes 0, z >= Z_DRILL: the
+    parent need not be reportable, it is diluted by its other half), and only its
+    shifts whose ramp lies within DRILL_DAYS of that change are tested. `stats` receives how many series
     and DiD tests that took."""
     rng = np.random.default_rng(seed)  # bootstrap only; fixed so a run is repeatable
     preps: dict[tuple[str, str], Prepared] = {}
@@ -676,7 +678,8 @@ def scan(ks: KPISet, seed: int = 0, stats: dict | None = None) -> list[Candidate
     prices = price_candidates(ks, rng)
     st["price_tests"] = len(prices)
     # drill-down: pairs under a confirmed level-0/1 change of the same metric
-    parents = [c for c in out + prices if c.status == "reported" and c.kind == "shift"]
+    parents = [c for c in out + prices if c.kind == "shift" and c.status in ("reported", "not_confirmed")
+               and c.ci is not None and not c.ci[0] <= 0 <= c.ci[1] and c.extra.get("z", 0) >= Z_DRILL]
     pair_keys = [(kpi, seg) for kpi, seg in ks.series
                  if _level(seg) == 2 and any(_parent_of(p, kpi, seg) for p in parents)]
 
