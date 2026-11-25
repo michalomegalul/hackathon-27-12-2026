@@ -85,7 +85,8 @@ def run_sim(spec_yaml: str, n_customers: int | None):
         for reason in world.story.skipped:
             job.log(f"skipped {reason}")
         out = DATA_DIR / "runs" / job.id
-        db = write_world(world, out)
+        from s2d.sim.dirt import FROM_SPEC
+        db = write_world(world, out, dirt=FROM_SPEC[spec.noise.messiness.value])
         job.log("no-story twin (same seed, no events)")
         write_world(simulate(without_story(spec)), out / "twin")
         from s2d import verify
@@ -356,16 +357,19 @@ def _verify_section(run_dir: str) -> None:
                "of the same dimension, 28 days after start + lag vs 28 before. Confirmed = 95 % CI excludes 0, "
                "direction as in the story, placebo z ≥ 3.")
 
-    def fmt(v):
-        return "–" if v is None else f"{v:+.1f} %"
+    def fmt(v, unit="%"):
+        if v is None:
+            return "–"
+        return f"{v:+.1f} %" if unit == "%" else f"{v:+.2f} {unit}"
     rows = []
     for r in ver["tests"]:
         tw = r.get("twin", {})
+        mu = r.get("measured_unit", "%")
         rows.append({
             "událost": r["event_id"], "tvrzení": r["claim_cs"],
             "test": f"{r['kpi']} · {r['segment'] or 'všichni'} · od {r['T']}",
-            "příběh": fmt(r["story_pct"]), "v okně": fmt(r["expected_pct"]),
-            "naměřeno": fmt(r.get("measured_pct")),
+            "příběh": fmt(r["story_pct"], r.get("unit", "%")), "v okně": fmt(r["expected_pct"]),
+            "naměřeno": fmt(r.get("measured_pct"), mu),
             "95% CI": (f"[{r['ci_pct'][0]:+.1f}, {r['ci_pct'][1]:+.1f}]" if r.get("ci_pct") else "–"),
             "z": r.get("z"), "p (placebo)": r.get("p_placebo"),
             "příběh ✓": "✅" if r["confirmed"] else "❌",
@@ -377,6 +381,9 @@ def _verify_section(run_dir: str) -> None:
     st.caption("Only confirmed events are told. " + (f"Narrator: {ver['narration']['source']}"
                                                       if "narration" in ver else "Template, no LLM."))
     for r in ver["tests"]:
+        if "groups" in r:
+            _join_lag_section(r)
+            continue
         if "series" not in r:
             continue
         mark = "✅" if r["confirmed"] else "❌"
@@ -386,10 +393,43 @@ def _verify_section(run_dir: str) -> None:
                 st.write(f"Ceny dotčených produktů: {fmt(r['price']['measured_pct'])} "
                          f"(příběh {fmt(r['price']['story_pct'])}, {r['price']['products']} produktů)")
             ok = "same DiD as the test" if r.get("sql_matches") else "DIFFERENT from the test"
-            st.caption(f"Run it on story.duckdb (DuckDB). Gives did_pct = {r['sql_result']['did_pct']:+.2f} %: {ok}.")
+            st.caption(f"Run it on story.duckdb (DuckDB). Gives did_pct = {r['sql_result']['did_pct']:+.2f} "
+                       f"{r.get('measured_unit', '%')}: {ok}.")
             st.code(r["sql"], language="sql")
             if "price" in r:
                 st.code(r["price"]["sql"], language="sql")
+
+
+def _join_lag_section(r: dict) -> None:
+    """The JOIN + lag test: late vs on-time parcels and who left 30-60 days later."""
+    import altair as alt
+
+    mark = "✅" if r["confirmed"] else "❌"
+    g, tw = r["groups"], r.get("twin", {})
+    with st.expander(f"{mark} {r['event_id']}: JOIN + lag: {r['claim_cs']}", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Odešli po pozdní zásilce", f"{g['late_left_pct']:.1f} %", help=f"{g['late_parcels']} zásilek")
+        c2.metric("Odešli po včasné zásilce", f"{g['on_time_left_pct']:.1f} %", help=f"{g['on_time_parcels']} zásilek")
+        c3.metric("Rozdíl", f"{r['measured_pct']:+.2f} p. b.", f"z = {r['z']}", delta_color="off")
+        st.caption(f"Parcels in {r['segment']} delivered {r['after'][0]} .. {r['after'][1]} (customers ⋈ orders ⋈ "
+                   f"deliveries). 'Left 30-60 days later' = it was the customer's last order and one average gap "
+                   f"after it falls 30-60 days after the parcel. Before the switch: "
+                   f"{r['placebo_before']['diff_pp']:+.2f} p. b., z {r['placebo_before']['z']}. "
+                   f"Twin: {tw.get('measured_pct', 0):+.2f} p. b., z {tw.get('z')}.")
+        off = r.get("offsets")
+        if off:
+            df = pd.DataFrame({"dní po doručení": off["bin_start"] * 2,
+                               "% zásilek, po kterých zákazník odešel": off["late"] + off["on_time"],
+                               "zásilka": ["pozdě"] * len(off["late"]) + ["včas"] * len(off["on_time"])})
+            chart = alt.Chart(df).mark_bar(opacity=0.85).encode(
+                x=alt.X("dní po doručení:O"), xOffset="zásilka:N",
+                y="% zásilek, po kterých zákazník odešel:Q",
+                color=alt.Color("zásilka:N", scale=alt.Scale(domain=["pozdě", "včas"], range=["#c0392b", "#7f8c8d"]),
+                                legend=alt.Legend(orient="bottom")))
+            st.altair_chart(chart.properties(height=260), width="stretch")
+        ok = "same as the test" if r.get("sql_matches") else "DIFFERENT from the test"
+        st.caption(f"Run it on story.duckdb (DuckDB). Gives did_pct = {r['sql_result']['did_pct']:+.2f} p. b.: {ok}.")
+        st.code(r["sql"], language="sql")
 
 
 def _detective_section(run_dir: str, card_path: Path) -> None:

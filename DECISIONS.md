@@ -792,3 +792,23 @@ the top of `s2d/detective/scan.py`.
       19 tables in 1.3 s, row counts equal to DuckDB. `tests/test_pg.py` runs when
       `S2D_TEST_PG` is set and is skipped otherwise.
 77. **Review texts.** `python -m s2d.sim run` fills `reviews.text` from a text pool (`--texts POOL`; by default `data/text_pools/<company>.json`, else `generic.json`, if one exists; `--texts none` skips) with `texts.fill_reviews`: the pool key is the review's rating, topic and its product's category; `{produkt}` = product name, `{dny}` = the parcel's delay, `{objednavka}` = order id. No pool on disk yet (the overnight batch has not run), so the column stays empty until one exists. Tickets get no text.
+78. **Final check, Example B (2026-11-25): `python -m s2d.sim run examples/b.yaml --seed 42
+    --n-customers 40000` (calibrated, hard, dirt medium) and its twin, `python -m s2d.verify`:
+    story 6/6 confirmed, twin 0/6.** Sim 3.6 s per run at 40k (A: 4.8 s).
+
+    | test | measured | z | twin | twin z |
+    |---|---|---|---|---|
+    | E1 late share, Ostrava + Olomouc vs other cities | +49.5 pp (mean delay +2.17 d, story 2.5) | 70.2 | +0.4 pp | 0.4 |
+    | E1 mean rating | −1.54 points (story −0.9) | 14.0 | −0.17 | 1.6 |
+    | E2 leavers, city level | +87 % | 5.6 | −1.6 % | 0.3 |
+    | **E2 JOIN + lag** | **late 7.8 % of 6742 parcels vs on time 3.7 % of 5010, ×2.09, +4.05 pp [3.2, 4.9]** | **9.6** | −0.96 pp | 1.6 |
+    | E3 new customers (geek, mobily) | +44.5 % | 5.3 | −7.0 % | 0.6 |
+    | E3 orders | +16.9 % | 6.0 | +5.9 % | 2.1 |
+
+    Before the switch the same JOIN comparison gives −0.26 pp (z 0.6). The city-level leaver
+    test is confirmed on this seed (z 5.6) but not reliably (z 2.0–3.8 on seeds 1–5; 2.5 on
+    seed 42 at 30k); the JOIN test is (z 6.8–10.6). `scripts/late_churn_chart.py` draws
+    `docs/late_churn_b.png` from the verifier JSON (`offsets`): % of parcels after which the
+    customer left, by days to the estimated departure. The excess after a late parcel peaks
+    at about 10–40 days and fades by ~70; the 30–60-day window catches its middle, not all
+    of it. The app's Score tab shows the test with its SQL and this chart.

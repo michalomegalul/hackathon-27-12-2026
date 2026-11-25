@@ -563,7 +563,7 @@ def test_join_lag(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_s
         placebo_before={"diff_pp": None if np.isnan(b_point) else round(b_point, 2),
                         "ci_pct": None if np.isnan(b_point) else [round(b_lo, 2), round(b_hi, 2)],
                         "z": None if np.isnan(b_point) else round(abs(b_point) / b_se, 2)},
-        sql=join_lag_sql(h, hi))
+        sql=join_lag_sql(h, hi), offsets=offset_histogram(con, h, hi))
     if check_sql:
         res = con.execute(out["sql"]).df()
         row = res[res["period"] == "after"].iloc[0]
@@ -571,6 +571,25 @@ def test_join_lag(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_s
                              for k, v in row.items()}
         out["sql_rows"] = res.to_dict("records")
         out["sql_matches"] = bool(abs(float(row["did_pct"]) - point) < 0.006)
+    return out
+
+
+OFFSET_BIN = 10
+OFFSET_MAX = 150
+
+
+def offset_histogram(con, h: Hypothesis, hi: date) -> dict:
+    """% of parcels (per group) after which the customer left, by days from the parcel to the
+    estimated departure, in OFFSET_BIN-day bins: where the 30-60 days come from."""
+    df = departure_offsets(con, h, hi)
+    edges = np.arange(0, OFFSET_MAX + OFFSET_BIN, OFFSET_BIN)
+    out = {"bin_start": edges[:-1].tolist()}
+    for name, late in (("late", True), ("on_time", False)):
+        g = df[df["late"].astype(bool) == late]
+        n = len(g)
+        counts, _ = np.histogram(g["offset"].dropna(), bins=edges)
+        out[name] = (100 * counts / max(n, 1)).round(3).tolist()
+        out[f"{name}_parcels"] = n
     return out
 
 
@@ -687,7 +706,8 @@ def verify_con(con, spec: StorySpec, key: pd.DataFrame | None, twin_con=None, ch
         twin = [test(twin_con, h, tlo, thi, check_sql=check_sql) for h in hyps]
         for r, t in zip(rows, twin):
             r["twin"] = {k: t.get(k) for k in ("measured_pct", "ci_pct", "z", "p_placebo", "confirmed",
-                                                 "status", "series", "sql_matches")}
+                                                 "status", "series", "sql_matches", "groups", "offsets",
+                                                 "placebo_before", "sql_result")}
         res["twin_confirmed"] = sum(t["confirmed"] for t in twin)
     return res
 
