@@ -692,3 +692,26 @@ the top of `s2d/detective/scan.py`.
 71. **`stores` table** (store_id, city, name, opened_date): `per_city_with_store` stores in every
     city with a store. `orders.store_id` is set for store orders: the customer's home store,
     customer_id modulo the city's stores (no RNG).
+72. **Subscriptions** (`s2d/sim/subscriptions.py`, decision 60). A segment holds subscriptions if
+    `segment.subscription` is true, or, when the field is left out, if its id looks like one
+    (predplat…, subscri…, abonent): LLM-written specs get them without knowing the field.
+    Example A sets it on `predplatitel`.
+    - Every subscriber has one subscription from signup (`started_at` = signup date, also before
+      the data). The plan (týdenní 7 / dvoutýdenní 14 / měsíční 30 / dvouměsíční 61 days) is
+      the one nearest to carrying 70 % of the customer's own orders; the other 30 % stay
+      ad-hoc Poisson orders. Scheduled orders come every plan interval from a random phase,
+      are shipped through the e-shop (if the shop has one), and carry `orders.subscription_id`.
+      Purchase-rate events do not change scheduled orders (a contract); churn does.
+    - A scheduled order is a purchase occasion: an upset customer may leave instead (68).
+      When a subscriber leaves for any reason, `cancelled_at` = that day and `cancel_reason` =
+      the churn cause (68; baseline churn becomes `už nepotřebuji` / `finance` / `jiné`).
+      Scheduled orders stop at cancellation (tested).
+    - **Upset only after a late parcel** (refines 68). With upset drawn for every parcel, the
+      noise term alone made on-time parcels cause defections, and in Example A 18 % of all
+      cancellations said `zpoždění` with no story behind them (5 % after this change). Upset
+      now starts at u ≥ 2 (a one-day delay gives ≈ 0.007, four days ≈ 0.33).
+    - **Verifier:** a churn effect whose target segments all hold subscriptions is tested on
+      **cancellations per day** (`subscriptions.cancelled_at`), not on inferred leavers.
+      Example A seed 42 (40k, medium, calibrated): **E4 is calibrated to +85.5 % hazard on its
+      own target (story +80 %), was ×2.2 widened to all of Brno; measured +93 % [49, 145],
+      z 4.7, twin z 0.2.** E2 (students, leavers) missed at z 2.95 this run: story 3/4, twin 0/4.

@@ -43,10 +43,11 @@ U_NOISE = 0.8
 RATING_TOP = 4.6                     # rating = round(RATING_TOP - RATING_PER_U * u + N(0, RATING_NOISE))
 RATING_PER_U = 0.75
 RATING_NOISE = 0.6
-# Upset = P(the customer leaves instead of ordering at their next purchase occasion).
-# A day late is mostly tolerated, three days is not: upset = DEFECT_MAX * clip((u - FROM) / SPAN).
+# Upset = P(the customer leaves instead of ordering at their next purchase occasion), only
+# after a late parcel. A day late is mostly tolerated, three days is not:
+# upset = DEFECT_MAX * clip((u - FROM) / SPAN).
 DEFECT_MAX = 0.5
-DEFECT_FROM = 1.5
+DEFECT_FROM = 2.0
 DEFECT_SPAN = 3.0
 UPSET_HALFLIFE = 45                  # days; an old disappointment fades
 
@@ -222,7 +223,7 @@ class Service:
         self.deliveries.append({"order_id": o, "courier": self.plan.of_city[t, city],
                                 "shipped": np.full(len(o), t + 1), "promised": np.full(len(o), promised),
                                 "delivered": delivered, "delay": delay})
-        up = upset_from(u_ship)
+        up = np.where(delay > 0, upset_from(u_ship), 0.0)
         bad = up > 0
         for d in np.unique(delivered[bad]):
             sel = bad & (delivered == d)

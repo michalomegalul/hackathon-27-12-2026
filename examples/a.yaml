@@ -17,7 +17,7 @@ entities:
     growth_per_year: 0.20
     segments:
       - {id: student,     share: 0.25, base_orders_per_month: 1.2, price_sensitivity: 2.0, base_churn_per_month: 0.04}
-      - {id: predplatitel, share: 0.30, base_orders_per_month: 2.0, price_sensitivity: 0.8, base_churn_per_month: 0.02}
+      - {id: predplatitel, share: 0.30, base_orders_per_month: 2.0, price_sensitivity: 0.8, base_churn_per_month: 0.02, subscription: true}
       - {id: bezny,       share: 0.45, base_orders_per_month: 0.8, price_sensitivity: 1.0, base_churn_per_month: 0.03}
   products:
     categories:

@@ -51,7 +51,7 @@ KPI = {"purchase_rate": "orders", "churn_hazard": "leavers", "acquisition_rate":
        "delivery_days": "late_share", "rating_mean": "rating"}
 KPI_CS = {"orders": "objednávky", "leavers": "odchody zákazníků", "new_customers": "noví zákazníci",
           "late_share": "podíl pozdních zásilek", "rating": "průměrné hodnocení",
-          "late_churn": "odchody po pozdní zásilce"}
+          "late_churn": "odchody po pozdní zásilce", "cancellations": "zrušená předplatná"}
 # Ratio KPIs: the daily value is a mean (late share in %, rating in points) and the DiD is a
 # difference in those units, not a relative change (scan.did(ratio=True)).
 RATIO = {"late_share": "pp", "rating": "b."}
@@ -62,6 +62,7 @@ COLUMNS = {
     "new_customers": {"city": "c.city", "channel": "c.preferred_channel", "segment": "c.segment"},
     "late_share": {"city": "c.city", "channel": "o.channel", "segment": "c.segment"},
     "rating": {"city": "c.city", "channel": "o.channel", "segment": "c.segment"},
+    "cancellations": {"city": "c.city", "channel": "c.preferred_channel", "segment": "c.segment"},
 }
 # JOIN + lag (DECISIONS 70): a late parcel, then the customer leaves 30-60 days later.
 LAG_FROM, LAG_TO = 30, 60
@@ -110,6 +111,9 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
     kpi = KPI.get(metric)
     if kpi is None:
         return None
+    subs = {sg.id for sg in spec.entities.customers.segments if sg.has_subscription}
+    if kpi == "leavers" and event.target.segment and set(event.target.segment) <= subs:
+        kpi = "cancellations"  # subscribers' churn is observed directly (DECISIONS 72)
     keys = [k for k in KEY_ORDER if _values(event.target, k)]
     dropped = [k for k in keys if k not in COLUMNS[kpi]]
     keys = [k for k in keys if k in COLUMNS[kpi]]
@@ -224,6 +228,8 @@ def _span(kpi: str, lo: date, hi: date) -> tuple[date, date]:
         return lo, hi
     if kpi == "new_customers":
         return lo + timedelta(days=WARMUP_DAYS), hi
+    if kpi == "cancellations":
+        return lo, hi
     return lo + timedelta(days=WARMUP_DAYS), hi - timedelta(days=LEAVER_EDGE_DAYS)
 
 
@@ -274,6 +280,14 @@ def _events_cte(h: Hypothesis, lo: date, hi: date) -> str:
   FROM orders o
   JOIN customers c USING (customer_id)
   WHERE {where}
+)"""
+    if h.kpi == "cancellations":
+        return f"""events AS (   -- one row per cancelled subscription, dated at cancellation
+  SELECT s.cancelled_at AS day,
+         {grp} AS grp
+  FROM subscriptions s
+  JOIN customers c USING (customer_id)
+  WHERE s.cancelled_at IS NOT NULL AND {where}
 )"""
     if h.kpi == "new_customers":
         return f"""events AS (   -- a new customer (signed up during the data), dated at the first order
@@ -723,6 +737,8 @@ def narrative_cs(res: dict) -> str:
              ("late_share", "up"): "přibylo pozdních zásilek", ("late_share", "down"): "ubylo pozdních zásilek",
              ("rating", "down"): "kleslo průměrné hodnocení", ("rating", "up"): "stouplo průměrné hodnocení",
              ("late_churn", "up"): "odcházelo víc zákazníků po pozdní zásilce",
+             ("cancellations", "up"): "přibylo zrušených předplatných",
+             ("cancellations", "down"): "ubylo zrušených předplatných",
              ("leavers", "up"): "přibylo odchodů zákazníků", ("leavers", "down"): "ubylo odchodů zákazníků",
              ("new_customers", "up"): "přibylo nových zákazníků", ("new_customers", "down"): "ubylo nových zákazníků"}
     out = []

@@ -214,6 +214,18 @@
                     "minimum": 0,
                     "title": "Base Churn Per Month",
                     "type": "number"
+                  },
+                  "subscription": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null,
+                    "title": "Subscription"
                   }
                 },
                 "required": [

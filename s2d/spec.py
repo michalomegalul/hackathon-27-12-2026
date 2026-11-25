@@ -167,6 +167,16 @@ class Segment(Strict):
     base_orders_per_month: Annotated[float, Field(gt=0, le=60)]
     price_sensitivity: Annotated[float, Field(ge=0, le=3)] = 1.0
     base_churn_per_month: Annotated[float, Field(ge=0, lt=1)]
+    # Customers of this segment hold a subscription (orders on schedule). None = guess from
+    # the id (predplatitel, subscriber, ...), so LLM-written specs get it without the field.
+    subscription: bool | None = None
+
+    @property
+    def has_subscription(self) -> bool:
+        if self.subscription is not None:
+            return self.subscription
+        low = self.id.lower()
+        return any(k in low for k in ("predplat", "předplat", "subscri", "abonent"))
 
 
 class Customers(Strict):

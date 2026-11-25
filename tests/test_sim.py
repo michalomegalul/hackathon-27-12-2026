@@ -67,7 +67,8 @@ def test_foreign_keys():
     for table, pk in [("customers", "customer_id"), ("products", "product_id"), ("orders", "order_id"),
                       ("order_items", "order_item_id"), ("payments", "payment_id"),
                       ("product_prices", "price_id"), ("deliveries", "delivery_id"),
-                      ("reviews", "review_id"), ("tickets", "ticket_id")]:
+                      ("reviews", "review_id"), ("tickets", "ticket_id"),
+                      ("subscriptions", "subscription_id"), ("stores", "store_id")]:
         assert t[table][pk].is_unique, f"{table}.{pk} not unique"
     for child, col, parent, pk in [("orders", "customer_id", "customers", "customer_id"),
                                    ("order_items", "order_id", "orders", "order_id"),
@@ -76,6 +77,8 @@ def test_foreign_keys():
                                    ("product_prices", "product_id", "products", "product_id"),
                                    ("deliveries", "order_id", "orders", "order_id"),
                                    ("orders", "store_id", "stores", "store_id"),
+                                   ("orders", "subscription_id", "subscriptions", "subscription_id"),
+                                   ("subscriptions", "customer_id", "customers", "customer_id"),
                                    ("reviews", "order_id", "orders", "order_id"),
                                    ("reviews", "customer_id", "customers", "customer_id"),
                                    ("tickets", "order_id", "orders", "order_id"),
@@ -90,6 +93,23 @@ def test_foreign_keys():
     assert (shipped["status"] == "completed").all() and (shipped["channel"] != "store").all()
     assert t["deliveries"]["order_id"].is_unique
     assert (orders["store_id"].notna() == (orders["channel"] == "store")).all()
+
+
+def test_subscriptions_stop_at_cancellation():
+    t = simulate(small_spec(), seed=3).tables
+    subs, orders = t["subscriptions"], t["orders"]
+    customers = t["customers"].set_index("customer_id")
+    assert (customers.loc[subs["customer_id"], "segment"] == "predplatitel").all()
+    assert subs["customer_id"].is_unique and len(subs) == (customers["segment"] == "predplatitel").sum()
+    m = orders.dropna(subset=["subscription_id"]).merge(subs, on="subscription_id", suffixes=("", "_s"))
+    assert (m["customer_id"] == m["customer_id_s"]).all()
+    assert not (m["order_date"] > m["cancelled_at"]).any()      # no scheduled order after cancelling
+    assert (subs["cancelled_at"].isna() == subs["cancel_reason"].isna()).all()
+    # an active subscriber gets an order about every plan interval
+    days = {"týdenní": 7, "dvoutýdenní": 14, "měsíční": 30, "dvouměsíční": 61}
+    gaps = m.sort_values("order_date").groupby("subscription_id")["order_date"].diff().dt.days.dropna()
+    plan = m.loc[gaps.index, "plan"].map(days)
+    assert (gaps == plan).mean() > 0.9
     # every order has at least one item, and its total matches the items
     items = t["order_items"].assign(line=lambda d: d.quantity * d.unit_price)
     totals = items.groupby("order_id")["line"].sum()

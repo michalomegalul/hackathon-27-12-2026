@@ -26,6 +26,7 @@ from .catalog import Catalog
 from .events import CompiledStory
 from .population import Population, target_mask
 from .service import Service
+from .subscriptions import SCHEDULED_SHARE, build_plans, subscriptions_table
 
 BASKET_EXTRA_ITEM_P = 0.6   # geometric basket size: mean 1/0.6 ≈ 1.7 items
 QUANTITY_P = 0.8            # geometric quantity per line: mean 1.25
@@ -95,12 +96,18 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
     churn_effects = _prepare_effects(spec, story, pop, cat, Metric.churn_hazard)
     buy_effects = _prepare_effects(spec, story, pop, cat, Metric.purchase_rate)
     holiday_factor = _holiday_factor(spec, pop, cal)
-    is_store_cust = np.array([c.channel == Channel.store for c in spec.company.channels])[pop.channel]
+    chan_is_store = np.array([c.channel == Channel.store for c in spec.company.channels])
     svc = Service(spec, cal, pop.n, pop.city, streams)
+    plans = build_plans(spec, pop.segment, pop.base_rate, pop.signup_day, streams["subscriptions"])
+    adhoc = np.where(plans.is_sub, 1 - SCHEDULED_SHARE, 1.0)  # subscribers: the rest is on schedule
+    chans = [c.channel for c in spec.company.channels]
+    # Scheduled orders are shipped: the e-shop if the shop has one, else the home channel.
+    sub_channel = chans.index(Channel.eshop) if Channel.eshop in chans else None
 
     churn_day = np.full(pop.n, -1)
     churn_cause = np.full(pop.n, "", dtype=object)
     order_customer, order_day, order_category, order_failed, order_retry = [], [], [], [], []
+    order_channel, order_sub = [], []
     n_orders_so_far = 0
 
     for t in range(cal.n_days):
@@ -120,7 +127,7 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
                                                 svc.rng_s)
 
         # 2. purchases. rate[i, c] = expected orders of customer i whose main item is in category c.
-        lam = pop.base_rate * cal.day_factor[t] * alive
+        lam = pop.base_rate * adhoc * cal.day_factor[t] * alive
         if cal.is_holiday[t]:
             lam = lam * holiday_factor
         rate = lam[:, None] * cat.category_weight[None, :]
@@ -136,6 +143,11 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
 
         total = rate.sum(axis=1)
         n_orders = rng_buy.poisson(total)
+        due = plans.days > 0
+        due &= plans.next_due == t
+        plans.next_due[due] += plans.days[due]
+        due &= alive
+        n_orders += due
         buyers = np.flatnonzero(n_orders)
         # An upset customer may leave at this purchase occasion instead of ordering.
         gone = buyers[svc.defect(buyers)]
@@ -143,11 +155,21 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
             churn_day[gone] = t
             churn_cause[gone] = "zpoždění"
             n_orders[gone] = 0
+            due[gone] = False
             buyers = np.flatnonzero(n_orders)
         who = np.repeat(buyers, n_orders[buyers])
+        # the first order of a due subscriber today is the scheduled one
+        first_of = np.concatenate([[0], np.cumsum(n_orders[buyers])[:-1]]).astype(np.int64)
+        is_sub = np.zeros(len(who), dtype=bool)
+        is_sub[first_of[due[buyers]]] = True
+        channel = pop.channel[who].copy()
+        if sub_channel is not None:
+            channel[is_sub] = sub_channel
 
-        # main category of each order, in proportion to rate[i, c]
-        cdf = np.cumsum(rate[who], axis=1) / total[who][:, None]
+        # main category of each order, in proportion to rate[i, c] (a scheduled order on a
+        # day the customer's store is closed still follows the usual category mix)
+        w = rate[who] + 1e-12 * cat.category_weight[None, :]
+        cdf = np.cumsum(w, axis=1) / w.sum(axis=1)[:, None]
         u = rng_buy.random(len(who))
         main_cat = np.minimum((cdf < u[:, None]).sum(axis=1), n_cats - 1)
 
@@ -156,21 +178,30 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
         retry_ok = rng_pay.random(len(who)) < RETRY_SUCCESS_P
         ids = np.arange(n_orders_so_far, n_orders_so_far + len(who))
         n_orders_so_far += len(who)
-        svc.on_orders(t, ids, who, is_store_cust[who], failed & ~retry_ok)
+        svc.on_orders(t, ids, who, chan_is_store[channel], failed & ~retry_ok)
 
         order_customer.append(who)
         order_day.append(np.full(len(who), t))
         order_category.append(main_cat)
         order_failed.append(failed)
         order_retry.append(retry_ok)
+        order_channel.append(channel)
+        order_sub.append(is_sub)
 
-    orders, items = _build_orders(spec, cal, pop, cat,
-                                  np.concatenate(order_customer), np.concatenate(order_day),
-                                  np.concatenate(order_category), rng_buy)
+    customer = np.concatenate(order_customer)
+    orders, items = _build_orders(spec, cal, pop, cat, customer, np.concatenate(order_day),
+                                  np.concatenate(order_category), rng_buy, np.concatenate(order_channel))
+    sub = np.concatenate(order_sub)
+    orders.insert(orders.columns.get_loc("channel") + 1, "subscription_id",
+                  pd.array(np.where(sub, plans.sub_id[customer], 0), dtype="Int64"))
+    orders.loc[~sub, "subscription_id"] = pd.NA
     payments, cancelled = _build_payments(spec, orders, rng_pay,
                                           np.concatenate(order_failed), np.concatenate(order_retry))
     orders["status"] = np.where(cancelled, "cancelled", "completed")
-    service = svc.tables(np.datetime64(cal.dates[0], "D"), orders, streams["timestamps"])
+    start = np.datetime64(cal.dates[0], "D")
+    service = svc.tables(start, orders, streams["timestamps"])
+    service["subscriptions"] = subscriptions_table(plans, pop.table["signup_date"], churn_day, churn_cause,
+                                                   start, streams["subscriptions"])
     return SimResult(churn_day, orders, items, payments, service, churn_cause)
 
 
@@ -221,11 +252,11 @@ def _churn_causes(idx: np.ndarray, t: int, pop: Population, churn_effects: list[
     return names[np.minimum(pick, len(parts) - 1)]
 
 
-def _build_orders(spec, cal, pop, cat, customer, day, main_cat, rng):
+def _build_orders(spec, cal, pop, cat, customer, day, main_cat, rng, channel_idx):
     n = len(customer)
     chan_names = np.array([c.channel.value for c in spec.company.channels], dtype=object)
     city_names = np.array([c.name for c in spec.company.cities], dtype=object)
-    channel = chan_names[pop.channel[customer]]
+    channel = chan_names[channel_idx]
 
     # Order time: stores are open 7:00-19:59, online follows ONLINE_HOURS.
     is_store = channel == Channel.store.value
