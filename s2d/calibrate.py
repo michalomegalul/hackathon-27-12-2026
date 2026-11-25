@@ -87,6 +87,16 @@ class Twin:
         self.con = verify.world_con(world)
         self.lo, self.hi = verify._range(self.con)
         self._cache: dict[str, pd.DataFrame] = {}
+        self._resolved: dict[tuple, verify.Hypothesis] = {}
+
+    def resolve(self, h: verify.Hypothesis) -> verify.Hypothesis:
+        """Control and unit as the verifier picks them (on the twin: no effect in it)."""
+        k = (h.event_id, h.metric, h.kpi)
+        if k not in self._resolved:
+            self._resolved[k] = verify.resolve(self.con, h, self.lo, self.hi)
+        r = self._resolved[k]
+        return verify.replace(h, vary=r.vary, treated=r.treated, fixed=r.fixed,
+                              control_mode=r.control_mode, absolute=r.absolute)
 
     def series(self, h: verify.Hypothesis) -> pd.DataFrame:
         k = verify._ctes(h, self.lo, self.hi)
@@ -98,18 +108,19 @@ class Twin:
 def _measure(twin: Twin, story_con, h: verify.Hypothesis | None) -> Measure:
     if h is None:
         return Measure(None, None, None, None)
+    h = twin.resolve(h)  # the verifier's control and unit for this test
     tw = verify.statistic(twin.series(h), h)
     st = verify.statistic(verify.series(story_con, h, twin.lo, twin.hi), h)
     if tw is None or st is None:
         return Measure(h.kpi, None, None, None)
     seg_tw, rest_tw, iT, na = tw
     seg_st, rest_st = st[0], st[1]
-    t, e_tw = scan.did_effects(seg_tw, rest_tw, 0, scan.WINDOW, na)
-    _, e_st = scan.did_effects(seg_st, rest_st, 0, scan.WINDOW, na)
+    t, e_tw = scan.did_effects(seg_tw, rest_tw, 0, scan.WINDOW, na, h.ratio)
+    _, e_st = scan.did_effects(seg_st, rest_st, 0, scan.WINDOW, na, h.ratio)
     at = np.flatnonzero(t == iT)
     if not len(at) or np.isnan(e_st[at[0]]) or np.isnan(e_tw[at[0]]):
         return Measure(h.kpi, None, None, None)
-    sigma = scan.robust_sd(verify.null_effects(seg_tw, rest_tw, iT, na))
+    sigma = scan.robust_sd(verify.null_effects(seg_tw, rest_tw, iT, na, h.ratio))
     effect = float(e_st[at[0]] - e_tw[at[0]])
     want = 1 if h.direction == "up" else -1
     return Measure(h.kpi, effect, sigma, max(0.0, want * effect) / sigma)
