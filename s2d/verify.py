@@ -790,7 +790,11 @@ def format_table(res: dict) -> str:
             lines.append(f"      left {LAG_FROM}-{LAG_TO} d after the parcel: late {g['late_left_pct']:.1f} % "
                          f"of {g['late_parcels']}, on time {g['on_time_left_pct']:.1f} % of {g['on_time_parcels']} "
                          f"(x{g['ratio']}); same test before the switch: {_u(pb['diff_pp'], 'pp')} z {pb['z']}")
-        if "sql_matches" in r:
+        if "sql_matches" in r and r["sql_result"].get("did_pct") is None:
+            m = r.get("measured_pct")
+            lines.append("      SQL gives no result " + ("(the event window is not measurable)" if m is None or m != m
+                                                         else f"but the test measured {_u(m, mu)}: MISMATCH"))
+        elif "sql_matches" in r:
             lines.append(f"      SQL gives {r['sql_result']['did_pct']:+.2f} {mu}: "
                          f"{'same as the test' if r['sql_matches'] else 'MISMATCH'}")
     lines.append(summary_line(res))
