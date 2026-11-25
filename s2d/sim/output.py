@@ -1,8 +1,10 @@
 """Write a simulated world to Parquet files and one DuckDB database.
 
-    out/customers.parquet ...           analyst tables
+    out/customers.parquet ...           analyst tables (clean)
     out/_truth/answer_key.parquet ...   hidden truth
     out/story.duckdb                    main schema = analyst, _truth schema = truth
+    out/export/*.parquet                the dirty copy (--dirt low|medium|high, s2d/sim/dirt.py)
+    out/export.duckdb                   the same, main = dirty tables, _truth.dirt_log
 """
 
 from pathlib import Path
@@ -26,7 +28,23 @@ def _to_arrow(df: pd.DataFrame) -> pa.Table:
     return table.replace_schema_metadata(None)
 
 
-def write_world(world, out_dir: str | Path) -> Path:
+def _write_db(path: Path, jobs) -> None:
+    path.unlink(missing_ok=True)
+    with duckdb.connect(str(path)) as con:
+        con.execute("CREATE SCHEMA _truth")
+        for schema, name, _, p in jobs:
+            con.execute(f"CREATE TABLE {schema}.{name} AS SELECT * FROM read_parquet(?)", [str(p)])
+
+
+def export_tables(world, level: str) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+    """The tables to export: the dirty copy for a level other than 'none' (seeded from the
+    world's `dirt` stream, so the same seed gives the same dirt)."""
+    from .dirt import dirty_copy
+    from .rng import make_streams
+    return dirty_copy(world.tables, level, make_streams(world.seed)["dirt"])
+
+
+def write_world(world, out_dir: str | Path, dirt: str = "none") -> Path:
     out = Path(out_dir)
     (out / "_truth").mkdir(parents=True, exist_ok=True)
 
@@ -38,9 +56,14 @@ def write_world(world, out_dir: str | Path) -> Path:
         pq.write_table(_to_arrow(df), path)
 
     db_path = out / "story.duckdb"
-    db_path.unlink(missing_ok=True)
-    with duckdb.connect(str(db_path)) as con:
-        con.execute("CREATE SCHEMA _truth")
-        for schema, name, _, path in jobs:
-            con.execute(f"CREATE TABLE {schema}.{name} AS SELECT * FROM read_parquet(?)", [str(path)])
+    _write_db(db_path, jobs)
+
+    if dirt != "none":
+        tables, log = export_tables(world, dirt)
+        (out / "export").mkdir(exist_ok=True)
+        ex = [("main", name, df, out / "export" / f"{name}.parquet") for name, df in tables.items()]
+        ex.append(("_truth", "dirt_log", log, out / "export" / "_dirt_log.parquet"))
+        for _, _, df, path in ex:
+            pq.write_table(_to_arrow(df), path)
+        _write_db(out / "export.duckdb", ex)
     return db_path

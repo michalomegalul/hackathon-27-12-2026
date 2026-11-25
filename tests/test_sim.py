@@ -2,6 +2,7 @@ import hashlib
 from datetime import date
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from s2d.spec import Effect, Event, load_spec
@@ -204,3 +205,23 @@ def test_churn_shock_hits_stated_target():
     r = report.iloc[0]
     assert r.stated_p == 0.15
     assert abs(r.realized_p - 0.15) < 0.02
+
+
+def test_dirt_only_touches_the_export_copy():
+    from s2d.sim.output import export_tables
+    world = simulate(small_spec(), seed=3)
+    clean = {k: v.copy() for k, v in world.tables.items()}
+    low, log_low = export_tables(world, "low")
+    high, log_high = export_tables(world, "high")
+    again, _ = export_tables(world, "high")
+    for k, v in clean.items():                       # the clean tables are untouched
+        pd.testing.assert_frame_equal(world.tables[k], v)
+    assert log_high["rows"].sum() > 3 * log_low["rows"].sum()
+    for k in high:                                   # same seed, same dirt
+        pd.testing.assert_frame_equal(high[k], again[k])
+    # keys stay valid: duplicates get new ids, NULLs never go into keys
+    assert high["customers"]["customer_id"].is_unique and high["payments"]["payment_id"].is_unique
+    assert len(high["customers"]) > len(clean["customers"])
+    assert high["orders"]["customer_id"].isin(high["customers"]["customer_id"]).all()
+    assert high["payments"]["order_id"].isin(high["orders"]["order_id"]).all()
+    assert (high["customers"]["city"] != clean["customers"]["city"].reindex(high["customers"].index)).any()

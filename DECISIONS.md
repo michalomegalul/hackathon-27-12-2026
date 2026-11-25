@@ -758,3 +758,20 @@ the top of `s2d/detective/scan.py`.
     (inventory_daily), pp DiD against the other products, at the same T as its first effect.
     Example A seed 42 (40k, uncalibrated): E3 zero-stock +78 pp (twin 0.00), sold-out tickets
     confirmed z ≈ 50 (twin z 0.2). Calibration does not touch emergent effects (decision 69).
+75. **Dirt layer** (`s2d/sim/dirt.py`). `--dirt none|low|medium|high`, default from
+    `noise.messiness` (light → low, heavy → high). It writes a **separate copy**
+    (`out/export/*.parquet`, `out/export.duckdb` with `_truth.dirt_log`: table, column, kind,
+    rows); `story.duckdb` stays clean, because the verifier, the detective and the scorer
+    read it. Seeded from the `dirt` stream: same seed, same dirt.
+    - Per level, the share of rows touched (low / medium / high): missing diacritics 1 / 5 /
+      15 %, typos (swap, drop, double, neighbouring QWERTZ key) 0.5 / 2 / 5 %, NULLs 0.5 / 2 /
+      5 % (phone 3×, review text 2×), duplicates 0.2 / 1 / 3 %, format variants 5 / 15 / 35 %.
+    - Where: customer names, cities (also `praha`, `PRAHA`, `Brno ` with a trailing space),
+      phone formats (`777123456`, `00420…`, `+420…` without spaces), NULL phone / e-mail /
+      gender; orders.city; duplicate customers (new id, e-mail in capitals or with `+1`) and
+      duplicate payments (a double submit, new id); couriers, review and ticket topics and
+      cancel reasons without diacritics; NULL review text.
+    - **Keys stay valid**: a duplicate gets a new id, NULLs only go into nullable non-key
+      columns, so the export keeps PK/FK constraints (decision 76). The `data_outage` decoy
+      (Example B) is still not simulated: in the clean data it would be a real gap the
+      detective should see, and the dirt layer does not reach the clean data.

@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--strict", action="store_true", help="fail on events that are not implemented yet")
     run.add_argument("--check", action="store_true", help="also run the no-story twin and print target vs realized")
     run.add_argument("--no-calibrate", action="store_true", help="skip the recoverability gate (s2d.calibrate)")
+    run.add_argument("--dirt", choices=["none", "low", "medium", "high"], default=None,
+                     help="messiness of the export copy (out/export*); default from the spec's noise.messiness")
     args = parser.parse_args(argv)
 
     spec = load_spec(args.spec)
@@ -51,7 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     if table is not None:
         world.truth["calibration"] = table
     t_sim = time.perf_counter() - t0 - t_cal
-    db = write_world(world, args.out)
+    from .dirt import FROM_SPEC
+    dirt = args.dirt or FROM_SPEC[spec.noise.messiness.value]
+    db = write_world(world, args.out, dirt=dirt)
     t_all = time.perf_counter() - t0
 
     for reason in world.story.skipped:
@@ -59,7 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"seed={world.seed}  days={spec.meta.days}  customers={world.population.n}")
     for name, df in world.tables.items():
         print(f"  {name:<15} {len(df):>9,} rows")
-    print(f"calibrated in {t_cal:.1f}s, simulated in {t_sim:.1f}s, written in {t_all - t_sim - t_cal:.1f}s -> {db}")
+    print(f"calibrated in {t_cal:.1f}s, simulated in {t_sim:.1f}s, written in {t_all - t_sim - t_cal:.1f}s -> {db}"
+          + (f" (+ export copy, dirt {dirt})" if dirt != "none" else ""))
 
     if args.check:
         twin = simulate(without_story(spec), seed=args.seed)
