@@ -878,3 +878,36 @@ the top of `s2d/detective/scan.py`.
     kavárny (quality issue, competitor), fitness (price change, subscriber churn,
     campaign), PC servis (outage, staff shortage, viral video: unsupported, + a price cut),
     víno (events in the last two months of the data) and papírnictví (no events).
+85. **New customers are dated at signup** (`customers.signup_date`), not at their first
+    order (decision 31 keeps the first order for the blind detective). The first order
+    comes weeks after signup, so a 3-week campaign was smeared past the 28-day window: on
+    the fitness story the Brno campaign read +6 % (story − twin) by first order and +52 %
+    by signup, against +46 % in the story. Signup is an ordinary column of the analyst's
+    table, and dated by its own row it needs no warm-up cut.
+86. **Story and twin stay paired** (`s2d/sim/rng.py` `DailyRng`, `population._acquisitions`).
+    Calibration measures an effect as story − twin at T with the same seed, assuming the
+    two runs draw the same numbers except where the story acts. They did not: the day
+    loop's streams are consumed in variable amounts (baskets per order, a draw per
+    delivery or review), so one extra order on day T shifted every later draw, and numpy's
+    Poisson sampler uses a rate-dependent number of uniforms, so a campaign in one cell
+    reshuffled all later acquisition counts. The "noise-free" effect carried about √2
+    noise units: on lékárna d went 2.9 → 2.4 → 3.9 for sizes 0.6 → 1.0 → 1.86, and
+    calibration stepped the wrong way. Now the eight day-loop streams are re-seeded from
+    (stream, day) every day (a difference cannot leak into the next day; within a day
+    arrays run over customers in signup order, so the starting base draws the same), and
+    acquisition counts are the inverse Poisson CDF of common uniforms (a higher rate only
+    adds customers). d is monotone in size and an effect of E3 no longer moves E1's d.
+    Fitness, calibrated, seeds 1–4: 14/16 tests confirmed, twin 0/16 (before: E3 orders
+    z 0.55 on seed 7 after calibration predicted 4.5). Every dataset's realization changed
+    (same seed, different numbers): Examples A and B at 40k, seed 42, calibrated: A 5/6
+    (E2 student leavers z 2.8), B 5/6 (E2 city-level leavers z 0.8, the unreliable test of
+    decision 78; its JOIN + lag test z 8.7), twins 0/6.
+87. **Known limits** found by the e2e run, not fixed here:
+    - An event for *everyone* has no control group: a plain before/after, whose bootstrap CI
+      is wide when the window crosses Christmas or New Year (fitness E1: placebo z 5, CI
+      touching 0 before decision 86 scaled it). A year-over-year control (same dates 364
+      days earlier) would need a year more data before the event.
+    - "In window" for orders assumes every order responds to purchase_rate. Subscribers'
+      scheduled orders do not (`SCHEDULED_SHARE`), so in an all-subscription business the
+      measured change is smaller than the stated one. Calibration measures the real effect,
+      so this only affects the expectation column, not whether the test confirms.
