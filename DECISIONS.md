@@ -812,3 +812,69 @@ the top of `s2d/detective/scan.py`.
     customer left, by days to the estimated departure. The excess after a late parcel peaks
     at about 10–40 days and fades by ~70; the 30–60-day window catches its middle, not all
     of it. The app's Score tab shows the test with its SQL and this chart.
+79. **The verifier on any story, not only A/B (2026-11-26).** A full run on a new story
+    (Psí Bouda: supplier delay, breeders' churn, courier switch, churn after it) confirmed
+    2/6 and printed NaN and +616666666566.7 %. Causes and fixes, all in `s2d/verify.py`:
+    - **Span.** `_span()` gave every KPI it did not list (late share, rating) the leavers'
+      span, which drops the last 120 days. Example B's switch was in February, so it never
+      showed; Psí Bouda's in August fell outside. Now only leavers (warm-up + 120-day edge)
+      and new customers (warm-up) are cut; anything dated by its own row runs to the end.
+    - **Control fallback** (`resolve`). The control is the other values of the varied key
+      with the same fixed keys. When that group has no data in the before-window it falls
+      back to *everything outside the target*, then to *no control* (plain before/after),
+      and says so in `note`. Psí Bouda: no other supplier sells kibble and canned food, so
+      the stockout's control is all other products; only breeders subscribe, so their
+      cancellations have no control at all. `resolve` runs on the story and the twin reuses
+      the result, so both run the same test; calibration resolves on its twin too.
+    - **Cancellations are a rate**: cancellations per 1000 subscriptions active that day
+      (`‰/den`), DiD as a difference. The story's expectation is 1000 × the added daily
+      hazard (churn_shock) or base hazard × relative size, in the same unit.
+    - **Small baselines.** A count KPI (orders, leavers, new customers) with fewer than
+      `MIN_BASE_EVENTS` = 20 events in a group's before-window is tested and reported as a
+      difference in events a day (`/den`), not a relative change. Chosen over a floor on
+      the denominator: a capped % is still a made-up number, a difference is what happened.
+    - **NaN never reaches the table.** A non-finite DiD, CI or z makes the row
+      `not_testable` with a `reason` (too close to the data end/start, empty KPI), shown in
+      the CLI table and the app. The placebo null drops NaN anchors.
+    Psí Bouda (seed 7) after the fixes: 5/6, twin 0/6; with decision 80 6/6, twin 0/6.
+80. **Every event gets its full measurement window** (`verify.needed_span`, `fit_windows`).
+    From the spec alone (no data): each test needs [T − 28, T + 27], leavers + 120 days at
+    the end and + 90 warm-up at the start, new customers + 90 at the start, the JOIN + lag
+    test a 28-day cohort + 120 days. If the data is shorter, `meta.days` is extended (or
+    `meta.start` moved back) and a warning names the event. The story's dates are kept,
+    not shifted: they are what the narrator tells, and an August churn really cannot be
+    measured in data that ends in October. Capped at the schema's 1095 days (then a
+    warning that some tests will not be measurable). Runs in the compiler (after
+    validation, `CompileResult.warnings`, shown in the app), in `python -m s2d.sim run`
+    (`--no-fit` to keep the spec as is; before `--no-story`, so the twin covers the same
+    days) and in the app's simulation job. Examples A and B already fit (unchanged data).
+81. **Narrator units.** The LLM got `measured_pct` without a unit and wrote "+5.04 %" for
+    +5.04 tickets a day. Each fact now carries `jednotka` and `zmena` (the change as Czech
+    text with its unit: "+5.04 tiketu denně", "+4.17 zrušení na 1000 aktivních předplatných
+    denně"), and the template uses the same `size_cs`. `check_numbers` validates the LLM
+    text: every number must be in the confirmed rows at the precision it is written
+    (measured, CI, z, date parts, price, JOIN shares, numbers in claim_cs, the window
+    constants, 0–10), and a number written with `%` must be one whose unit is %. A failed
+    check falls back to the template, with the reason in `source`.
+82. **A story with no events.** The LLM grammar required ≥ 1 event (gemma emitted lazy
+    `events: []`), so "nothing happens, only the school start and Christmas" came back as
+    two invented campaigns with budget 0. Now `events` may be empty in the grammar; an
+    empty list is answered once with "every change must be an event, seasonal peaks are
+    not; if there really is none, send the same spec with events: []", and a second empty
+    list is accepted. New rule in the prompt: seasonal peaks are baseline.seasonality.
+83. **Unsupported events and effects.** The sim now skips an unsupported *effect* alone, not
+    its whole event: a quality_issue with a rating drop (ratings only move through a
+    courier switch) and lost orders keeps its lost orders (answer key: `simulated` per
+    effect). An unsupported event *type* (service_outage, staff_shortage, viral_spike as an
+    event) is still skipped whole. `verify.untested` lists both, with the reason in Czech;
+    the CLI table prints them and the app shows a warning per event, and "no event to
+    verify" when nothing is testable. `--strict` still fails on either.
+84. **`scripts/e2e.py`** runs compiler (real Ollama, no LLM cache unless `--cache`, no Claude
+    fallback) → fit → calibration → sim → twin → verifier → narrator for every story in
+    `examples/stories/`, and writes spec, verify table/JSON and a summary to `data/e2e/`.
+    Goals checked per story: no crash, no NaN, no |x| > 1000 in a % column, twin ≤ 10 %,
+    story ≥ 80 % of the tests of supported effects. 8 new stories: lékárna (price change,
+    campaign), hračky (stockout, churn), zahrada (supplier delay, courier switch + churn),
+    kavárny (quality issue, competitor), fitness (price change, subscriber churn,
+    campaign), PC servis (outage, staff shortage, viral video: unsupported, + a price cut),
+    víno (events in the last two months of the data) and papírnictví (no events).
