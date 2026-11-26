@@ -42,7 +42,7 @@ from s2d.spec import Effect, Event, EventType, StorySpec
 WINDOW = scan.WINDOW          # 28 days before and after
 MIN_AFTER = scan.MIN_AFTER    # an after-window shorter than this (data end) is not testable
 Z_CONFIRM = 3.0               # placebo z needed to confirm
-WARMUP_DAYS = 90              # leavers / new customers: the first days of the data are incomplete
+WARMUP_DAYS = 90              # leavers: the first days of the data are incomplete
 LEAVER_EDGE_DAYS = 120        # a leaver has no order in the last 120 days of the data
 LEAVER_MAX_GAP = 45          # leavers: only regular buyers (average gap <= 45 d); sparse ones blur the date
 KEY_ORDER = ("supplier", "category", "city", "channel", "segment")  # the first key of a target is the one varied
@@ -262,15 +262,15 @@ def hypotheses(spec: StorySpec, key: pd.DataFrame | None = None) -> list[Hypothe
 def needed_span(spec: StorySpec) -> list[tuple[Hypothesis, date, date]]:
     """For every test of the story: (hypothesis, first day, last day) the data must cover so
     that the test has its full before- and after-window. Leavers need LEAVER_EDGE_DAYS more
-    at the end and WARMUP_DAYS at the start, new customers WARMUP_DAYS at the start, the
-    JOIN + lag test a WINDOW-long cohort of parcels plus LEAVER_EDGE_DAYS."""
+    at the end and WARMUP_DAYS at the start, the JOIN + lag test a WINDOW-long cohort of
+    parcels plus LEAVER_EDGE_DAYS."""
     out = []
     for h in hypotheses(spec):
         if h.kpi == "late_churn":
             first, last = h.start - timedelta(days=WINDOW), h.start + timedelta(days=WINDOW + LEAVER_EDGE_DAYS)
         else:
             first, last = h.T - timedelta(days=WINDOW), h.T + timedelta(days=WINDOW - 1)
-            if h.kpi in ("leavers", "new_customers"):
+            if h.kpi == "leavers":
                 first -= timedelta(days=WARMUP_DAYS)
             if h.kpi == "leavers":
                 last += timedelta(days=LEAVER_EDGE_DAYS)
@@ -330,11 +330,9 @@ def _d(x: date) -> str:
 
 
 def _span(kpi: str, lo: date, hi: date) -> tuple[date, date]:
-    """Days on which the KPI is complete. Only the KPIs that need a customer's history are
-    cut: new customers (warm-up) and leavers (warm-up, and no order in the last 120 days).
-    Everything dated by its own row (orders, deliveries, reviews, ...) is complete to the end."""
-    if kpi == "new_customers":
-        return lo + timedelta(days=WARMUP_DAYS), hi
+    """Days on which the KPI is complete. Only leavers need a customer's history and are cut
+    (warm-up, and no order in the last 120 days). Everything dated by its own row (orders,
+    signups, deliveries, reviews, ...) is complete to the end."""
     if kpi == "leavers":
         return lo + timedelta(days=WARMUP_DAYS), hi - timedelta(days=LEAVER_EDGE_DAYS)
     return lo, hi
@@ -418,13 +416,11 @@ def _events_cte(h: Hypothesis, lo: date, hi: date) -> str:
   WHERE {where}
 )"""
     if h.kpi == "new_customers":
-        return f"""events AS (   -- a new customer (signed up during the data), dated at the first order
-  SELECT min(o.order_date) AS day,
-         any_value({grp}) AS grp
-  FROM orders o
-  JOIN customers c USING (customer_id)
+        return f"""events AS (   -- a new customer, dated at signup (the first order comes weeks later)
+  SELECT c.signup_date AS day,
+         {grp} AS grp
+  FROM customers c
   WHERE c.signup_date >= {_d(lo)} AND {where}
-  GROUP BY o.customer_id
 )"""
     edge = hi - timedelta(days=LEAVER_EDGE_DAYS)
     return f"""per_customer AS (   -- last order and average gap between order days
