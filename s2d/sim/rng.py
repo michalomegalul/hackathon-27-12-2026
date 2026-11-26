@@ -32,3 +32,31 @@ STREAM_NAMES = (
 def make_streams(seed: int) -> dict[str, np.random.Generator]:
     children = np.random.SeedSequence(seed).spawn(len(STREAM_NAMES))
     return {name: np.random.default_rng(child) for name, child in zip(STREAM_NAMES, children)}
+
+
+# The day loop's streams: a run with the story and its no-story twin should draw the
+# same numbers wherever nothing differs. A stream consumed in variable amounts (baskets
+# per order, one review draw per delivery) would otherwise shift every later day once
+# the story adds a single order, and the twin comparison (calibration) stops being paired.
+DAILY_STREAMS = ("purchases", "churn", "payments", "deliveries", "tickets", "reviews", "service", "inventory")
+
+
+class DailyRng:
+    """A Generator re-seeded every simulated day from (this stream's key, day). Use it like
+    a Generator; call day(t) at the start of day t. Within a day, arrays run over customers
+    in signup order, so the starting base draws the same numbers with and without the story."""
+
+    def __init__(self, parent: np.random.Generator):
+        self._key = int(parent.integers(0, 2**63 - 1))
+        self._g = parent
+
+    def day(self, t: int) -> None:
+        self._g = np.random.default_rng([self._key, t])
+
+    def __getattr__(self, name):
+        return getattr(self._g, name)
+
+
+def daily(streams: dict[str, np.random.Generator]) -> dict:
+    """The same streams with DAILY_STREAMS wrapped in DailyRng."""
+    return {k: DailyRng(v) if k in DAILY_STREAMS else v for k, v in streams.items()}

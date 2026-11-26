@@ -25,6 +25,7 @@ from .calendar import HOLIDAY_FACTOR_ONLINE, Calendar
 from .catalog import Catalog
 from .events import CompiledStory
 from .population import Population, target_mask
+from .rng import DAILY_STREAMS, daily
 from .service import Service
 from .inventory import OTHER_P, SUBSTITUTE_P, Inventory
 from .subscriptions import SCHEDULED_SHARE, build_plans, subscriptions_table
@@ -89,6 +90,7 @@ def _holiday_factor(spec: StorySpec, pop: Population, cal: Calendar) -> np.ndarr
 
 def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Population,
                  cat: Catalog, streams: dict[str, np.random.Generator]) -> SimResult:
+    streams = daily(streams)  # re-seeded each day: story and twin stay paired (rng.DailyRng)
     rng_churn = streams["churn"]
     rng_buy = streams["purchases"]
     rng_pay = streams["payments"]
@@ -116,6 +118,8 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
     n_orders_so_far = 0
 
     for t in range(cal.n_days):
+        for name in DAILY_STREAMS:
+            streams[name].day(t)
         svc.start_day(t)
         alive = (pop.signup_day <= t) & (churn_day < 0)
 
@@ -211,6 +215,8 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
         order_sub.append(is_sub)
 
     customer = np.concatenate(order_customer)
+    for name in DAILY_STREAMS:  # what is drawn after the loop
+        streams[name].day(cal.n_days)
     orders, items = _build_orders(spec, cal, pop, cat, customer, np.concatenate(order_day), rng_buy,
                                   np.concatenate(order_channel), np.concatenate(item_order),
                                   np.concatenate(item_product), np.concatenate(item_qty))
