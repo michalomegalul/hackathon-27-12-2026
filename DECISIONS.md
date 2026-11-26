@@ -911,3 +911,37 @@ the top of `s2d/detective/scan.py`.
       scheduled orders do not (`SCHEDULED_SHARE`), so in an all-subscription business the
       measured change is smaller than the stated one. Calibration measures the real effect,
       so this only affects the expectation column, not whether the test confirms.
+    - Calibration measures d on one seed. For a small cell (pekárna: Prostějov × families,
+      6000 customers) *which* customers leave is binomial noise inside the effect, which
+      pairing cannot remove: calibrated d 5.4, realized z 1.1–4.7 over seeds 1–5 and 7
+      (mean 2.9). Measuring d on 2–3 seeds would fix it at about twice the calibration time.
+    - A small count cell can confirm on the twin by chance: lékárna's seniors × app new
+      customers (≈1.4 a day) read +69 %, z 3.7, on the no-story twin.
+    - gemma sometimes returns an empty narration (vino, zahrada); the template is used.
+88. **E2E results (2026-11-26, `scripts/e2e.py`, gemma4:26b, no LLM cache, seed 7, each
+    spec's own customer count).** 11 stories (8 new + 3 old), no crash, 0 NaN, 0 values
+    above 1000 %. Story tests confirmed 23/28 (82 %), twin 1/28 (3.6 %). Valid spec on the
+    first try 8/11; the 3 others on the second (papírnictví: the empty-events challenge
+    of decision 82, as intended).
+
+    | story | 1st try | types (* unsupported) | story | twin | notes |
+    |---|---|---|---|---|---|
+    | fitness | yes | price_change, churn_shock, campaign | 4/4 | 0/4 | |
+    | hračky | yes | supplier_delay*, churn_shock | 0/1 | 0/1 | LLM left out lead_time_multiplier: now a validation error (decision 89); rerun 3/3, twin 0/3 |
+    | kavárny | yes | quality_issue, competitor_entry | 2/2 | 0/2 | rating effect untested (decision 83) |
+    | kola | no (2) | supplier_delay, churn_shock, competitor_entry | 3/4 | 0/4 | data extended 5 days |
+    | kosmetika | yes | campaign, churn_shock, supplier_delay | 4/5 | 0/5 | |
+    | lékárna | yes | price_change, campaign | 3/3 | 1/3 | twin false positive (decision 87) |
+    | papírnictví | no (2) | – (no events) | 0/0 | 0/0 | |
+    | PC servis | no (2) | price_change, service_outage*, staff_shortage* | 1/1 | 0/1 | viral video went to decoys |
+    | pekárna | yes | quality_issue*, churn_shock, price_change | 0/2 | 0/2 | E3 capped by the price-elasticity cap (below_target); E2 one-seed calibration (decision 87) |
+    | víno | yes | competitor_entry, campaign | 2/2 | 0/2 | data extended 12 days for the 15 Oct campaign |
+    | zahrada | yes | supplier_delay, courier_change, churn_shock | 4/4 | 0/4 | |
+
+    With the hračky rerun: 26/30 (87 %), twin 1/30. Per-story goals: 7/11 met (≥ 80 %
+    story, ≤ 10 % twin); a story with 1–3 tests misses on a single test either way.
+    Compile 20–50 s, calibration + sim + twin 2–48 s, verification 0.4–2.4 s per story.
+89. **Supply events need their params at validation.** `supplier_delay` without
+    `lead_time_multiplier`, or a supply event without a supplier/category target, is now a
+    StorySpec error (the LLM retries with the message) instead of an event the simulator
+    silently skips. Unsupported event *types* stay valid: they are real story content.
