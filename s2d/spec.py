@@ -374,6 +374,14 @@ class StorySpec(Strict):
             if ev.caused_by is not None and ev.caused_by not in seen:
                 errors.append(f"{where}: caused_by {ev.caused_by!r} is not an earlier event")
             check_target(where, ev.target)
+            # Params the simulator needs to run these types (s2d/sim/events.mechanism); a
+            # missing one is the model's mistake to fix, not an unsupported event.
+            if ev.type == EventType.supplier_delay and not ev.params.lead_time_multiplier:
+                errors.append(f"{where}: supplier_delay needs params.lead_time_multiplier "
+                              "(how many times longer the supplier's lead time gets, e.g. 3)")
+            if ev.type in (EventType.supplier_delay, EventType.stockout) and not (
+                    ev.target.supplier or ev.target.category):
+                errors.append(f"{where}: {ev.type.value} needs a target supplier or category")
             if ev.type == EventType.churn_shock:
                 if ev.params.churn_pct is None or ev.params.churn_window_days is None:
                     errors.append(f"{where}: churn_shock needs params.churn_pct and churn_window_days")

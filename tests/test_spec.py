@@ -41,3 +41,11 @@ def test_semantic_errors(mutate, message):
     mutate(data)
     with pytest.raises(ValidationError, match=message):
         StorySpec.model_validate(data)
+
+
+def test_supply_events_need_their_params():
+    data = yaml.safe_load(open("examples/a.yaml", encoding="utf-8"))
+    ev = next(e for e in data["events"] if e["type"] == "supplier_delay")
+    ev["params"] = {}
+    with pytest.raises(ValidationError, match="needs params.lead_time_multiplier"):
+        StorySpec.model_validate(data)
