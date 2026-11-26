@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from faker import Faker
+from scipy.stats import poisson
 
 from s2d.spec import Channel, Metric, StorySpec, Target
 
@@ -91,7 +92,12 @@ def _acquisitions(spec: StorySpec, cal: Calendar, story: CompiledStory, rng: np.
         hit = target_mask(eff.target, spec, seg, city, chan)
         rate[:, hit] *= np.maximum(1 + eff.size * eff.curve[:, None], 0)
 
-    counts = rng.poisson(rate)  # [day, cell]
+    # Inverse CDF of common uniforms, not rng.poisson: numpy's Poisson sampler uses a
+    # rate-dependent number of draws, so a campaign in one cell would reshuffle the counts
+    # of every later cell and day. This way a higher rate only adds customers where it is
+    # higher, and the no-story twin has the same arrivals everywhere else.
+    u = rng.random(rate.shape)
+    counts = np.where(rate > 0, poisson.ppf(u, np.maximum(rate, 1e-12)), 0).astype(np.int64)  # [day, cell]
     day_idx, cell_idx = np.nonzero(counts)
     reps = counts[day_idx, cell_idx]
     cell_of_new = np.repeat(cell_idx, reps)
