@@ -1,8 +1,9 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, NavLink, Outlet, isRouteErrorResponse, useRouteError } from 'react-router'
+import { Link, NavLink, Outlet, isRouteErrorResponse, useLocation, useRouteError } from 'react-router'
 import { getHealth, getNetDown, subscribeNet } from '../api'
 import { Alert, Card } from '../components/ui'
+import { Spiral } from '../components/Spiral'
 import { setToken, useLoginRequired, useToken, useTokenInvalid } from '../token'
 
 function QueueInfo() {
@@ -31,7 +32,7 @@ function NetBanner() {
   return (
     <div
       role="alert"
-      className="sticky top-0 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-rose-500/40 bg-rose-950/90 px-3 py-2 text-sm text-rose-100 backdrop-blur"
+      className="sticky top-16 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-rose-500/40 bg-rose-950/90 px-3 py-2 text-sm text-rose-100 backdrop-blur"
     >
       <span className="mr-auto">Server je nedostupný (výpadek sítě nebo restart API). Zkoušíme to znovu.</span>
       <button
@@ -49,29 +50,43 @@ function NetBanner() {
 }
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-2.5 py-1.5 text-sm ${isActive ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`
+  `rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap ${isActive ? 'bg-white/[0.07] text-white' : 'text-muted hover:text-white'}`
+
+const NAV: [to: string, label: string, end?: boolean][] = [
+  ['/', 'Story', true],
+  ['/rev', 'Rev story'],
+  ['/history', 'History'],
+  ['/about', 'About'],
+]
 
 function Shell({ children }: { children: ReactNode }) {
+  // /run/:id is a Story run: keep "Story" lit there too
+  const { pathname } = useLocation()
+  const inRun = pathname.startsWith('/run/')
   return (
-    <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-3 sm:px-6">
-      <header className="flex items-center gap-3 py-3 sm:py-4">
-        <Link to="/" className="mr-auto flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid size-7 place-items-center rounded-md bg-accent/20 text-accent">S</span>
-          Story2Data
-        </Link>
-        <QueueInfo />
-        <nav className="flex gap-1">
-          <NavLink to="/" end className={navCls}>
-            Nová úloha
-          </NavLink>
-          <NavLink to="/jobs" end className={navCls}>
-            Moje úlohy
-          </NavLink>
-        </nav>
-        <Logout />
+    <div className="flex min-h-dvh flex-col">
+      <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
+          <Link to="/" className="flex shrink-0 items-center gap-1.5 font-semibold tracking-tight">
+            <Spiral />
+            <span className="hidden min-[380px]:inline">Story2Data</span>
+          </Link>
+          <nav className="-mx-1 flex min-w-0 gap-0.5 overflow-x-auto px-1">
+            {NAV.map(([to, label, end]) => (
+              <NavLink key={to} to={to} end={end} className={(a) => navCls({ isActive: a.isActive || (to === '/' && inRun) })}>
+                {label}
+              </NavLink>
+            ))}
+          </nav>
+          <span className="ml-auto" />
+          <QueueInfo />
+          <Logout />
+        </div>
       </header>
-      <NetBanner />
-      <main className="flex-1 pb-12">{children}</main>
+      <div className="mx-auto w-full max-w-7xl px-3 sm:px-6">
+        <NetBanner />
+      </div>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-3 pb-12 pt-4 sm:px-6 sm:pt-6">{children}</main>
     </div>
   )
 }
