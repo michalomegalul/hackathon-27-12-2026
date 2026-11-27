@@ -25,8 +25,8 @@ from typing import Any
 STEPS = ["specifikace (AI)", "kalibrace a simulace", "dvojče bez příběhu", "ověření", "český příběh (AI)"]
 # no history yet: (fixed seconds, seconds per customer), measured on the notebook (DECISIONS 94).
 # The simulation steps grow with the customer count; calibration also has a fixed part.
-PRIORS = {"specifikace (AI)": (35.0, 0.0), "kalibrace a simulace": (12.0, 4e-4),
-          "dvojče bez příběhu": (0.5, 6e-5), "ověření": (0.5, 1e-5), "český příběh (AI)": (15.0, 0.0)}
+PRIORS = {"specifikace (AI)": (35.0, 0.0), "kalibrace a simulace": (12.0, 2e-3),
+          "dvojče bez příběhu": (0.3, 1.5e-4), "ověření": (0.3, 3e-5), "český příběh (AI)": (15.0, 0.0)}
 DETECT_PRIOR_S = 40.0
 DEFAULT_N = 20_000   # customer count to assume before the spec is known
 HISTORY = 30         # timings kept per step

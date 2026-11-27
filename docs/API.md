@@ -206,7 +206,8 @@ Own jobs, newest first (admin: everyone's).
   `z`, `sql` are `null` and `reason` says why).
 - `control_mode`: `vary` (other values of the target's dimension), `rest` (everything outside
   the target), `yoy` (same days 364 days earlier), `none` (plain before/after).
-- Units: `%`, `pp` (percentage points), `b.` (rating points), `/den`, `‰/den`.
+- Units: `%`, `pp` (percentage points), `b.` (rating points), `/den`, `‰/den`; `story_unit`
+  can also be `d` (days, a delivery delay the story states).
 - `sql` runs on the job's data (`/query` or the `analyst.duckdb` from the ZIP) and gives
   `did_pct` = `measured`.
 
@@ -304,6 +305,7 @@ returned as is (no second run).
 {
   "job_id": "20261127-191502-3fa9c1",
   "status": "done",
+  "position": 0,
   "elapsed_s": 21,
   "error": null,
   "events": [{"id": "C3", "metric": "orders", "segment": "segment=student",
@@ -316,7 +318,8 @@ returned as is (no second run).
 }
 ```
 
-`events`, `narrative` and `score` are `null` until `done`. `score` is `null` for a student
+`status`/`position` as for a job (the detective waits in the same queue and takes about
+40 s). `events`, `narrative` and `score` are `null` until `done`. `score` is `null` for a student
 (always). 404 `"detective not run"` before a `POST`.
 
 ## curl

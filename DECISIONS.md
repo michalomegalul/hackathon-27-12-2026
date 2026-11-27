@@ -1037,3 +1037,39 @@ the top of `s2d/detective/scan.py`.
     E3 now stated by gemma at −25 % (confirmed, z 6.3); lékárna 2/3 / 1/3 (the known twin
     false positive of decision 87). New LLM outputs, so not a like-for-like comparison with
     decision 88.
+
+## The HTTP API (feat/api, 2026-11-27)
+
+94. **One process, one worker thread, jobs as files** (`s2d/api/`, contract `docs/API.md`).
+    The queue is in memory but rebuilt from `$DATA_DIR/api/jobs/*/job.json` at startup:
+    `running` → `error: "server restarted"`, `queued` runs again in creation order. Detective
+    runs (`detect.json` next to the job) share the same FIFO queue, so the GPU never gets two
+    AI calls at once. Uvicorn must run with one worker process (`--workers > 1` would start
+    two queues). The pipeline is `run_sim`'s, plus what the app does elsewhere: reviews from a
+    text pool when `texts.find_pool` finds one, the dirty export from `noise.messiness` (or
+    `dirt`), and `verify.narrate` (template when the LLM fails or replay has no cache).
+    `fit_windows` runs after the overrides, as in the app.
+95. **ETA = prior shape × median ratio.** Each step has a prior `fixed + per_customer · n`
+    (measured on the notebook, example A: calibration + simulation 17.6 s at 3k, 57 s at 20k,
+    92 s at 40k → 12 s + 2 ms/customer; twin 0.7 / 3.3 / 6.2 s → 0.15 ms/customer; AI steps
+    fixed 35 s and 15 s). Every finished step stores `{s, n}` in `timings.json` (last 30);
+    the estimate is `prior(n) · median(s_i / prior(n_i))`, so one 40k run corrects the
+    estimate for 10k too, and the calibration's fixed part is not scaled away. A step answered
+    from the LLM cache, or the narrator's template, records nothing: 0 s says nothing about
+    the GPU. While queued, `eta_s` includes what is left of every job ahead.
+96. **The sandbox is a separate file, not a filtered view.** `analyst.duckdb` is a copy of
+    schema `main` only, built when the job finishes, so `_truth` does not exist in it. Each
+    query opens it `read_only` with `enable_external_access=false`, extension auto-load/install
+    off, `lock_configuration=true` (set last), 2 threads, 2 GB; a `threading.Timer` calls
+    `con.interrupt()` after 20 s (408); at most 1000 rows (`truncated`). Checked in
+    `tests/test_api.py`: `_truth.*`, `read_parquet`/`read_csv`/`read_text`/`glob` on real
+    paths, `ATTACH` of the job's own story.duckdb, `COPY TO`, `SET` of either option,
+    `INSTALL`/`LOAD`, `CREATE`/`DROP` all fail. The same file feeds `/tables` and the ZIP.
+97. **Visibility**: a student sees only own jobs, teacher and admin every job (they hand
+    datasets out); `GET /v1/jobs` lists everyone's only for admin. A job you may not see is
+    404, not 403, so ids do not leak. `/result` carries the spec and the verifier's SQL (the
+    person who wrote the story knows it); `/answer-key` (teacher/admin) adds the hidden
+    tables `answer_key`, `decoys`, `calibration`, and the detective's `score` is staff-only.
+98. **Not done in the API**: the ZIP has no Postgres SQL dump and no ERD (PLAN mentions them;
+    `s2d/sim/pg.py` exports to a live Postgres, not to a file); no rate limit per token; no
+    job deletion or cleanup (a 40k job is ~60 MB on disk, the ZIP ~25 MB more).
