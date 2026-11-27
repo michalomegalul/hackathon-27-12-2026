@@ -71,6 +71,29 @@ def test_401_without_or_with_unknown_token(api):
     assert c.get(f"/v1/jobs/{api['id']}/result").status_code == 401
 
 
+def test_public_role_lets_requests_without_token_in(api, monkeypatch):
+    c = api["c"]
+    monkeypatch.setenv("API_PUBLIC_ROLE", "teacher")
+    r = c.get("/v1/jobs")
+    assert r.status_code == 200 and r.json() == {"jobs": []}  # "public" owns no job yet
+    assert c.get(f"/v1/jobs/{api['id']}").json()["status"] == "done"  # teacher sees the student's job
+    assert c.get(f"/v1/jobs/{api['id']}/answer-key").status_code == 200
+    # a token still wins, and an unknown one is still 401
+    assert c.get("/v1/jobs", headers=api["h"]["student"]).json()["jobs"][0]["owner"] == "student"
+    assert c.get("/v1/jobs", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_public_role_student_sees_only_public_jobs(api, monkeypatch):
+    monkeypatch.setenv("API_PUBLIC_ROLE", "student")
+    assert api["c"].get(f"/v1/jobs/{api['id']}").status_code == 404
+
+
+def test_public_role_must_be_a_role(api, monkeypatch):
+    monkeypatch.setenv("API_PUBLIC_ROLE", "guest")
+    with pytest.raises(RuntimeError, match="API_PUBLIC_ROLE"):
+        api["c"].get("/v1/jobs")
+
+
 def test_422_and_400_on_bad_input(api):
     c, h = api["c"], api["h"]["student"]
     r = c.post("/v1/jobs", json={"company": "x"}, headers=h)

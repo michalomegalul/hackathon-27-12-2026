@@ -1108,3 +1108,11 @@ the top of `s2d/detective/scan.py`.
     the real Gemma is not done**: the homelab Ollama (192.168.4.19) is not reachable from the
     notebook on the venue Wi-Fi and there is no Claude key; run it on the server:
     `uv run python scripts/e2e.py examples/stories/brief.yaml --n-customers 160000`.
+126. **The API is public for the hackathon** (`API_PUBLIC_ROLE`, `s2d/api/auth.py`): with the
+    variable set, a request without a token is user `public` with that role, so judges open
+    `/web/` without a login. `compose.yaml` sets `teacher`, so a shared link to any job (the
+    pre-generated demo jobs belong to team tokens) opens, and the answer key can be shown.
+    A token still wins and an unknown token is still 401; the web page shows the token form
+    only after a request without a token got 401 (the API is not public). Risk accepted for
+    two days: anyone can queue jobs on the one GPU. **After the hackathon** set
+    `API_PUBLIC_ROLE=` (empty) in the server's `.env` and restart the `api` service.

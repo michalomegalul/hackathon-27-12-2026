@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, isRouteErrorResponse, useRouteError } from 'react-router'
 import { getHealth } from '../api'
 import { Alert, Card } from '../components/ui'
-import { setToken, useToken } from '../token'
+import { setToken, useLoginRequired, useToken } from '../token'
 
 function QueueInfo() {
   const { data } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 10_000 })
@@ -96,7 +96,8 @@ function TokenForm() {
 
 export function Layout() {
   const token = useToken()
-  return <Shell>{token ? <Outlet /> : <TokenForm />}</Shell>
+  const loginRequired = useLoginRequired()
+  return <Shell>{token || !loginRequired ? <Outlet /> : <TokenForm />}</Shell>
 }
 
 export function RouteError() {

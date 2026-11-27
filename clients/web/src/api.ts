@@ -1,7 +1,7 @@
 // Typed client for docs/API.md. All URLs are relative (/v1/...): the Vite dev proxy and
 // nginx in production both route them to the API.
 import { queryOptions } from '@tanstack/react-query'
-import { getToken, setToken } from './token'
+import { getToken, setLoginRequired, setToken } from './token'
 
 // ---- shapes ----------------------------------------------------------------------------
 
@@ -142,7 +142,10 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
       ...init?.headers,
     },
   })
-  if (res.status === 401 && token) setToken('') // unknown token: ask for a new one
+  if (res.status === 401) {
+    if (token) setToken('') // unknown token: forget it (the API may be public without one)
+    else setLoginRequired() // the API is not public: show the token form
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: string | ValidationIssue[] } | null
     throw new ApiError(res.status, body?.detail ?? res.statusText ?? `HTTP ${res.status}`)

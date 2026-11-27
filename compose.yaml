@@ -8,6 +8,8 @@ x-env: &env
   DATA_DIR: /data
   LLM_CACHE_DIR: /data/llm_cache
   TEXT_POOL_DIR: /data/text_pools
+  # no token needed for the demo: visitors are user "public" with this role; empty = tokens only
+  API_PUBLIC_ROLE: ${API_PUBLIC_ROLE-teacher}
 
 services:
   app:
