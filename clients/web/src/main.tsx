@@ -21,6 +21,8 @@ const router = createBrowserRouter([
       { path: 'jobs/:id', Component: JobPage },
       // lazy: TanStack Table + Virtual load only with the data page
       { path: 'jobs/:id/data', lazy: async () => ({ Component: (await import('./pages/DataPage')).DataPage }) },
+      // lazy: React Flow, uPlot and anime.js load only with the story page
+      { path: 'jobs/:id/story', lazy: async () => ({ Component: (await import('./pages/StoryPage')).StoryPage }) },
     ],
   },
 ], { basename: import.meta.env.BASE_URL.replace(/\/$/, '') }) // served at /web/

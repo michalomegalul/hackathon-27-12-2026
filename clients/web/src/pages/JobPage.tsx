@@ -147,6 +147,14 @@ export function JobPage() {
         </div>
         {done && (
           <Link
+            to={`/jobs/${id}/story`}
+            className="inline-flex items-center justify-center gap-2 self-start rounded-lg border border-line px-4 py-2.5 font-medium hover:border-accent/60"
+          >
+            ◆ Příběh v datech
+          </Link>
+        )}
+        {done && (
+          <Link
             to={`/jobs/${id}/data`}
             className="inline-flex items-center justify-center gap-2 self-start rounded-lg border border-line px-4 py-2.5 font-medium hover:border-accent/60"
           >
