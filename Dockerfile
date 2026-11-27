@@ -11,9 +11,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY s2d ./s2d
 COPY schema ./schema
 COPY examples ./examples
-COPY app ./app
 
-EXPOSE 8501
-CMD ["streamlit", "run", "app/main.py", \
-     "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", \
-     "--browser.gatherUsageStats=false"]
+# The HTTP API (docs/API.md). One process, because the job queue and its single worker
+# thread live in it (one GPU): never run it with --workers > 1.
+EXPOSE 8000
+CMD ["uvicorn", "s2d.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
