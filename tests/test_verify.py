@@ -172,6 +172,45 @@ def test_fit_windows_extends_the_data_for_a_late_event():
     assert verify.fit_windows(load_spec("examples/b.yaml"))[1] == []
 
 
+def _late_start(start, days):
+    spec = load_spec("examples/brief/sport.yaml")  # E1 for everyone from 2026-04-01
+    spec.meta.start, spec.meta.days = start, days
+    return spec
+
+
+def test_fit_windows_extends_the_data_a_year_back_for_an_event_for_everyone():
+    from datetime import date
+    spec = _late_start(date(2025, 9, 1), 500)       # E1 is 7 months into the data
+    fitted, warnings = verify.fit_windows(spec)
+    need = date(2026, 4, 1) - verify.timedelta(days=verify.WINDOW + verify.YOY_DAYS)
+    assert fitted.meta.start == need and fitted.meta.end == spec.meta.end
+    assert any("year-over-year" in w and "E1" in w for w in warnings)
+    h = verify.hypotheses(fitted)[0]
+    lo, hi = fitted.meta.start, fitted.meta.end
+    assert verify.yoy_reason(h, lo, hi) is None      # the year-over-year control now applies
+    # a full year before already: nothing to do (the brief spec starts 2025-01-01)
+    assert verify.fit_windows(load_spec("examples/brief/sport.yaml"))[1] == []
+    # A and B have no event for everyone: unchanged (see the test above)
+
+
+def test_fit_windows_keeps_plain_before_after_when_a_year_back_does_not_fit():
+    from datetime import date
+    spec = _late_start(date(2025, 9, 1), 1000)      # ends 2028-05: a year back would exceed 1095 days
+    fitted, warnings = verify.fit_windows(spec)
+    assert fitted.meta.start == spec.meta.start and fitted.meta.days == spec.meta.days
+    assert any("plain before/after" in w for w in warnings)
+
+
+def test_fit_windows_year_back_on_a_simulated_world():
+    from datetime import date
+    spec, _ = verify.fit_windows(_late_start(date(2025, 9, 1), 500))
+    spec.entities.customers.n = 3000
+    w = simulate(spec)
+    res = verify.verify_con(verify.world_con(w), spec, w.truth["answer_key"], check_sql=True)
+    r = res["tests"][0]
+    assert r["control_mode"] == "yoy" and r["sql_matches"]
+
+
 TICKETS = {"event_id": "E1", "kpi": "tickets", "segment": "supplier=S_POL", "T": "2026-04-01", "measured_pct": 5.04,
            "ci_pct": [3.0, 7.4], "z": 19.16, "measured_unit": "/den", "claim_cs": "Kamion stál na hranicích.",
            "confirmed": True, "direction": "up"}

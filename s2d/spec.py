@@ -180,7 +180,7 @@ class Segment(Strict):
 
 
 class Customers(Strict):
-    n: Annotated[int, Field(ge=500, le=100_000)]
+    n: Annotated[int, Field(ge=500, le=200_000)]
     growth_per_year: Annotated[float, Field(ge=-0.5, le=3)] = 0.0
     segments: list[Segment] = Field(min_length=1)
 

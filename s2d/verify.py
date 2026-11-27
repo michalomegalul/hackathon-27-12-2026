@@ -291,15 +291,44 @@ def needed_span(spec: StorySpec) -> list[tuple[Hypothesis, date, date]]:
     return out
 
 
+def yoy_start(h: Hypothesis) -> date | None:
+    """First day the data needs for a year-over-year control (the KPI complete from
+    T - WINDOW - YOY_DAYS, see yoy_reason), or None if the test has a group to compare with."""
+    if h.vary is not None or h.kpi == "late_churn":
+        return None
+    first = h.T - timedelta(days=WINDOW + YOY_DAYS)
+    return first - timedelta(days=WARMUP_DAYS) if h.kpi == "leavers" else first
+
+
 def fit_windows(spec: StorySpec) -> tuple[StorySpec, list[str]]:
     """Extend the data (meta.start earlier, meta.days longer) so that every event's test
     has its full measurement window. The story's dates stay as told: an event in August
     whose churn shows 6 weeks later cannot be measured in data that ends in October, so
-    the data runs longer. Returns the (copied) spec and the warnings."""
+    the data runs longer. Returns the (copied) spec and the warnings.
+
+    An event with no group to compare with (for everyone, or keys the KPI cannot split by)
+    also gets the data a year further back, so its test can use the year-over-year control
+    (DECISIONS 91, 99), unless that would exceed the longest data the spec allows: then it
+    stays a plain before/after and a warning says so."""
     from s2d.spec import Meta
     spans = needed_span(spec)
     if not spans:
         return spec, []
+    cap = Meta.model_fields["days"].metadata[-1].le
+    yoy_warnings, yoy_ids = [], set()
+    last_all = max(max(t for _, _, t in spans), spec.meta.end)
+    first_plain = min(min(f for _, f, _ in spans), spec.meta.start)
+    for i, (h, f, t) in enumerate(spans):
+        y = yoy_start(h)
+        if y is None or y >= f:
+            continue
+        if (last_all - min(y, first_plain)).days + 1 > cap:
+            yoy_warnings.append(f"{h.event_id} ({KPI_CS[h.kpi]}, from {h.T}) has no group to compare with; a "
+                                f"year-over-year control needs data from {y}, which would make the data longer "
+                                f"than {cap} days: plain before/after")
+            continue
+        spans[i] = (h, y, t)
+        yoy_ids.add(i)
     first = min(f for _, f, _ in spans)
     last = max(t for _, _, t in spans)
     start, end = spec.meta.start, spec.meta.end
@@ -307,21 +336,22 @@ def fit_windows(spec: StorySpec) -> tuple[StorySpec, list[str]]:
     new_start = min(start, first)
     new_end = max(end, last)
     days = (new_end - new_start).days + 1
-    if days > Meta.model_fields["days"].metadata[-1].le:
-        cap = Meta.model_fields["days"].metadata[-1].le
+    if days > cap:
         warnings.append(f"the events need data {first} .. {last} ({days} days), more than {cap}: "
                         "some tests will not be measurable")
         days = cap
         new_end = new_start + timedelta(days=cap - 1)
-    for h, f, t in spans:
+    for i, (h, f, t) in enumerate(spans):
         if t > end:
             warnings.append(f"{h.event_id} ({KPI_CS[h.kpi]}, from {h.T}) needs data until {t}, the data ended "
                             f"{end}: extended to {new_end}")
         if f < start:
-            warnings.append(f"{h.event_id} ({KPI_CS[h.kpi]}, from {h.T}) needs data from {f}, the data started "
-                            f"{start}: starts {new_start}")
+            why = " for a year-over-year control (no group to compare with)" if i in yoy_ids else ""
+            warnings.append(f"{h.event_id} ({KPI_CS[h.kpi]}, from {h.T}) needs data from {f}{why}, the data "
+                            f"started {start}: starts {new_start}")
+    warnings += yoy_warnings
     if (new_start, days) == (start, spec.meta.days):
-        return spec, []
+        return spec, list(dict.fromkeys(yoy_warnings))
     spec = spec.model_copy(deep=True)
     spec.meta.start, spec.meta.days = new_start, days
     return spec, list(dict.fromkeys(warnings))
