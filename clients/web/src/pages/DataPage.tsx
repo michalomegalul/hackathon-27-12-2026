@@ -1,4 +1,4 @@
-// /jobs/:id/data: browse the analyst tables (GET /tables, /tables/{name}) and run SQL (POST /query).
+// /run/:id/data: browse the analyst tables (GET /tables, /tables/{name}) and run SQL (POST /query).
 // A verification row's "Spustit SQL" lands here with its SQL and expected result in the router state.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
@@ -193,8 +193,8 @@ export function DataPage() {
   }
 
   const back = (
-    <Link to={`/jobs/${id}`} className="text-sm text-muted hover:text-white">
-      ← Úloha {id}
+    <Link to={`/run/${id}#s-data`} className="text-sm text-muted hover:text-white">
+      ← Zpět na běh {id}
     </Link>
   )
 
@@ -202,8 +202,8 @@ export function DataPage() {
     return (
       <div className="grid gap-4">
         <Alert>{job.error.message}</Alert>
-        <Link to="/jobs" className="text-accent hover:underline">
-          ← Moje úlohy
+        <Link to="/history" className="text-accent hover:underline">
+          ← History
         </Link>
       </div>
     )
