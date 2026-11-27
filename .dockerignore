@@ -6,3 +6,6 @@ data
 reports
 research_notes
 site
+**/node_modules
+clients/web/dist
+**/.env*
