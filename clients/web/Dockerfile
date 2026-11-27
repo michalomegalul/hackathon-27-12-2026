@@ -1,4 +1,4 @@
-# The `web` service: nginx with the React site built in (served at /web/, see nginx.conf).
+# The `web` service: nginx with the React site built in (served at /, see nginx.conf).
 # Build context is the repo root (compose.yaml): the site imports examples/*.yaml with ?raw.
 FROM node:24-slim AS build
 WORKDIR /src/clients/web

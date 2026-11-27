@@ -35,7 +35,7 @@ const router = createBrowserRouter([
       { path: 'jobs/:id/story', loader: ({ params }) => redirect(`/run/${id(params)}#s-summary`) },
     ],
   },
-], { basename: import.meta.env.BASE_URL.replace(/\/$/, '') }) // served at /web/
+], { basename: import.meta.env.BASE_URL.replace(/\/$/, '') }) // vite base '/': no basename
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, retry: retryTransient } } })
 
 createRoot(document.getElementById('root')!).render(

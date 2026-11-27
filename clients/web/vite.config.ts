@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, searchForWorkspaceRoot } from 'vite'
 
 export default defineConfig({
-  base: '/web/', // nginx serves the build at https://hack.dobsinsky.dev/web/
+  base: '/', // nginx serves the build at https://hack.dobsinsky.dev/ (/web/... redirects there)
   plugins: [react(), tailwindcss()],
   build: {
     rolldownOptions: {
