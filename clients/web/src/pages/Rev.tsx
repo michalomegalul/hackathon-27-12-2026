@@ -10,6 +10,7 @@ import { Sections } from '../run/sections'
 import { useRun } from '../run/useRun'
 import { recallSent, useResend, useSend } from '../run/useSend'
 import { isDemo, matchesQuery } from '../run/jobs'
+import { forgetLast, useRememberLast } from '../run/lastRun'
 import { Alert, Badge, Spinner } from '../components/ui'
 import { dateTimeCs } from '../format'
 
@@ -143,6 +144,7 @@ export function Rev() {
   const run = useRun(id, useResend(id, send))
   const { data } = useQuery({ ...jobsOptions('all'), enabled: Boolean(id) })
   const title = data?.jobs.find((j) => j.job_id === id)?.title
+  useRememberLast('rev', id)
 
   if (!id) {
     const idle = { ...run, status: { ...run.status, detail: 'Vyberte databázi nebo přiložte specifikaci.' } }
@@ -157,7 +159,7 @@ export function Rev() {
       run={run}
       top={
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
-          <Link to="/rev" className="text-sm text-muted hover:text-white">
+          <Link to="/rev" onClick={() => forgetLast('rev')} className="text-sm text-muted hover:text-white">
             ← Vybrat jinou databázi
           </Link>
           {title && <span className="text-sm font-medium">{title}</span>}

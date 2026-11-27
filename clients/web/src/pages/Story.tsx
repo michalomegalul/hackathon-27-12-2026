@@ -1,12 +1,14 @@
 // Story "/" and "/run/:id". On "/" the prompt is typed into the Prompt section itself; sending
 // runs everything automatically (useRun) and the URL becomes /run/:id, so a reload or a shared
-// link reopens the run. A new run starts from "Story" in the header.
-import { useLocation, useParams } from 'react-router'
+// link reopens the run. "+ Nový příběh" starts a new one;
+// the "Story" tab leads back to the last run (run/lastRun.ts).
+import { Link, useLocation, useParams } from 'react-router'
 import { Composer } from '../run/Composer'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { useRun } from '../run/useRun'
 import { recallSent, useResend, useSend, type Draft } from '../run/useSend'
+import { forgetLast, useRememberLast } from '../run/lastRun'
 
 export function Story() {
   const { id } = useParams()
@@ -15,12 +17,19 @@ export function Story() {
   // History "Upravit" navigates here with the prompt (or spec) as a draft
   const location = useLocation()
   const draft = (location.state as { draft?: Draft } | null)?.draft
+  useRememberLast('story', id)
 
   return (
     <RunView
       run={run}
       top={
-        !id && (
+        id ? (
+          <div className="flex px-1">
+            <Link to="/" onClick={() => forgetLast('story')} className="text-sm text-muted hover:text-white">
+              + Nový příběh
+            </Link>
+          </div>
+        ) : (
           <div className="px-1 pb-1">
             <h1 className="text-xl font-semibold tracking-tight">Z příběhu data</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted">

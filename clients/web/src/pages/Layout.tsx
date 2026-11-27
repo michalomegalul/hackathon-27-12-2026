@@ -1,7 +1,9 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, NavLink, Outlet, isRouteErrorResponse, useLocation, useRouteError } from 'react-router'
-import { getHealth, getNetDown, subscribeNet } from '../api'
+import { Link, Outlet, isRouteErrorResponse, useLocation, useRouteError } from 'react-router'
+import { getHealth, getNetDown, inputOptions, isStatus, jobOptions, subscribeNet } from '../api'
+import { clearActive, useActive, useLastRun } from '../run/lastRun'
+import { recallSent } from '../run/useSend'
 import { Alert, Card } from '../components/ui'
 import { Spiral } from '../components/Spiral'
 import { setToken, useLoginRequired, useToken, useTokenInvalid } from '../token'
@@ -52,17 +54,55 @@ function NetBanner() {
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `border-b-2 px-2 py-1.5 text-base whitespace-nowrap sm:px-3 ${isActive ? 'border-accent text-white' : 'border-transparent text-muted hover:text-white'}`
 
-const NAV: [to: string, label: string, end?: boolean][] = [
-  ['/', 'Story', true],
-  ['/rev', 'Rev story'],
-  ['/history', 'History'],
-  ['/about', 'About'],
-]
+/** The run started last in this tab, from any page: queued / running / done, one click back to it. */
+function ActiveRun() {
+  const a = useActive()
+  const { pathname } = useLocation()
+  const job = useQuery({ ...jobOptions(a?.id ?? ''), enabled: Boolean(a) }) // shares the run page's polling
+  const input = useQuery({ ...inputOptions(a?.id ?? ''), enabled: Boolean(a) })
+  const here = Boolean(a && (pathname === a.path || pathname.startsWith(`${a.path}/`)))
+  const j = job.data
+  const finishedHere = here && (j?.status === 'done' || j?.status === 'error')
+  const gone = isStatus(job.error, 404)
+  // seen it finished, or it no longer exists: stop following it
+  useEffect(() => {
+    if (finishedHere || gone) clearActive()
+  }, [finishedHere, gone])
+  if (!a || here || !j) return null
+
+  const name = input.data?.company || recallSent(a.id)?.specName || 'běh'
+  const [dot, text, tone] =
+    j.status === 'queued'
+      ? ['bg-slate-400', j.position > 0 ? `ve frontě (${j.position})` : 've frontě', 'border-line text-slate-300']
+      : j.status === 'running'
+        ? ['bg-sky-400 motion-safe:animate-pulse', `${Math.round(Math.min(1, j.progress) * 100)} %`, 'border-sky-500/40 text-sky-200']
+        : j.status === 'done'
+          ? ['bg-emerald-400', 'hotovo', 'border-emerald-500/40 text-emerald-200']
+          : ['bg-rose-400', 'chyba', 'border-rose-500/40 text-rose-200']
+  return (
+    <Link
+      to={a.path}
+      title={`Zpět na ${name}${j.step && j.status === 'running' ? ` · ${j.step}` : ''}`}
+      className={`inline-flex min-w-0 shrink items-center gap-1.5 rounded-full border bg-white/[0.03] px-2.5 py-1 text-xs hover:bg-white/[0.07] ${tone}`}
+    >
+      <span className={`size-2 shrink-0 rounded-full ${dot}`} />
+      <span className="hidden max-w-40 truncate text-slate-200 sm:inline">{name}</span>
+      <span className="shrink-0 tabular-nums">{text}</span>
+    </Link>
+  )
+}
 
 function Shell({ children }: { children: ReactNode }) {
-  // /run/:id is a Story run: keep "Story" lit there too
   const { pathname } = useLocation()
-  const inRun = pathname.startsWith('/run/')
+  // Story and Rev story lead back to the run left there (per browser tab); lit on their runs too
+  const lastStory = useLastRun('story')
+  const lastRev = useLastRun('rev')
+  const NAV: [to: string, label: string, active: boolean][] = [
+    [lastStory ? `/run/${lastStory}` : '/', 'Story', pathname === '/' || pathname.startsWith('/run/')],
+    [lastRev ? `/rev/${lastRev}` : '/rev', 'Rev story', pathname === '/rev' || pathname.startsWith('/rev/')],
+    ['/history', 'History', pathname.startsWith('/history')],
+    ['/about', 'About', pathname.startsWith('/about')],
+  ]
   return (
     <div className="flex min-h-dvh flex-col">
       <header data-chrome="top" className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
@@ -72,13 +112,14 @@ function Shell({ children }: { children: ReactNode }) {
             <span className="hidden sm:inline">Story2Data</span>
           </Link>
           <nav className="-mx-1 flex min-w-0 gap-0.5 overflow-x-auto px-1">
-            {NAV.map(([to, label, end]) => (
-              <NavLink key={to} to={to} end={end} className={(a) => navCls({ isActive: a.isActive || (to === '/' && inRun) })}>
+            {NAV.map(([to, label, isActive]) => (
+              <Link key={label} to={to} aria-current={isActive ? 'page' : undefined} className={navCls({ isActive })}>
                 {label}
-              </NavLink>
+              </Link>
             ))}
           </nav>
           <span className="ml-auto" />
+          <ActiveRun />
           <QueueInfo />
           <Logout />
         </div>

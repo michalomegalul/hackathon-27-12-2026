@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { createJob, getInput, getResult, inputOptions, type JobInput, type NewJob } from '../api'
 import { rememberMine } from './jobs'
+import { setActive } from './lastRun'
 import type { Submit } from './prompt'
 
 const key = (id: string) => `s2d_sent_${id}`
@@ -39,6 +40,7 @@ export function useSend(base = '/run') {
         /* private mode: retry falls back to GET /input */
       }
       rememberMine(created.job_id)
+      setActive(created.job_id, `${base}/${created.job_id}`) // the header chip follows it
       void qc.invalidateQueries({ queryKey: ['jobs'] })
       void navigate(`${base}/${created.job_id}`)
     },
