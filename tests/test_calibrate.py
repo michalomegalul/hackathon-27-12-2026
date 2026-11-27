@@ -74,3 +74,41 @@ def test_calibration_steps_back_down_but_not_below_the_story(example_a):
     for r in table.itertuples():
         if r.status == "scaled":
             assert r.d <= r.target_d * calibrate.BAND + 1e-9 or abs(r.simulated_size) == abs(r.story_size)
+
+
+def test_a_stated_size_survives_calibration(example_a):
+    """Example A's E5 ("prodeje klesnou o pětinu") is size_stated: calibration measures it
+    but never changes it, and reports below_target instead of inflating it (DECISIONS 90)."""
+    spec, out, table = example_a
+    e5 = next(e for e in out.events if e.id == "E5")
+    assert e5.effects[0].size == -0.20 and e5.target == next(e for e in spec.events if e.id == "E5").target
+    row = table.set_index("event_id").loc["E5"]
+    assert bool(row["stated"]) and row["simulated_size"] == pytest.approx(-0.20)
+    assert row["status"] in ("ok", "below_target") and row["d"] is not None
+    assert not table.set_index("event_id").loc["E1", "stated"]
+
+
+def test_a_stated_size_below_target_warns_and_stays():
+    spec = load_spec("examples/a.yaml")
+    spec.entities.customers.n = 3000
+    spec.events = [e for e in spec.events if e.id == "E1"]
+    spec.events[0].effects[0].size_stated = True  # -6 %: far below target at 3000 customers
+    said = []
+    out, table = calibrate.calibrate(spec, seed=1, log=said.append)
+    assert out.events[0].effects[0].size == -0.06
+    r = table.iloc[0]
+    assert r["status"] == "below_target" and r["d"] < r["target_d"] and r["factor"] == 1
+    assert any("stated by the story" in m for m in said)
+
+
+def test_difficulty_does_not_scale_a_stated_size():
+    from s2d.sim import simulate
+    spec = load_spec("examples/a.yaml")
+    spec.entities.customers.n = 500
+    spec.meta.difficulty = Difficulty.hard
+    key = simulate(spec, seed=1).truth["answer_key"].set_index("event_id")
+    assert key.loc["E5", "magnitude_pct"] == pytest.approx(-20)   # stated
+    assert key.loc["E1", "magnitude_pct"] == pytest.approx(-3)    # -6 % x 0.5
+    from s2d import verify
+    hs = {h.event_id: h for h in verify.hypotheses(spec)}
+    assert hs["E5"].story_pct == pytest.approx(-20) and hs["E1"].story_pct == pytest.approx(-3)

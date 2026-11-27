@@ -145,3 +145,21 @@ def test_llm_schema_requires_every_key():
 def test_yaml_roundtrip(name):
     spec = compiler.validate(_spec(name))
     assert compiler.validate(yaml.safe_load(compiler.spec_to_yaml(spec))) == spec
+
+
+def test_size_stated_is_in_the_schema_prompt_and_examples():
+    schema = llm_schema()
+    effect = schema["properties"]["events"]["items"]["properties"]["effects"]["items"]
+    assert effect["properties"]["size_stated"]["type"] == "boolean" and "size_stated" in effect["required"]
+    prompt = compiler.build_prompt(**_story("kola"))
+    assert "size_stated: true only when the story text" in prompt
+    assert '"size":-0.2,"size_stated":true' in prompt      # Example A: "klesnou o pětinu"
+    assert '"size":-0.06,"size_stated":false' in prompt    # Example A: "mírně klesnou"
+
+
+@pytest.mark.parametrize("name", STORIES)
+def test_a_spec_without_size_stated_still_works(name):
+    raw = _spec(name)
+    assert all("size_stated" not in eff for ev in raw["events"] for eff in ev["effects"])
+    spec = compiler.validate(raw)
+    assert all(eff.size_stated is False for ev in spec.events for eff in ev.effects)

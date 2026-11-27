@@ -23,6 +23,12 @@ from .calendar import Calendar
 # The spec's `difficulty` scales every relative effect size.
 DIFFICULTY_SCALE = {Difficulty.easy: 1.5, Difficulty.medium: 1.0, Difficulty.hard: 0.5}
 
+
+def size_scale(spec: StorySpec, eff: Effect) -> float:
+    """The difficulty multiplier of an effect's size: 1 for a size the story states
+    (effect.size_stated, DECISIONS 90), DIFFICULTY_SCALE otherwise."""
+    return 1.0 if eff.size_stated else DIFFICULTY_SCALE[spec.meta.difficulty]
+
 # Metrics the day loop applies as multiplier curves.
 IMPLEMENTED_METRICS = {Metric.purchase_rate, Metric.churn_hazard, Metric.acquisition_rate}
 # Effect sizes in absolute units (report: "or absolute for rating/delivery_days").
@@ -215,7 +221,6 @@ def _compile_event(event: Event, spec: StorySpec, cal: Calendar) -> tuple[list[C
     start_idx = cal.index_of(event.start)
     side_effects = TYPE_HANDLERS[event.type](event, start_idx)
 
-    scale = DIFFICULTY_SCALE[spec.meta.difficulty]
     compiled = []
     kinds = [_kind(spec, event, eff) for eff in event.effects]
     if all(k is None for k in kinds):
@@ -239,7 +244,7 @@ def _compile_event(event: Event, spec: StorySpec, cal: Calendar) -> tuple[list[C
 
         compiled.append(
             CompiledEffect(
-                event.id, event.type.value, eff.metric, eff.size * scale,
+                event.id, event.type.value, eff.metric, eff.size * size_scale(spec, eff),
                 compile_curve(start_idx, eff, cal.n_days), event.target,
                 price_sensitive=(event.type == EventType.price_change and eff.metric == Metric.purchase_rate),
             )
@@ -262,7 +267,6 @@ def _compile_decoy(decoy: Decoy, cal: Calendar) -> CompiledEffect:
 
 def compile_story(spec: StorySpec, cal: Calendar, strict: bool = False) -> CompiledStory:
     story = CompiledStory()
-    scale = DIFFICULTY_SCALE[spec.meta.difficulty]
     rows = []
     for event in spec.events:
         try:
@@ -290,7 +294,7 @@ def compile_story(spec: StorySpec, cal: Calendar, strict: bool = False) -> Compi
             elif how == "emergent":
                 magnitude = eff.size * 100  # the story's expectation; nothing is scaled
             else:
-                magnitude = eff.size * scale * 100
+                magnitude = eff.size * size_scale(spec, eff) * 100
             rows.append({
                 "event_id": event.id,
                 "type": event.type.value,

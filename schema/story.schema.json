@@ -773,6 +773,11 @@
                   "title": "Size",
                   "type": "number"
                 },
+                "size_stated": {
+                  "default": false,
+                  "title": "Size Stated",
+                  "type": "boolean"
+                },
                 "lag_days": {
                   "default": 0,
                   "maximum": 120,

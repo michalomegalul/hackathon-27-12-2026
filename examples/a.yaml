@@ -81,7 +81,7 @@ events:
     target: {city: [Brno], channel: [store]}
     params: {}
     effects:
-      - {metric: purchase_rate, size: -0.20, lag_days: 0, ramp_days: 30, duration_days: null, decay_halflife_days: null}
+      - {metric: purchase_rate, size: -0.20, size_stated: true, lag_days: 0, ramp_days: 30, duration_days: null, decay_halflife_days: null}
     caused_by: null
     narrative_cs: Otevření konkurenční kavárny v Brně.
 decoys:

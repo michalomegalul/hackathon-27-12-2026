@@ -36,7 +36,7 @@ import pandas as pd
 import yaml
 
 from s2d.detective import scan
-from s2d.sim.events import ABSOLUTE_METRICS, DIFFICULTY_SCALE, compile_curve, daily_hazard
+from s2d.sim.events import ABSOLUTE_METRICS, compile_curve, daily_hazard, size_scale
 from s2d.spec import Effect, Event, EventType, StorySpec
 
 WINDOW = scan.WINDOW          # 28 days before and after
@@ -140,7 +140,7 @@ def hypothesis(spec: StorySpec, event: Event, effect: Effect) -> Hypothesis | No
     dropped = [k for k in keys if k not in COLUMNS[kpi]]
     keys = [k for k in keys if k in COLUMNS[kpi]]
     vary = keys[0] if keys else None
-    scale = DIFFICULTY_SCALE[spec.meta.difficulty]
+    scale = size_scale(spec, effect)
     unit = "%"
     if event.type == EventType.churn_shock:
         story_pct = float(event.params.churn_pct)

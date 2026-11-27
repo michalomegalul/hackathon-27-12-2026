@@ -945,3 +945,23 @@ the top of `s2d/detective/scan.py`.
     `lead_time_multiplier`, or a supply event without a supplier/category target, is now a
     StorySpec error (the LLM retries with the message) instead of an event the simulator
     silently skips. Unsupported event *types* stay valid: they are real story content.
+
+## Stated sizes and a year-over-year control (feat/stated-sizes, 2026-11-27)
+
+90. **A size the story states is a fact** (`effect.size_stated`, default false). The
+    hackathon brief "tržby klesly o 5 %" compiled to purchase_rate −0.05 and calibration
+    (Gemma had picked easy) made it −30 %. Now:
+    - The compiler sets `size_stated: true` when the story text gives the effect's number
+      (rule in the prompt; few-shot Example A's E5 "klesnou o pětinu" and Example B's
+      "o 2–3 dny později" are marked; "mírně klesnou" stays false). `llm_schema` requires
+      the key like every other, so the model has to decide. A spec without it validates
+      (the three gemma fixtures have none) and means false.
+    - `DIFFICULTY_SCALE` skips it (`events.size_scale`: 1 for a stated size), in the sim,
+      the answer key and the verifier's `story_pct`. Decision 9 still holds for the rest.
+    - Calibration measures it (d, σ, effect in `_truth.calibration`, new column `stated`)
+      but never scales it, never caps it and never widens its event (a stated −20 % in Brno
+      is not a −20 % in all stores). Below target it is `below_target` with a WARNING that
+      says the size is the story's and stays; the expected z is the row's `d`. For a
+      churn_shock, a stated effect protects `churn_pct`.
+    - Consequence for Example A: E5 now stays at the story's −20 % (it was calibrated to
+      about −26 %).

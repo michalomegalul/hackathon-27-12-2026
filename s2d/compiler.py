@@ -83,6 +83,11 @@ Rules:
   lag_days = delay before the effect starts, ramp_days = linear ramp,
   duration_days = plateau after the ramp (null = permanent),
   decay_halflife_days = tail after the plateau (null = stop at once).
+- size_stated: true only when the story text itself gives that effect's number
+  ("tržby klesly o 5 %" -> size -0.05, size_stated true; "o pětinu" -> -0.2, true;
+  "zákazníci budou odcházet" or "mírně klesnou" -> your estimate, false). A stated size is a
+  fact: write exactly the story's number. For a churn_shock, size_stated true means the
+  story gives churn_pct.
 - A consequence that starts later or hits another group is its own event with
   caused_by set to the id of an earlier event.
 - A churn_shock needs params.churn_pct and params.churn_window_days, and its effects

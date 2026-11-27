@@ -279,6 +279,9 @@ class Params(Strict):
 class Effect(Strict):
     metric: Metric
     size: Annotated[float, Field(ge=-1, le=10)]  # relative: +0.15 = +15 %
+    # True when the story text gives this number ("tržby klesly o 5 %"): a stated fact that
+    # neither difficulty nor calibration may change (DECISIONS 90).
+    size_stated: bool = False
     lag_days: Annotated[int, Field(ge=0, le=120)] = 0
     ramp_days: Annotated[int, Field(ge=0, le=60)] = 0
     duration_days: Annotated[int, Field(ge=0, le=1095)] | None = None  # None = permanent

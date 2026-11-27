@@ -16,7 +16,9 @@ the other values of the same dimension, 28 days after start + lag vs 28 before):
 Difficulty sets the target d (TARGET_D). An effect below its target has its
 `size` (churn_shock: `churn_pct`) scaled up, keeping its direction; one far above
 it is scaled back down, never below the story's own size. Stated facts such as
-`price_change_pct` are never touched, and drops are capped at realistic sizes. If
+`price_change_pct` and a size the story gives (`effect.size_stated`, DECISIONS 90)
+are never touched: such an effect is only measured, and below its target it is
+reported as below_target with a warning. Drops are capped at realistic sizes. If
 even the cap is far from the target, the event's target is widened by dropping
 one key, before any scaling. Whatever still cannot reach its target is left as
 it is and listed with a warning.
@@ -36,7 +38,7 @@ import pandas as pd
 from s2d import verify
 from s2d.detective import scan
 from s2d.sim import simulate, without_story
-from s2d.sim.events import DIFFICULTY_SCALE, mechanism
+from s2d.sim.events import mechanism, size_scale
 from s2d.spec import Difficulty, EventType, StorySpec, Target
 
 # Target d of the verifier's single test (DECISIONS 62). verify.Z_CONFIRM is 3:
@@ -144,7 +146,16 @@ def _sim_size(spec: StorySpec, i: int, j: int) -> float:
     ev = spec.events[i]
     if ev.type == EventType.churn_shock:
         return ev.params.churn_pct
-    return ev.effects[j].size * DIFFICULTY_SCALE[spec.meta.difficulty]
+    return ev.effects[j].size * size_scale(spec, ev.effects[j])
+
+
+def stated(spec: StorySpec, i: int, j: int) -> bool:
+    """Is the simulated size of this effect a number the story states (DECISIONS 90)?
+    A churn_shock's size is its churn_pct, stated if any of its effects says so."""
+    ev = spec.events[i]
+    if ev.type == EventType.churn_shock:
+        return any(e.size_stated for e in ev.effects)
+    return ev.effects[j].size_stated
 
 
 def size_cap(spec: StorySpec, i: int, j: int, up: bool) -> float:
@@ -167,7 +178,7 @@ def _set_sim_size(spec: StorySpec, i: int, j: int, value: float) -> bool:
     cap = size_cap(spec, i, j, up=value > 0)
     capped = abs(value) >= abs(cap)
     v = cap if capped else value
-    ev.effects[j].size = round(v / DIFFICULTY_SCALE[spec.meta.difficulty], 4)
+    ev.effects[j].size = round(v / size_scale(spec, ev.effects[j]), 4)
     return capped
 
 
@@ -181,7 +192,7 @@ def _at_cap(spec: StorySpec, i: int) -> StorySpec:
     """A copy of the spec with every simulated effect of event i at its size cap."""
     out = spec.model_copy(deep=True)
     for k in _slots(out):
-        if k[0] == i:
+        if k[0] == i and not stated(out, *k):
             v = _sim_size(out, *k)
             _set_sim_size(out, *k, CHURN_PCT_CAP if out.events[i].type == EventType.churn_shock
                           else size_cap(out, *k, up=v > 0))
@@ -202,7 +213,8 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     seed = (spec.meta.seed if seed is None else seed) + SEED_OFFSET
     spec = spec.model_copy(deep=True)
     cols = ["event_id", "metric", "kpi", "segment", "original_segment", "original_size", "story_size",
-            "simulated_size", "factor", "sigma", "cv_eff", "effect", "d_original", "d", "target_d", "status"]
+            "simulated_size", "factor", "sigma", "cv_eff", "effect", "d_original", "d", "target_d", "status",
+            "stated"]
     slots = _slots(spec)
     if not slots:
         return spec, pd.DataFrame(columns=cols)
@@ -215,6 +227,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     orig_target = {i: spec.events[i].target for i, _ in slots}
     capped: set[tuple[int, int]] = set()
     widened: set[int] = set()
+    fixed = {k for k in slots if stated(spec, *k)}  # the story's own numbers: measured, never changed
 
     first = _measure_all(spec, seed, twin)
 
@@ -224,6 +237,8 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     # widening cannot leave another event's earlier scaling stale (DECISIONS 56).
     for i in sorted({i for i, _ in slots}):
         own = [k for k in slots if k[0] == i]
+        if any(k in fixed for k in own):
+            continue  # a stated size in a wider segment would be another story
         at_cap = _at_cap(spec, i)
         m_cap = _measure_all(at_cap, seed, twin)
         here = min((m_cap[k].d or 0.0) for k in own)
@@ -245,7 +260,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     # back down, but never below the story's own size and never past the cap.
     m = _measure_all(spec, seed, twin)
     for _ in range(ITERATIONS):
-        off = [k for k in slots if m[k].d is not None and (
+        off = [k for k in slots if k not in fixed and m[k].d is not None and (
             (m[k].d < goal and k not in capped)
             or (m[k].d > goal * BAND and abs(_sim_size(spec, *k)) > abs(story_size[k]) + 1e-9))]
         if not off:
@@ -279,7 +294,8 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
         if status in ("not_measurable", "below_target"):
             say(f"WARNING calibration: {ev.id} {ev.effects[j].metric.value} on '{kpi_segment(ev.target)}' "
                 f"has d = {mk.d if mk.d is None else round(mk.d, 2)} < target {goal:.1f} ({status}); "
-                f"it may not be detectable")
+                + ("the size is stated by the story and stays as it is; " if k in fixed else "")
+                + "it may not be detectable")
         rows.append({
             "event_id": ev.id, "metric": ev.effects[j].metric.value, "kpi": mk.kpi,
             "segment": ev.target.describe(), "original_segment": orig_target[i].describe(),
@@ -291,7 +307,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
             "effect": None if mk.effect is None else round(mk.effect, 5),
             "d_original": None if first[k].d is None else round(first[k].d, 2),
             "d": None if mk.d is None else round(mk.d, 2),
-            "target_d": goal, "status": status,
+            "target_d": goal, "status": status, "stated": k in fixed,
         })
     return spec, pd.DataFrame(rows, columns=cols)
 
@@ -301,5 +317,6 @@ def format_table(table: pd.DataFrame) -> str:
     for r in table.itertuples():
         seg = r.segment if r.segment == r.original_segment else f"{r.original_segment} -> {r.segment}"
         lines.append(f"  {r.event_id:<4} {r.metric:<16} {seg:<36} size {r.story_size:+.3g} -> {r.simulated_size:+.3g}"
-                     f"  d {r.d_original} -> {r.d} (target {r.target_d:.1f}, via {r.kpi})  {r.status}")
+                     f"  d {r.d_original} -> {r.d} (target {r.target_d:.1f}, via {r.kpi})  {r.status}"
+                     + ("  (stated size)" if getattr(r, "stated", False) else ""))
     return "\n".join(lines)

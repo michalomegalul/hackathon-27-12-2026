@@ -46,7 +46,7 @@ events:
     target: {city: [Ostrava, Olomouc]}
     params: {delivery_delay_days: 2.5}
     effects:
-      - {metric: delivery_days, size: 2.5, lag_days: 0, ramp_days: 0, duration_days: 120, decay_halflife_days: null}
+      - {metric: delivery_days, size: 2.5, size_stated: true, lag_days: 0, ramp_days: 0, duration_days: 120, decay_halflife_days: null}
       - {metric: rating_mean, size: -0.9, lag_days: 3, ramp_days: 0, duration_days: 120, decay_halflife_days: null}
     caused_by: null
     narrative_cs: Přechod na levnějšího přepravce na Moravě → pozdní doručení.
