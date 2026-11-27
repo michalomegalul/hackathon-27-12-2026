@@ -1,7 +1,8 @@
 """What one job does: the pipeline of app/main.py run_sim, in the five steps the status shows.
 
 compile (unless spec_yaml) -> calibrate -> simulate -> fill_reviews (if a pool exists) ->
-write_world -> twin -> verify -> narrate (template fallback) -> analyst.duckdb + result.json.
+write_world -> twin -> verify -> narrate (template fallback) -> analyst.duckdb, analyst_twin.duckdb
++ result.json.
 The detective is a separate job on a finished one.
 """
 
@@ -184,6 +185,7 @@ def run_generate(state: dict) -> None:
     (run / "verify.json").write_text(json.dumps(ver, ensure_ascii=False, default=str), "utf-8")
 
     sandbox.build_analyst(run / "story.duckdb", jd / "analyst.duckdb")
+    sandbox.build_analyst(run / "twin" / "story.duckdb", jd / "analyst_twin.duckdb")
     from s2d.compiler import spec_to_yaml
     result = {
         "job_id": state["job_id"], "spec_yaml": spec_to_yaml(spec), "summary": summary(ver),

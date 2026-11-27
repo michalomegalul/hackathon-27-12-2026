@@ -1116,3 +1116,27 @@ the top of `s2d/detective/scan.py`.
     only after a request without a token got 401 (the API is not public). Risk accepted for
     two days: anyone can queue jobs on the one GPU. **After the hackathon** set
     `API_PUBLIC_ROLE=` (empty) in the server's `.env` and restart the `api` service.
+127. **The API serves the twin, the keys, the history and live stats** (for web v2,
+    `docs/prompts/06-web-v2.md` prompt 0). (A) A finished job also gets `analyst_twin.duckdb`,
+    built from `run/twin/story.duckdb` by the same `sandbox.build_analyst` (schema `main` only,
+    so the twin's `_truth` is not in it either); `/query` (body) and `/tables/{name}` (query
+    parameter) take `world: story | twin`, default `story`, same sandbox and limits. Jobs
+    finished before this get the file on the first twin request, under a lock (check and build
+    together, since `build_analyst` writes a fixed `.tmp` name). `GET /tables` stays the story's
+    (the web does not need the twin's row counts there). (B) `s2d/sim/pg.py` stays the one
+    source of the keys: `primary_key()` and `foreign_keys()` (only keys whose two tables
+    exist) feed `export()`, `GET /tables` (`primary_key`, `foreign_keys`) and the new
+    `GET /ddl` (`pg.ddl`: Postgres types, inline PRIMARY KEY and named REFERENCES constraints,
+    parents first so it runs as is; the test runs it in DuckDB, which checks REFERENCES too).
+    (D) `GET /v1/jobs?scope=all` lists every job for teacher and admin (403 for a student;
+    admin's default stays everything), `story_preview` (120 chars) per item, and
+    `GET /jobs/{id}/input` gives the params as sent without the spec. (C) `GET /v1/stats` has
+    no auth, like `/health`, and nothing but titles from the jobs (no owners, no stories):
+    the dashboard is public anyway in demo mode. It reads the job files at most every 5 s;
+    the per-job numbers from `result.json` are kept in memory (a done result does not change).
+    Choices: percentages are 0–100 over **rows** (not jobs), tested = not `not_testable`;
+    `twin_false_pct` counts rows with a twin value; run time is `finished − started` (no
+    queue wait); `recent` and `timeline` count **done** jobs (an error has no summary);
+    `timeline` is always 24 hourly buckets ending with the current hour; rows and customers
+    are the story world only (`result.json` `rows`); a running detective shows as step
+    `"detektiv"`.

@@ -9,7 +9,7 @@ until `status` is `done` or `error`, then read `/result`.
 
 ## Auth
 
-Every endpoint except `GET /v1/health`, `/docs` and `/openapi.json` needs
+Every endpoint except `GET /v1/health`, `GET /v1/stats`, `/docs` and `/openapi.json` needs
 
 ```
 Authorization: Bearer <token>
@@ -17,9 +17,9 @@ Authorization: Bearer <token>
 
 | role | can |
 |---|---|
-| `student` | create jobs, see **own** jobs, result, tables, query, download, run the detective |
-| `teacher` | the same on **every** job, + `answer-key`, + the detective's score |
-| `admin` | everything; `GET /v1/jobs` lists every job |
+| `student` | create jobs, see **own** jobs, input, result, tables, query, DDL, download, run the detective |
+| `teacher` | the same on **every** job, + `answer-key`, + the detective's score, + `GET /v1/jobs?scope=all` |
+| `admin` | everything; `GET /v1/jobs` lists every job (with or without `scope=all`) |
 
 A job you may not see answers `404 job not found` (not 403), so ids do not leak.
 
@@ -36,10 +36,10 @@ Every error is `{"detail": "<message>"}` with these codes:
 | 400 | the request is well-formed but cannot run | `"spec_yaml is not a valid spec: meta.days: Input should be less than or equal to 1095"` |
 | 400 | SQL error in `/query` | `"Catalog Error: Table with name foo does not exist!"` |
 | 401 | no / unknown token | `"missing or unknown token"` |
-| 403 | wrong role | `"teacher or admin only"` |
-| 404 | no such job (or not yours), table, or detective run | `"job not found"`, `"table not found"`, `"detective not run"` |
+| 403 | wrong role (`answer-key`, `GET /v1/jobs?scope=all`) | `"teacher or admin only"` |
+| 404 | no such job (or not yours), table, data files, or detective run | `"job not found"`, `"table not found"`, `"data not found"`, `"detective not run"` |
 | 408 | `/query` ran over 20 s | `"query timed out after 20 s"` |
-| 409 | the job is not `done` yet (result, tables, query, download, answer-key, detect) | `"job is running, not done"` |
+| 409 | the job is not `done` yet (result, tables, ddl, query, download, answer-key, detect) | `"job is running, not done"` |
 | 422 | body or query parameters do not match the schema (FastAPI) | see below |
 
 422 is FastAPI's own format, `detail` is a list:
@@ -65,6 +65,55 @@ Every error is `{"detail": "<message>"}` with these codes:
 `running` is the id of the running job or `null`. `reachable`: Ollama answers (`ollama`), an
 API key is set (`claude`), always `true` for `replay` (cache only, no network). `ok` is
 `false` only when the worker thread is dead.
+
+### `GET /v1/stats` (no auth): the homepage dashboard
+
+```json
+{
+  "jobs_total": 23,
+  "jobs_done": 19,
+  "jobs_today": 7,
+  "running": {"job_id": "20261127-191502-3fa9c1", "step": "kalibrace a simulace", "step_index": 2,
+              "progress": 0.55, "eta_s": 35},
+  "waiting": 1,
+  "median_run_s": 81,
+  "events_confirmed_pct": 87.5,
+  "twin_false_pct": 3.1,
+  "customers_simulated": 412000,
+  "rows_generated": 9731554,
+  "recent": [
+    {"job_id": "20261127-191502-3fa9c1", "title": "Pražírna Zrnko",
+     "finished": "2026-11-27T19:16:16+01:00", "elapsed_s": 74, "summary": {"story": "4/4", "twin": "0/4"}}
+  ],
+  "timeline": [
+    {"hour": "2026-11-26T20:00:00+01:00", "jobs": 0, "median_run_s": null},
+    {"hour": "2026-11-26T21:00:00+01:00", "jobs": 3, "median_run_s": 77},
+    "... 24 entries, oldest first, the last one is the current hour ..."
+  ]
+}
+```
+
+Computed from the job files at most every 5 s (cached in between), so polling it every 5 s is
+fine. Over every user's jobs; it has no owner names and no story texts, only job titles.
+
+- `jobs_total`: every job, any status. `jobs_done`: status `done`. `jobs_today`: created
+  today (server time).
+- `running`: the job the worker runs now, with these five fields as in `GET /v1/jobs/{id}`; `null` when idle.
+  While the detective runs it is `{"job_id": ..., "step": "detektiv", "step_index": 0, ...}`.
+- `waiting`: items in the queue behind it (generate and detective), as in `/v1/health`.
+- `median_run_s`: median of `finished − started` of the done jobs (queue wait not included);
+  `null` before the first one.
+- `events_confirmed_pct`: confirmed story rows / tested story rows (`status` not
+  `not_testable`) of `/result` `verification`, over all done jobs, in % (0–100, one decimal).
+- `twin_false_pct`: tested rows with `twin_confirmed: true` / tested rows with a twin value,
+  in %: how often the twin without the story "finds" the event (a false alarm).
+  Both are `null` while nothing was tested.
+- `customers_simulated`, `rows_generated`: sums of `/result` `rows` (`customers`, and all
+  tables) over done jobs; the story world only (the twin is not counted).
+- `recent`: the last 20 done jobs, newest `finished` first.
+- `timeline`: always 24 hours, oldest first, the last entry is the current (unfinished)
+  hour; `hour` is its start. `jobs`: done jobs that finished in that hour, `median_run_s` their
+  median run time (`null` when `jobs` is 0).
 
 ### `POST /v1/jobs` → 202
 
@@ -107,19 +156,38 @@ Response **202**:
 Errors: 400 (invalid `spec_yaml`), 401, 422 (no `company`+`story` and no `spec_yaml`:
 `"detail": [{"type": "value_error", "loc": ["body"], "msg": "Value error, give company and story, or spec_yaml", ...}]`).
 
-### `GET /v1/jobs`
+### `GET /v1/jobs?scope=mine`
 
-Own jobs, newest first (admin: everyone's).
+Own jobs, newest first (admin: everyone's). `scope=all` lists **every** job for teacher and
+admin (403 `"teacher or admin only"` for a student), so in public mode (`teacher`) the web page
+shows the whole history, including the demo jobs made with team tokens. `scope=mine` is the
+default.
 
 ```json
 {"jobs": [
   {"job_id": "20261127-191502-3fa9c1", "status": "done", "title": "Pražírna Zrnko",
    "owner": "michal", "created": "2026-11-27T19:15:02+01:00", "elapsed_s": 74,
-   "summary": {"story": "4/4", "twin": "0/4"}}
+   "summary": {"story": "4/4", "twin": "0/4"},
+   "story_preview": "V březnu 2026 jsme zdražili o 15 %, studenti začali odcházet ..."}
 ]}
 ```
 
-`summary` is `null` until the job is done.
+`summary` is `null` until the job is done. `story_preview`: the first 120 characters of the
+story (trimmed), `null` for a `spec_yaml` job.
+
+### `GET /v1/jobs/{id}/input`: the prompt as sent
+
+Any status, same visibility as the job.
+
+```json
+{"company": "Pražírna Zrnko, kavárny v Praze a Brně a e-shop ...",
+ "story": "V březnu 2026 jsme zdražili o 15 %, studenti začali odcházet ...",
+ "difficulty": "medium", "seed": 42, "n_customers": 20000, "dirt": "low", "spec_given": false}
+```
+
+The fields of `POST /v1/jobs` as given (`null` when left out). For a `spec_yaml` job
+`company` and `story` are `null`, `spec_given` is `true` and `n_customers` is the spec's count
+unless one was given; the spec itself is in `/result` `spec_yaml`, not repeated here.
 
 ### `GET /v1/jobs/{id}`: status (the progress bar reads this)
 
@@ -220,14 +288,55 @@ Own jobs, newest first (admin: everyone's).
 ```json
 {"tables": [
   {"name": "customers", "rows": 20000,
-   "columns": [{"name": "customer_id", "type": "BIGINT"}, {"name": "city", "type": "VARCHAR"}]},
-  {"name": "orders", "rows": 151234, "columns": [...]}
+   "columns": [{"name": "customer_id", "type": "BIGINT"}, {"name": "city", "type": "VARCHAR"}],
+   "primary_key": ["customer_id"], "foreign_keys": []},
+  {"name": "orders", "rows": 151234, "columns": [...],
+   "primary_key": ["order_id"],
+   "foreign_keys": [{"column": "customer_id", "references": {"table": "customers", "column": "customer_id"}},
+                    {"column": "store_id", "references": {"table": "stores", "column": "store_id"}},
+                    {"column": "subscription_id", "references": {"table": "subscriptions", "column": "subscription_id"}}]},
+  {"name": "inventory_daily", "...": "...", "primary_key": ["product_id", "date"], "foreign_keys": [...]}
 ]}
 ```
 
-### `GET /v1/jobs/{id}/tables/{name}?limit=100&offset=0`
+`type` is DuckDB's. `primary_key` and `foreign_keys` are the keys the Postgres export
+creates (`s2d/sim/pg.py`), the same as `/ddl`; a foreign key is listed only when both tables
+exist. Use them for ERD edges instead of guessing from `*_id`.
 
-`limit` 1–1000 (default 100), `offset` ≥ 0. Rows are arrays in column order; dates are
+### `GET /v1/jobs/{id}/ddl` → `text/plain`
+
+The analyst tables as Postgres `CREATE TABLE` statements, with the keys of `/tables`, parents
+before children, so the script runs as is in an empty `public` schema (excerpt, every column
+is in the real one):
+
+```sql
+CREATE TABLE "public"."customers" (
+    "customer_id" BIGINT,
+    "first_name" TEXT,
+    "signup_date" DATE,
+    PRIMARY KEY ("customer_id")
+);
+
+CREATE TABLE "public"."orders" (
+    "order_id" BIGINT,
+    "customer_id" BIGINT,
+    "order_ts" TIMESTAMP,
+    "order_date" DATE,
+    "total_czk" DOUBLE PRECISION,
+    PRIMARY KEY ("order_id"),
+    CONSTRAINT "orders_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "public"."customers" ("customer_id")
+);
+```
+
+Types: `BIGINT`, `INTEGER`, `DOUBLE PRECISION`, `NUMERIC`, `TEXT`, `DATE`, `TIMESTAMP`,
+`BOOLEAN` (DuckDB `DOUBLE` → `DOUBLE PRECISION`, `VARCHAR` → `TEXT`, `DECIMAL(p,s)` →
+`NUMERIC(p,s)`, anything else → `TEXT`). The constraint names are the export's
+(`<table>_<column>_fkey`).
+
+### `GET /v1/jobs/{id}/tables/{name}?limit=100&offset=0&world=story`
+
+`limit` 1–1000 (default 100), `offset` ≥ 0. `world`: `story` (default) or `twin`, see
+`/query`. Rows are arrays in column order; dates are
 `"YYYY-MM-DD"`, timestamps ISO 8601, missing values `null`.
 
 ```json
@@ -238,13 +347,18 @@ Own jobs, newest first (admin: everyone's).
 }
 ```
 
-Errors: 404 `"table not found"`, 422 (limit > 1000).
+Errors: 404 `"table not found"`, 404 `"data not found"` (no twin files), 422 (limit > 1000,
+`world` not `story`/`twin`).
 
 ### `POST /v1/jobs/{id}/query`
 
 ```json
-{"sql": "SELECT city, count(*) AS n FROM customers GROUP BY 1 ORDER BY 2 DESC"}
+{"sql": "SELECT city, count(*) AS n FROM customers GROUP BY 1 ORDER BY 2 DESC", "world": "story"}
 ```
+
+`world`: `story` (default), the data the story happened in, or `twin`, the same company
+simulated with the same seed **without** the story (the control the verification compares
+with): the same tables and columns, so the same SQL runs on both.
 
 ```json
 {"columns": [{"name": "city", "type": "VARCHAR"}, {"name": "n", "type": "BIGINT"}],
@@ -252,10 +366,13 @@ Errors: 404 `"table not found"`, 422 (limit > 1000).
  "truncated": false, "seconds": 0.01}
 ```
 
-Sandboxed: DuckDB SQL on a separate `analyst.duckdb` holding only the analyst tables (no
-answer key, no `_truth`), opened read-only with external access off (no `read_parquet`,
+Sandboxed: DuckDB SQL on a separate `analyst.duckdb` (`analyst_twin.duckdb` for the twin)
+holding only the analyst tables (no answer key, no `_truth`), opened read-only with external access off (no `read_parquet`,
 `read_csv`, `ATTACH`, `COPY`, no files) and the configuration locked. At most 1000 rows
 (`truncated: true` if there were more), 20 s timeout (408). SQL errors are 400.
+The twin file is built when the job finishes; for a job finished before the twin was
+queryable it is built on the first twin request (that one takes a second longer). 404
+`"data not found"` if the job has no twin files.
 
 ### `GET /v1/jobs/{id}/download` → `application/zip`
 
@@ -331,15 +448,22 @@ returned as is (no second run).
 ```sh
 T=<token>; H="Authorization: Bearer $T"; U=https://hack.dobsinsky.dev
 curl -s $U/v1/health
+curl -s $U/v1/stats
 curl -s -H "$H" -H 'Content-Type: application/json' -X POST $U/v1/jobs \
      -d '{"company":"Pekárna v Brně ...","story":"V dubnu jsme zdražili ...","seed":7}'
 curl -s -H "$H" $U/v1/jobs
+curl -s -H "$H" "$U/v1/jobs?scope=all"
+curl -s -H "$H" $U/v1/jobs/$ID/input
 curl -s -H "$H" $U/v1/jobs/$ID
 curl -s -H "$H" $U/v1/jobs/$ID/result
 curl -s -H "$H" $U/v1/jobs/$ID/tables
 curl -s -H "$H" "$U/v1/jobs/$ID/tables/orders?limit=5&offset=0"
+curl -s -H "$H" "$U/v1/jobs/$ID/tables/orders?limit=5&world=twin"
+curl -s -H "$H" $U/v1/jobs/$ID/ddl
 curl -s -H "$H" -H 'Content-Type: application/json' -X POST $U/v1/jobs/$ID/query \
      -d '{"sql":"SELECT count(*) FROM orders"}'
+curl -s -H "$H" -H 'Content-Type: application/json' -X POST $U/v1/jobs/$ID/query \
+     -d '{"sql":"SELECT count(*) FROM orders","world":"twin"}'
 curl -s -H "$H" -o data.zip $U/v1/jobs/$ID/download
 curl -s -H "$H" $U/v1/jobs/$ID/answer-key
 curl -s -H "$H" -X POST $U/v1/jobs/$ID/detect
