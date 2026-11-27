@@ -24,6 +24,7 @@ const router = createBrowserRouter([
       // lazy: TanStack Table + Virtual load only with the data browser
       { path: 'run/:id/data', lazy: async () => ({ Component: (await import('./pages/DataPage')).DataPage }) },
       { path: 'rev', Component: Rev },
+      { path: 'rev/:id', Component: Rev },
       { path: 'history', Component: History },
       { path: 'history/:id', Component: HistoryRun },
       { path: 'about', Component: About },

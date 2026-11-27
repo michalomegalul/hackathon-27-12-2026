@@ -12,6 +12,7 @@ import type { Run } from './useRun'
 
 const DataView = lazy(async () => ({ default: (await import('./DataView')).DataView }))
 const Summary = lazy(() => import('./Summary'))
+const RevSummary = lazy(() => import('./RevSummary'))
 
 const frac = (s: string) => s.split('/').map(Number) as [number, number]
 const kpi = (k: string) => KPI_CS[k] ?? k
@@ -299,19 +300,22 @@ export function ScoreSection({ run }: { run: Run }) {
 
 // ---- 6. Shrnutí ------------------------------------------------------------------------
 
-export function SummarySection({ run, spec }: { run: Run; spec: Spec | null }) {
+export function SummarySection({ run, spec, mode = 'story' }: { run: Run; spec: Spec | null; mode?: Mode }) {
   return (
-    <Section run={run} id="summary" title="Shrnutí">
+    <Section run={run} id="summary" title="Shrnutí" hint={mode === 'rev' && 'detektiv proti zadání'}>
       {run.result && run.id && (
         <Suspense fallback={<Waiting>Připravuji shrnutí…</Waiting>}>
-          <Summary run={run} spec={spec} />
+          {mode === 'rev' && run.detect ? <RevSummary run={run} /> : <Summary run={run} spec={spec} />}
         </Suspense>
       )}
     </Section>
   )
 }
 
-export function Sections({ run, specName }: { run: Run; specName?: string }) {
+/** story: Shrnutí links the prompt to charts and tables; rev: the detective's story against the prompt. */
+export type Mode = 'story' | 'rev'
+
+export function Sections({ run, specName, mode = 'story' }: { run: Run; specName?: string; mode?: Mode }) {
   const spec = useSpec(run.result?.spec_yaml)
   return (
     <>
@@ -320,7 +324,7 @@ export function Sections({ run, specName }: { run: Run; specName?: string }) {
       <DataSection run={run} />
       <DetectSection run={run} />
       <ScoreSection run={run} />
-      <SummarySection run={run} spec={spec} />
+      <SummarySection run={run} spec={spec} mode={mode} />
     </>
   )
 }
