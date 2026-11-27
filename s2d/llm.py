@@ -257,9 +257,11 @@ def _ollama_call(w: _Worker, step: str, prompt: str, schema: dict | None,
         "stream": False,
         "keep_alive": -1,
         "options": {"num_ctx": NUM_CTX, **STEP_OPTIONS.get(step, {"temperature": 0.1})},
+        # never think: with format it breaks the JSON, without it gemma4 thought for 275 s on
+        # the narration and returned empty content (DECISIONS 131)
+        "think": False,
     }
     if schema is not None:
-        body["think"] = False  # never combine think:true with format
         body["format"] = schema
     try:
         r = httpx.post(f"{w.url}/api/chat", json=body, timeout=httpx.Timeout(TIMEOUT_S, connect=10))

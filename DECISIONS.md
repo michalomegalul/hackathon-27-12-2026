@@ -1206,3 +1206,10 @@ the top of `s2d/detective/scan.py`.
      ×2.44 (story ×1.8), E2 at the +400 % cap. Stated sizes are untouched (decision 90),
      and `customers_for_stated` now aims at 4.3 too, so it adds a few more customers. Easy
      (5) and hard (2.5) stay.
+131. **Ollama never thinks** (`s2d/llm.py`: `think: false` on every call). Before, only
+     calls with a schema had it, so the narration and the review texts ran with gemma4's
+     thinking on. On the live Example A job (6 events) the narration thought for 275 s and
+     returned empty content, and the template was used: 426 s for a job whose pipeline took
+     149 s. The same prompt without thinking takes 6.3 s and gives the Czech narrative. A
+     one-sentence prompt took 7.8 s with 378 tokens thinking on, 1.4 s with 29 tokens off.
+     This also explains the empty narrations of decision 87.

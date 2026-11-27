@@ -96,7 +96,8 @@ def test_text_step_sampling_and_no_format(ollama):
     assert llm.complete("texts", "napiš") == "volný text"
     body = ollama.posts[0][1]
     assert body["options"] == {"num_ctx": 16384, "temperature": 1.0, "top_p": 0.95, "top_k": 64}
-    assert "format" not in body and "think" not in body
+    # thinking off on text steps too: on the narration it ran 275 s and returned "" (DECISIONS 131)
+    assert "format" not in body and body["think"] is False
 
 
 def test_second_call_is_a_cache_hit(ollama):
