@@ -103,6 +103,33 @@ def summary(ver: dict) -> dict:
     return out
 
 
+def _calibrate(spec, s: "Steps", say):
+    """Calibration; if a size the story states is too weak to confirm, more customers
+    (up to MAX_CUSTOMERS, DECISIONS 129) and every d measured again at that count, with
+    the sizes as calibrated. The first pass's warnings are dropped then (only logged),
+    they were about the smaller world."""
+    from s2d.calibrate import calibrate, customers_for_stated, remeasure
+    said: list[str] = []
+    out, table = calibrate(spec, log=said.append)
+    n0 = spec.entities.customers.n
+    n1 = customers_for_stated(spec, table, MAX_CUSTOMERS)
+    if n1 is None:
+        for m in said:
+            say(m)
+        return out, table
+    for m in said:
+        s.log(m.removeprefix("WARNING "))
+    short = ", ".join(r.event_id for r in table.itertuples() if r.stated and r.status == "below_target")
+    say(f"WARNING počet zákazníků zvýšen z {_num(n0)} na {_num(n1)}: velikost {short} je daná příběhem "
+        f"a při {_num(n0)} zákaznících by nešla ověřit")
+    out.entities.customers.n = n1  # the calibrated sizes stay: more customers only raise d
+    return out, remeasure(out, table, log=say)
+
+
+def _num(n: int) -> str:
+    return f"{n:,}".replace(",", " ")
+
+
 def run_generate(state: dict) -> None:
     """Runs a queued job to the end; raises on failure (the worker records the error)."""
     from s2d import llm, texts, verify
@@ -150,8 +177,9 @@ def run_generate(state: dict) -> None:
         s.log(f"simulating {spec.meta.days} days, {spec.entities.customers.n} customers")
         table = None
         if spec.events:
-            from s2d.calibrate import calibrate
-            spec, table = calibrate(spec, log=say)
+            spec, table = _calibrate(spec, s, say)
+            state["n_customers"] = spec.entities.customers.n
+            store.save_job(state)
         world = simulate(spec)
         if table is not None:
             world.truth["calibration"] = table

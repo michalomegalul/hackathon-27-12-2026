@@ -1150,3 +1150,49 @@ the top of `s2d/detective/scan.py`.
     with a fixed host it kept the old IP after a deploy recreated the container and gave
     502 until nginx restarted. The server's old `app` container stays as an orphan until
     `docker compose up -d --remove-orphans` (or `docker rm -f`) removes it.
+
+## Calibration on three seeds (feat/calibration-seeds, 2026-11-28)
+
+129. **d is the weakest of three calibration seeds, and a stated size that is too weak
+     gets more customers** (`s2d/calibrate.py`, `s2d/api/pipeline.py`). The deployed
+     Example A (40k customers, its own seed 20261127) came out story 3/6, twin 0/6 on every
+     run. The input was the same each time and the pipeline is deterministic, so this was
+     one result repeated. E1 z 1.25, E4 z 2.14, E5 (stated −20 %) z 0.84. Baseline on
+     main, `_curve_level` medium, seeds 1–5, 40k: 83 % (25/30), twin 0 %. E1 confirmed 2/5
+     at calibrated d 3.78.
+     - **Why one seed is not enough:** at one size the *paired* effect itself scatters
+       from seed to seed, not only the noise. Calibrated Example A, 40k, seed 7919 and 1–5:
+       E1 d 2.76–4.08, E5 d 0.35–4.55 (effect −0.9 % to −11.8 %). So a single seed's d of
+       3.5 confirms about two runs in three, and a story with six tests misses about two
+       (decision 87 named this).
+     - **Now:** d is measured on `CAL_SEEDS` = 3 seeds (seed + k·7919, k = 1..3: k = 1
+       is the old seed, and the run's own seed is never one of them) and the smallest
+       counts. The table has a `d_seeds` column. Widening, scaling, caps and stated sizes
+       work as before on that d.
+     - **Speed:** one worker process per seed holds that seed's twin, so only the spec
+       crosses the pipe. Workers fork from a `forkserver` that preloads `s2d.calibrate`,
+       so there are no copies of the API's threads. The children still import the
+       caller's `__main__`, so a script needs `if __name__ == "__main__"`. Every script in
+       the repo has one. If a worker dies (memory, or an unguarded main), calibration goes
+       on in-process one seed after another. Threads were tried first and got about
+       1.7 cores, which is not enough. Above `PARALLEL_MAX_N` (100k) calibration uses one
+       seed, as before. Three seeds at 160k (the brief) would need about 12 GB side by side
+       and would triple calibration in turn, and at 160k the brief confirms on every seed
+       (decision 92).
+     - **A stated size below target** (decision 90: never scaled) raises
+       `entities.customers.n` in the API pipeline, once, to
+       n·(goal·OVERSHOOT / d)² (d ∝ √n), rounded up to 5000 and capped at `MAX_CUSTOMERS`.
+       Then `calibrate.remeasure` measures every d again at the new count, with the sizes
+       already calibrated. A full second calibration took 2–3× longer. More customers only
+       raise d, so a scaled size may now sit above target × BAND. The job gets a Czech
+       warning ("počet zákazníků zvýšen z 40 000 na 80 000: velikost E5 je daná
+       příběhem …"), and `n_customers` in the status shows the new count. The CLI
+       (`python -m s2d.sim run`) does not raise.
+     - **Deployed case after the change** (notebook, 18 cores): story **6/6**, twin 0/6,
+       every SQL matching. 40k → 80k customers; E1 z 3.43, E4 z 7.34, E5 z 5.04. Job 225 s
+       (calibration 186 s), against 97 s before. With threads it was 707 s. The cost is
+       sizes: E2's hazard is calibrated at 40k on the weakest seed and lands at the cap
+       (+400 %).
+     - **Server:** CT 106 (`hack`, the API's container) went from 4 cores / 6 GB to
+       8 cores / 12 GB (`pct set 106 --cores 8 --memory 12288 --swap 1024`, live). Three
+       seeds at 100k need about 7–8 GB.

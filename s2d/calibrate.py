@@ -11,7 +11,8 @@ the other values of the same dimension, 28 days after start + lag vs 28 before):
              no-story twin (the placebo-in-time null of the test)
     effect = the DiD at T, story run minus twin run with the same seed (paired,
              so nearly noise-free)
-    d      = |effect| / sigma, the placebo z the verifier expects
+    d      = |effect| / sigma, the placebo z the verifier expects, measured on
+             CAL_SEEDS seeds; the smallest counts (the effect scatters per seed)
 
 Difficulty sets the target d (TARGET_D). An effect below its target has its
 `size` (churn_shock: `churn_pct`) scaled up, keeping its direction; one far above
@@ -29,8 +30,12 @@ changes the sim's internals, not this).
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 import sys
-from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -57,6 +62,11 @@ ITERATIONS = 6
 BAND = 1.25                  # above goal * BAND a scaled size steps back down
 OVERSHOOT = 1.05             # aim 5 % above the target, d is not exactly linear in size
 SEED_OFFSET = 7919           # calibrate on another seed than the run itself
+# d is measured on CAL_SEEDS seeds (seed + k * SEED_OFFSET, k = 1..) and the smallest
+# one counts: on one seed the paired effect itself scatters (Example A, 40k, E5: d 0.35 to
+# 4.55 over six seeds at one size), so one seed's d 3.5 confirms only about two runs in three.
+CAL_SEEDS = 3
+PARALLEL_MAX_N = 100_000     # above this many customers one calibration seed (RAM: ~2.5 GB a seed at 100k)
 KEY_ORDER = ("category", "city", "channel", "segment")  # how the KPI series name pairs
 
 
@@ -80,6 +90,7 @@ class Measure:
     effect: float | None     # DiD statistic, story - twin
     sigma: float | None
     d: float | None          # None: the verifier has no test for this target
+    d_seeds: list = field(default_factory=list)  # d on each calibration seed (min is `d`)
 
 
 class Twin:
@@ -182,10 +193,93 @@ def _set_sim_size(spec: StorySpec, i: int, j: int, value: float) -> bool:
     return capped
 
 
-def _measure_all(spec: StorySpec, seed: int, twin: Twin) -> dict[tuple[int, int], Measure]:
+def _measure_seed(spec: StorySpec, seed: int, twin: Twin) -> dict[tuple[int, int], Measure]:
     story_con = verify.world_con(simulate(spec, seed=seed))
     return {(i, j): _measure(twin, story_con, verify.hypothesis(spec, spec.events[i], spec.events[i].effects[j]))
             for i, j in _slots(spec)}
+
+
+def _combine(per_seed: list[Measure]) -> Measure:
+    """The weakest seed counts: its Measure, with every seed's d alongside."""
+    ds = [None if m.d is None else round(m.d, 2) for m in per_seed]
+    known = [m for m in per_seed if m.d is not None]
+    worst = min(known, key=lambda m: m.d) if known else per_seed[0]
+    return Measure(worst.kpi, worst.effect, worst.sigma, worst.d, ds)
+
+
+# One worker process per calibration seed holds that seed's twin (a DuckDB connection
+# cannot be pickled), so only the spec goes over the pipe.
+_W_SEED: int | None = None
+_W_TWIN: Twin | None = None
+
+
+def _worker_init(twin_spec: StorySpec, seed: int) -> None:
+    global _W_SEED, _W_TWIN
+    _W_SEED, _W_TWIN = seed, Twin(simulate(twin_spec, seed=seed))
+
+
+def _worker_measure(spec: StorySpec) -> dict[tuple[int, int], Measure]:
+    assert _W_TWIN is not None and _W_SEED is not None
+    return _measure_seed(spec, _W_SEED, _W_TWIN)
+
+
+def _context():
+    """Workers fork from a forkserver that imported only this module: no copy of the
+    caller's threads (uvicorn, DuckDB) or locks, and no import of the caller's __main__."""
+    ctx = multiprocessing.get_context("forkserver")
+    ctx.set_forkserver_preload(["s2d.calibrate"])
+    return ctx
+
+
+def _parallel(n_customers: int, seeds: list[int]) -> bool:
+    if len(seeds) < 2 or n_customers > PARALLEL_MAX_N:
+        return False
+    return len(os.sched_getaffinity(0)) >= 2 if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1) >= 2
+
+
+class Measurer:
+    """Measures every slot on every calibration seed: one process per seed (its own CPU)
+    up to PARALLEL_MAX_N customers, in this process one seed after another above it."""
+
+    def __init__(self, spec: StorySpec, seeds: list[int]):
+        self.seeds = seeds
+        self.twin_spec = twin_spec = without_story(spec)
+        self.pools: list[ProcessPoolExecutor] = []
+        self.twins: list[Twin] = []
+        if _parallel(spec.entities.customers.n, seeds):
+            ctx = _context()
+            self.pools = [ProcessPoolExecutor(1, mp_context=ctx, initializer=_worker_init,
+                                              initargs=(twin_spec, s)) for s in seeds]
+        else:
+            self.twins = [Twin(simulate(twin_spec, seed=s)) for s in seeds]
+
+    def __call__(self, spec: StorySpec) -> dict[tuple[int, int], Measure]:
+        runs = None
+        if self.pools:
+            try:
+                futures = [p.submit(_worker_measure, spec) for p in self.pools]
+                runs = [f.result() for f in futures]
+            except BrokenProcessPool:
+                # a worker died (out of memory, or a caller's __main__ without a guard):
+                # go on in this process instead of failing the job
+                self.close()
+                self.pools = []
+                self.twins = [Twin(simulate(self.twin_spec, seed=s)) for s in self.seeds]
+        if runs is None:
+            runs = [_measure_seed(spec, s, t) for s, t in zip(self.seeds, self.twins)]
+        return {k: _combine([r[k] for r in runs]) for k in runs[0]}
+
+    def close(self) -> None:
+        for p in self.pools:
+            p.shutdown(cancel_futures=True)
+
+
+def calibration_seeds(seed: int, n_customers: int = 0) -> list[int]:
+    """seed + k * SEED_OFFSET for k = 1..CAL_SEEDS; one seed above PARALLEL_MAX_N customers,
+    where three would not fit in RAM side by side and one seed's d scatters less
+    (DECISIONS 92: the brief's 160k confirms on every seed)."""
+    k_max = CAL_SEEDS if n_customers <= PARALLEL_MAX_N else 1
+    return [seed + k * SEED_OFFSET for k in range(1, k_max + 1)]
 
 
 def _at_cap(spec: StorySpec, i: int) -> StorySpec:
@@ -210,17 +304,25 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     """Scale effects until each one has d in [target, target * BAND]. Returns the
     calibrated spec (a copy) and one row per effect for _truth.calibration."""
     say = log or (lambda m: print(m, file=sys.stderr))
-    seed = (spec.meta.seed if seed is None else seed) + SEED_OFFSET
+    seeds = calibration_seeds(spec.meta.seed if seed is None else seed, spec.entities.customers.n)
     spec = spec.model_copy(deep=True)
     cols = ["event_id", "metric", "kpi", "segment", "original_segment", "original_size", "story_size",
             "simulated_size", "factor", "sigma", "cv_eff", "effect", "d_original", "d", "target_d", "status",
-            "stated"]
+            "stated", "d_seeds"]
     slots = _slots(spec)
     if not slots:
         return spec, pd.DataFrame(columns=cols)
 
     goal = target_d(spec.meta.difficulty)
-    twin = Twin(simulate(without_story(spec), seed=seed))
+    measure = Measurer(spec, seeds)
+    try:
+        return _calibrate(spec, slots, goal, measure, cols, say)
+    finally:
+        measure.close()
+
+
+def _calibrate(spec: StorySpec, slots, goal: float, measure: Measurer, cols, say) -> tuple[StorySpec, pd.DataFrame]:
+    """The calibration proper; `measure` gives each slot's weakest d over the seeds."""
     orig_size = {(i, j): (spec.events[i].params.churn_pct if spec.events[i].type == EventType.churn_shock
                           else spec.events[i].effects[j].size) for i, j in slots}
     story_size = {k: _sim_size(spec, *k) for k in slots}
@@ -229,7 +331,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
     widened: set[int] = set()
     fixed = {k for k in slots if stated(spec, *k)}  # the story's own numbers: measured, never changed
 
-    first = _measure_all(spec, seed, twin)
+    first = measure(spec)
 
     # 1. Widen first. An event whose target stays below half the goal even at the
     # size cap (or is not visible in any scanned KPI) loses one key, the option with the
@@ -240,7 +342,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
         if any(k in fixed for k in own):
             continue  # a stated size in a wider segment would be another story
         at_cap = _at_cap(spec, i)
-        m_cap = _measure_all(at_cap, seed, twin)
+        m_cap = measure(at_cap)
         here = min((m_cap[k].d or 0.0) for k in own)
         if all(first[k].d is not None for k in own) and here >= WIDEN_BELOW * goal:
             continue  # reachable, or a near miss: a near miss stays below_target, not a new story
@@ -248,7 +350,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
         for opt in _widen_options(spec.events[i].target):
             trial = at_cap.model_copy(deep=True)
             trial.events[i].target = opt
-            mt = _measure_all(trial, seed, twin)
+            mt = measure(trial)
             d = min((mt[k].d or 0.0) for k in own)
             if best is None or d > best[0]:
                 best = (d, opt)
@@ -258,7 +360,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
 
     # 2. Scale, both ways. Below the goal a size grows; above goal * BAND it steps
     # back down, but never below the story's own size and never past the cap.
-    m = _measure_all(spec, seed, twin)
+    m = measure(spec)
     for _ in range(ITERATIONS):
         off = [k for k in slots if k not in fixed and m[k].d is not None and (
             (m[k].d < goal and k not in capped)
@@ -274,7 +376,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
                 capped.add(k)
             else:
                 capped.discard(k)
-        m = _measure_all(spec, seed, twin)
+        m = measure(spec)
 
     rows = []
     for k in slots:
@@ -292,10 +394,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
         else:
             status = "ok"
         if status in ("not_measurable", "below_target"):
-            say(f"WARNING calibration: {ev.id} {ev.effects[j].metric.value} on '{kpi_segment(ev.target)}' "
-                f"has d = {mk.d if mk.d is None else round(mk.d, 2)} < target {goal:.1f} ({status}); "
-                + ("the size is stated by the story and stays as it is; " if k in fixed else "")
-                + "it may not be detectable")
+            say(_short_warning(spec, k, mk.d, goal, status, k in fixed))
         rows.append({
             "event_id": ev.id, "metric": ev.effects[j].metric.value, "kpi": mk.kpi,
             "segment": ev.target.describe(), "original_segment": orig_target[i].describe(),
@@ -307,7 +406,7 @@ def calibrate(spec: StorySpec, seed: int | None = None, log=None) -> tuple[Story
             "effect": None if mk.effect is None else round(mk.effect, 5),
             "d_original": None if first[k].d is None else round(first[k].d, 2),
             "d": None if mk.d is None else round(mk.d, 2),
-            "target_d": goal, "status": status, "stated": k in fixed,
+            "target_d": goal, "status": status, "stated": k in fixed, "d_seeds": mk.d_seeds,
         })
     return spec, pd.DataFrame(rows, columns=cols)
 
@@ -320,3 +419,70 @@ def format_table(table: pd.DataFrame) -> str:
                      f"  d {r.d_original} -> {r.d} (target {r.target_d:.1f}, via {r.kpi})  {r.status}"
                      + ("  (stated size)" if getattr(r, "stated", False) else ""))
     return "\n".join(lines)
+
+
+def _short_warning(spec: StorySpec, k: tuple[int, int], d: float | None, goal: float, status: str,
+                   is_stated: bool) -> str:
+    ev = spec.events[k[0]]
+    return (f"WARNING calibration: {ev.id} {ev.effects[k[1]].metric.value} on '{kpi_segment(ev.target)}' "
+            f"has d = {d if d is None else round(d, 2)} < target {goal:.1f} ({status}); "
+            + ("the size is stated by the story and stays as it is; " if is_stated else "")
+            + "it may not be detectable")
+
+
+def remeasure(spec: StorySpec, table: pd.DataFrame, seed: int | None = None, log=None) -> pd.DataFrame:
+    """The calibration table again for a spec whose sizes `calibrate` set and whose customer
+    count only grew since (DECISIONS 129): d on the same seeds, no scaling. More customers
+    only raise d, so a scaled size stays (it may now sit above target * BAND)."""
+    say = log or (lambda m: print(m, file=sys.stderr))
+    slots = _slots(spec)
+    out = table.copy()
+    if not slots:
+        return out
+    goal = target_d(spec.meta.difficulty)
+    measure = Measurer(spec, calibration_seeds(spec.meta.seed if seed is None else seed,
+                                               spec.entities.customers.n))
+    try:
+        m = measure(spec)
+    finally:
+        measure.close()
+    out["d_seeds"] = out["d_seeds"].astype(object)
+    for idx, k in zip(out.index, slots):  # rows were written in slot order
+        mk = m[k]
+        out.at[idx, "d"] = None if mk.d is None else round(mk.d, 2)
+        out.at[idx, "d_seeds"] = mk.d_seeds
+        out.at[idx, "sigma"] = None if mk.sigma is None else round(mk.sigma, 5)
+        out.at[idx, "cv_eff"] = None if mk.sigma is None else round(mk.sigma * np.sqrt(scan.WINDOW), 4)
+        out.at[idx, "effect"] = None if mk.effect is None else round(mk.effect, 5)
+        old = out.at[idx, "status"]
+        if mk.d is None:
+            status = "not_measurable"
+        elif mk.d < goal:
+            status = "below_target"
+        elif old in ("not_measurable", "below_target"):
+            status = "ok" if out.at[idx, "factor"] in (None, 1) else "scaled"
+        else:
+            status = old
+        out.at[idx, "status"] = status
+        if status in ("not_measurable", "below_target"):
+            say(_short_warning(spec, k, mk.d, goal, status, bool(out.at[idx, "stated"])))
+    return out
+
+
+def customers_for_stated(spec: StorySpec, table: pd.DataFrame, cap: int, step: int = 5000) -> int | None:
+    """How many customers a below-target stated effect needs (DECISIONS 129), or None.
+    A stated size is never scaled, so the customer count is its only lever; d grows about
+    as sqrt(n) for counts. The largest need over such rows, rounded up to `step`, at most
+    `cap`; None when nothing is short or the count cannot grow."""
+    n = spec.entities.customers.n
+    if table is None or table.empty or n >= cap:
+        return None
+    goal = target_d(spec.meta.difficulty) * OVERSHOOT
+    need = 0.0
+    for r in table.itertuples():
+        if not r.stated or r.status != "below_target" or r.d is None or pd.isna(r.d):
+            continue
+        need = max(need, cap if r.d <= 0 else n * (goal / r.d) ** 2)
+    if need <= n:
+        return None
+    return int(min(cap, -(-need // step) * step))

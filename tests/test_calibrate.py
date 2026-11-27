@@ -112,3 +112,51 @@ def test_difficulty_does_not_scale_a_stated_size():
     from s2d import verify
     hs = {h.event_id: h for h in verify.hypotheses(spec)}
     assert hs["E5"].story_pct == pytest.approx(-20) and hs["E1"].story_pct == pytest.approx(-3)
+
+
+def test_d_is_the_weakest_calibration_seed(example_a):
+    """d is measured on CAL_SEEDS seeds, none of them the run's, and the smallest counts."""
+    _, _, table = example_a
+    seeds = calibrate.calibration_seeds(3)
+    assert len(seeds) == calibrate.CAL_SEEDS > 1 and 3 not in seeds
+    assert calibrate.calibration_seeds(3, calibrate.PARALLEL_MAX_N + 1) == seeds[:1]  # the brief's 160k
+    for r in table.itertuples():
+        assert len(r.d_seeds) == calibrate.CAL_SEEDS
+        known = [d for d in r.d_seeds if d is not None]
+        if r.d is not None:
+            assert r.d == pytest.approx(min(known), abs=0.01)
+
+
+def test_customers_for_stated_grows_n_only_for_a_short_stated_size():
+    spec = load_spec("examples/a.yaml")
+    spec.entities.customers.n = 40000  # medium: goal 3.5 * OVERSHOOT
+
+    def table(*rows):
+        return pd.DataFrame([{"stated": s, "status": st, "d": d} for s, st, d in rows])
+
+    assert calibrate.customers_for_stated(spec, table((False, "below_target", 1.0)), 100_000) is None
+    assert calibrate.customers_for_stated(spec, table((True, "ok", 4.0)), 100_000) is None
+    assert calibrate.customers_for_stated(spec, table((True, "not_measurable", None)), 100_000) is None
+    # d 3.0 -> n * (3.675 / 3.0)^2 = 60 025 -> rounded up to 65 000
+    assert calibrate.customers_for_stated(spec, table((True, "below_target", 3.0)), 100_000) == 65_000
+    assert calibrate.customers_for_stated(spec, table((True, "below_target", 0.5)), 100_000) == 100_000
+    assert calibrate.customers_for_stated(spec, table((True, "below_target", 0.0)), 100_000) == 100_000
+    spec.entities.customers.n = 100_000
+    assert calibrate.customers_for_stated(spec, table((True, "below_target", 1.0)), 100_000) is None
+    assert calibrate.customers_for_stated(spec, pd.DataFrame(), 100_000) is None
+
+
+def test_remeasure_keeps_sizes_and_measures_at_the_new_count(example_a):
+    """After the customer raise (DECISIONS 129) the sizes stay as calibrated and every d is
+    measured again, on the same seeds."""
+    _, out, table = example_a
+    bigger = out.model_copy(deep=True)
+    bigger.entities.customers.n = 2 * out.entities.customers.n
+    again = calibrate.remeasure(bigger, table, seed=3, log=lambda m: None)
+    assert list(again["simulated_size"]) == list(table["simulated_size"])
+    assert list(again["event_id"]) == list(table["event_id"])
+    for r in again.itertuples():
+        assert len(r.d_seeds) == calibrate.CAL_SEEDS
+        if r.d is not None:
+            assert r.d == pytest.approx(min(d for d in r.d_seeds if d is not None), abs=0.01)
+            assert (r.status == "below_target") == (r.d < r.target_d)
