@@ -965,3 +965,34 @@ the top of `s2d/detective/scan.py`.
       churn_shock, a stated effect protects `churn_pct`.
     - Consequence for Example A: E5 now stays at the story's −20 % (it was calibrated to
       about −26 %).
+91. **Year-over-year control for an event with no group to compare with** (`verify.resolve`,
+    `control_mode = "yoy"`). An event for everyone (empty target), or one whose keys the KPI
+    cannot split by, had a plain before/after, and that measures the season too: the brief
+    story's −5 % read −10 to −14 % over seeds 1–5 at 20k customers, its twin −5 to −9 %
+    (retail_cz: March → April is a seasonal drop). Now:
+    - **Treated** = the KPI around T, **control** = the same KPI over the same calendar
+      window 364 days earlier (52 weeks, same weekday). DiD = (after/before at T) /
+      (after/before a year earlier) − 1, the same statistic, bootstrap CI and placebo-in-
+      time z as every other test: the series is the KPI joined to itself 364 days back, so
+      it starts a year after the data and the placebo null runs over that last year.
+    - **A public holiday in either year counts in neither** (NULL that day in both series;
+      `avg` and `nanmean` skip it). Easter moves (Good Friday 2025-04-18, 2026-04-03) and
+      stores close on holidays, so without the mask the after-windows of the two years held
+      the holidays on different days and the block bootstrap's CI was ±8 % at any customer
+      count (−5 % never excluded 0). The holiday list (the sim's `holidays.CZ`) is inlined
+      in the SQL as a `holidays` CTE.
+    - **Only with a year of data**: the KPI must exist from T − 28 − 364 (leavers: after
+      their warm-up). Otherwise the test stays a plain before/after, `control_mode` none,
+      and `control_reason` says what date the year-over-year control would need. The data
+      is not extended for it (`fit_windows` is unchanged).
+    - **Not for a target that has a dimension but no other group with data** (Psí Bouda:
+      only breeders subscribe). That stays plain before/after, as asked: the target is a
+      group, and on Psí Bouda's cancellations a YoY control measured +4.07 ‰/den
+      (story +3.86) but at z 2.95 instead of a confirmed plain test, because a year earlier
+      the subscription base was young and its rate noisy.
+    - The SQL (example in the result's `sql`): `kpi_daily` (one group, as before), then
+      `daily` = `kpi_daily k JOIN kpi_daily prev ON prev.day = k.day - 364` with the two
+      holiday LEFT JOINs; the `windows` and `did_pct` parts are unchanged. `sql_matches`
+      holds on story and twin. Calibration uses the same `resolve` and series, so it
+      measures d with this test. The narrator says "oproti stejnému období před rokem"
+      (template and the LLM's `kontrola` field), the app labels the line "před rokem".

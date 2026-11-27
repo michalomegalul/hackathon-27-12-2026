@@ -1,0 +1,47 @@
+# The hackathon brief, written by hand (no LLM): "Od dubna 2026 klesly tržby o 5 %."
+# A sporting goods retailer, e-shop + stores in Praha and Brno (DECISIONS 92).
+version: 1
+meta: {seed: 1, start: 2025-01-01, days: 730, currency: CZK, locale: cs_CZ, difficulty: medium}
+company:
+  name: SportMax
+  legal_form: s.r.o.
+  industry: retail
+  description: Sportovní potřeby, e-shop a prodejny v Praze a Brně.
+  channels: [{eshop: 0.6}, {store: 0.4}]
+  cities:
+    - {name: Praha, weight: 0.6, has_store: true}
+    - {name: Brno,  weight: 0.4, has_store: true}
+entities:
+  customers:
+    n: 20000
+    growth_per_year: 0.10
+    segments:
+      - {id: rekreacni, share: 0.55, base_orders_per_month: 0.4, price_sensitivity: 1.2, base_churn_per_month: 0.03}
+      - {id: sportovec, share: 0.25, base_orders_per_month: 0.8, price_sensitivity: 0.8, base_churn_per_month: 0.02}
+      - {id: rodina,    share: 0.20, base_orders_per_month: 0.5, price_sensitivity: 1.4, base_churn_per_month: 0.025}
+  products:
+    categories:
+      - {id: obuv,     n_skus: 40, price_min: 990, price_max: 4990, supplier: S1, zipf_s: 1.1}
+      - {id: obleceni, n_skus: 60, price_min: 290, price_max: 2990, supplier: S1, zipf_s: 1.1}
+      - {id: vybaveni, n_skus: 50, price_min: 490, price_max: 19990, supplier: S2, zipf_s: 1.2}
+      - {id: doplnky,  n_skus: 30, price_min: 90,  price_max: 990,  supplier: S3, zipf_s: 1.3}
+  suppliers:
+    - {id: S1, name: Sport Distribution CZ, lead_time_days: 10, reliability: 0.97}
+    - {id: S2, name: Outdoor Gear EU,       lead_time_days: 14, reliability: 0.96}
+    - {id: S3, name: Doplňky Morava,        lead_time_days: 4,  reliability: 0.99}
+  stores: {per_city_with_store: 1}
+  employees: {support_agents: 4, tickets_per_agent_day: 25}
+baseline:
+  seasonality: {weekly: [1.0,1.0,1.0,1.0,1.05,1.15,0.8], profile: retail_cz, black_friday: true, christmas: true, cz_holidays_closed: true}
+events:
+  - id: E1
+    type: competitor_entry
+    start: 2026-04-01
+    target: {}
+    params: {}
+    effects:
+      - {metric: purchase_rate, size: -0.05, size_stated: true, lag_days: 0, ramp_days: 7, duration_days: null, decay_halflife_days: null}
+    caused_by: null
+    narrative_cs: Od dubna 2026 klesly tržby o 5 %.
+decoys: []
+noise: {messiness: none}

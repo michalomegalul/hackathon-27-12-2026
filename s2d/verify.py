@@ -10,7 +10,9 @@ answer-key effect that was simulated it builds one test from the event itself:
              new customers (price_change also checks product_prices)
     treated  the event's target
     control  the same KPI in the other values of the same dimension (DECISIONS 37):
-             Brno stores vs stores in the other cities, coffee vs the other categories
+             Brno stores vs stores in the other cities, coffee vs the other categories;
+             with no such group (an event for everyone), the same KPI over the same
+             days 364 days earlier, if the data reaches that far (DECISIONS 91)
     windows  [T, T+28) vs [T-28, T), T = start + lag
     test     relative DiD, 95 % CI from a 7-day block bootstrap, placebo-in-time z
              (scan.did / scan.placebo_z, the detective's own functions)
@@ -46,6 +48,7 @@ WARMUP_DAYS = 90              # leavers: the first days of the data are incomple
 LEAVER_EDGE_DAYS = 120        # a leaver has no order in the last 120 days of the data
 LEAVER_MAX_GAP = 45          # leavers: only regular buyers (average gap <= 45 d); sparse ones blur the date
 KEY_ORDER = ("supplier", "category", "city", "channel", "segment")  # the first key of a target is the one varied
+YOY_DAYS = 364               # year-over-year control: 52 weeks back, the same weekday (DECISIONS 91)
 
 KPI = {"purchase_rate": "orders", "churn_hazard": "leavers", "acquisition_rate": "new_customers",
        "delivery_days": "late_share", "rating_mean": "rating", "ticket_rate": "tickets"}
@@ -103,7 +106,8 @@ class Hypothesis:
     unit: str = "%"                 # unit of story_pct / measured_pct: '%' relative, 'pp', 'b.' (points), 'd'
     on_days: int | None = None      # late_churn: days the courier switch lasts (cohort window)
     topic: str | None = None        # tickets: only this topic
-    control_mode: str = "vary"      # 'vary': other values of `vary`; 'rest': everything outside the target
+    control_mode: str = "vary"      # 'vary': other values of `vary`; 'rest': everything outside the target;
+                                    # 'yoy': no group to compare with, the same KPI YOY_DAYS earlier
     absolute: bool = False          # a count KPI tested as a difference in events a day (small baseline)
     expected_unit: str = "%"        # unit of expected_pct
     note: str = ""                  # why the control or the unit differs from the default
@@ -111,6 +115,15 @@ class Hypothesis:
     @property
     def T(self) -> date:
         return self.start + timedelta(days=self.lag)
+
+    @property
+    def yoy(self) -> bool:
+        return self.vary is None and self.control_mode == "yoy"
+
+    @property
+    def controlled(self) -> bool:
+        """Is there a control series (another group, or the same group a year earlier)?"""
+        return bool(self.vary) or self.yoy
 
     @property
     def ratio(self) -> bool:
@@ -440,8 +453,39 @@ events AS (   -- a leaver: a regular buyer (average gap <= {LEAVER_MAX_GAP} days
 )"""
 
 
+def cz_holidays(first: date, last: date) -> list[date]:
+    """Czech public holidays in [first, last] (the simulator's calendar, s2d/sim/calendar.py)."""
+    import holidays
+    cz = holidays.CZ(years=range(first.year, last.year + 1))
+    return sorted(d for d in cz if first <= d <= last)
+
+
+def _yoy_cte(h: Hypothesis, s0: date, s1: date) -> str:
+    """Year-over-year: the one group's daily KPI joined to itself YOY_DAYS earlier. A day that
+    is a public holiday in either year counts in neither (NULL): Easter moves (Good Friday
+    2025-04-18, 2026-04-03), so a holiday in one year's window and not the other's would
+    read as an effect."""
+    days = ", ".join(_d(d) for d in cz_holidays(s0, s1))
+    return f""",
+holidays AS (   -- Czech public holidays in the data
+  SELECT unnest([{days}]) AS day
+),
+daily AS (   -- treated: the KPI that day; control: the same KPI {YOY_DAYS} days (52 weeks, same weekday) earlier;
+             -- NULL if either day is a public holiday
+  SELECT k.day,
+         CASE WHEN h.day IS NULL AND hp.day IS NULL THEN k.treated END AS treated,
+         CASE WHEN h.day IS NULL AND hp.day IS NULL THEN prev.treated END AS control
+  FROM kpi_daily k
+  JOIN kpi_daily prev ON prev.day = k.day - {YOY_DAYS}
+  LEFT JOIN holidays h ON h.day = k.day
+  LEFT JOIN holidays hp ON hp.day = prev.day
+)"""
+
+
 def _ctes(h: Hypothesis, lo: date, hi: date) -> str:
     s0, s1 = _span(h.kpi, lo, hi)
+    name = "kpi_daily" if h.yoy else "daily"  # yoy: the one group's series, then joined to itself a year back
+    tail = _yoy_cte(h, s0, s1) if h.yoy else ""
     if h.kpi == "cancellations":
         def rate(g):
             return (f"1000.0 * count(*) FILTER (WHERE s.grp = '{g}' AND s.cancelled_at = days.day)\n"
@@ -450,30 +494,35 @@ def _ctes(h: Hypothesis, lo: date, hi: date) -> str:
 days AS (
   SELECT CAST(d AS DATE) AS day FROM range({_d(s0)}, {_d(s1 + timedelta(days=1))}, INTERVAL 1 DAY) t(d)
 ),
-daily AS (   -- cancellations per 1000 subscriptions active that day: treated group and control group
+{name} AS (   -- cancellations per 1000 subscriptions active that day: treated group and control group
   SELECT days.day,
          {rate('treated')} AS treated,
          {rate('control') if h.vary else 'NULL'} AS control
   FROM days LEFT JOIN subs s
     ON s.started_at <= days.day AND (s.cancelled_at IS NULL OR s.cancelled_at >= days.day)
   GROUP BY days.day
-)"""
+){tail}"""
     agg = "avg(e.val)" if h.kpi in MEAN_KPIS else "count(e.grp)"
     control = (f"{agg} FILTER (WHERE e.grp = 'control')" if h.vary else "NULL")
     return f"""WITH {_events_cte(h, lo, hi)},
 days AS (
   SELECT CAST(d AS DATE) AS day FROM range({_d(s0)}, {_d(s1 + timedelta(days=1))}, INTERVAL 1 DAY) t(d)
 ),
-daily AS (   -- {KPI_CS[h.kpi]} per day: treated group and control group
+{name} AS (   -- {KPI_CS[h.kpi]} per day: treated group and control group
   SELECT days.day,
          {agg} FILTER (WHERE e.grp = 'treated') AS treated,
          {control} AS control
   FROM days LEFT JOIN events e ON e.day = days.day
   GROUP BY days.day
-)"""
+){tail}"""
 
 
 def _control_text(h: Hypothesis) -> str:
+    if h.yoy:
+        b0, T, _ = _windows(h, h.T + timedelta(days=WINDOW))
+        y = timedelta(days=YOY_DAYS)
+        return (f"the same KPI {YOY_DAYS} days earlier (before {b0 - y} .. {T - y - timedelta(days=1)}, "
+                f"after {T - y} .. {T - y + timedelta(days=WINDOW - 1)})")
     if not h.vary:
         return "none: plain before/after"
     if h.control_mode == "rest":
@@ -493,10 +542,10 @@ def sql(h: Hypothesis, lo: date, hi: date) -> str:
     ctl = _control_text(h)
     if h.ratio:  # difference in the KPI's own units (pp of late parcels, rating points, tickets a day)
         did = ("round((treated_after - treated_before) - (control_after - control_before), 2)"
-               if h.vary else "round(treated_after - treated_before, 2)")
+               if h.controlled else "round(treated_after - treated_before, 2)")
     else:
         did = ("round(100 * ((treated_after / treated_before) / (control_after / control_before) - 1), 2)"
-               if h.vary else "round(100 * (treated_after / treated_before - 1), 2)")
+               if h.controlled else "round(100 * (treated_after / treated_before - 1), 2)")
     return f"""-- {h.event_id} ({h.type}): {KPI_CS[h.kpi]}, {target}
 -- control: {ctl}
 -- before {b0} .. {T - timedelta(days=1)}, after {T} .. {a1 - timedelta(days=1)}
@@ -725,7 +774,7 @@ def series(con, h: Hypothesis, lo: date, hi: date) -> pd.DataFrame:
 def statistic(df: pd.DataFrame, h: Hypothesis) -> tuple[np.ndarray, np.ndarray | None, int, int] | None:
     """(treated, control, index of T, after-window length) or None if not testable."""
     seg = df["treated"].to_numpy(float)
-    rest = df["control"].to_numpy(float) if h.vary else None
+    rest = df["control"].to_numpy(float) if h.controlled else None
     hit = np.flatnonzero(df["day"].to_numpy() == np.datetime64(h.T))
     if not len(hit):
         return None
@@ -739,7 +788,17 @@ def statistic(df: pd.DataFrame, h: Hypothesis) -> tuple[np.ndarray, np.ndarray |
 def _no_control(h: Hypothesis) -> Hypothesis:
     """The whole target as the treated group, no control: a plain before/after."""
     fixed = ({h.vary: h.treated} if h.vary else {}) | h.fixed
-    return replace(h, vary=None, treated=[], fixed=fixed, control_mode="vary")
+    return replace(h, vary=None, treated=[], fixed=fixed, control_mode="none")
+
+
+def yoy_reason(h: Hypothesis, lo: date, hi: date) -> str | None:
+    """None if the data holds the test's full windows YOY_DAYS before T (the year-over-year
+    control can be used), else why not."""
+    need = h.T - timedelta(days=WINDOW + YOY_DAYS)
+    first = _span(h.kpi, lo, hi)[0]
+    if need < first:
+        return (f"a year-over-year control needs {KPI_CS[h.kpi]} from {need}, the data has them from {first}")
+    return None
 
 
 def _before_events(v: np.ndarray, iT: int) -> float:
@@ -763,7 +822,10 @@ def resolve(con, h: Hypothesis, lo: date, hi: date) -> Hypothesis:
     control   the other values of `vary` (same fixed keys) if they have data; else everything
               outside the target (a stockout of S_POL's kibble and canned food: there is no
               other supplier of those categories, so the control is all other products); else
-              none (only one segment has subscriptions: nobody else can cancel).
+              none (only one segment has subscriptions: nobody else can cancel). A target with
+              no key the KPI can split by (an event for everyone) has no group to compare
+              with: the control is the same KPI YOY_DAYS earlier if the data has the full
+              windows there, else none (DECISIONS 91).
     unit      a count KPI whose before-window has fewer than MIN_BASE_EVENTS events in a group
               is tested as a difference in events a day, not a relative change."""
     notes = []
@@ -779,15 +841,26 @@ def resolve(con, h: Hypothesis, lo: date, hi: date) -> Hypothesis:
             break
         notes.append(f"control {_control_text(cand)!r} has no data")
     else:
-        if h.vary:
+        if h.vary:  # the target has a dimension, but no other group has data: plain before/after
             h = _no_control(h)
+            notes.append("no control, plain before/after")
+        else:       # no dimension to compare along: the same days a year earlier, if the data has them
+            why = ("an event for everyone" if not h.segment
+                   else f"{KPI_CS[h.kpi]} cannot be split by {', '.join(h.dropped)}")
+            h = _no_control(h)
+            no_yoy = yoy_reason(h, lo, hi)
+            if no_yoy is None:
+                h = replace(h, control_mode="yoy")
+                notes.append(f"{why}: control = the same days {YOY_DAYS} days earlier (year over year)")
+            else:
+                notes.append(f"{why}; {no_yoy}: no control, plain before/after")
         df = series(con, h, lo, hi)
         hit = np.flatnonzero(df["day"].to_numpy() == np.datetime64(h.T))
         if not len(hit):
             return h
         iT = int(hit[0])
     if h.kpi in ("orders", "leavers", "new_customers"):
-        groups = [df["treated"].to_numpy(float)] + ([df["control"].to_numpy(float)] if h.vary else [])
+        groups = [df["treated"].to_numpy(float)] + ([df["control"].to_numpy(float)] if h.controlled else [])
         base = min(_before_events(v, iT) for v in groups)
         if base < MIN_BASE_EVENTS:
             notes.append(f"{base:.0f} events in the before-window: a difference a day, not a relative change")
@@ -821,8 +894,11 @@ def test(con, h: Hypothesis, lo: date, hi: date, seed: int = 0, check_sql: bool 
         return test_join_lag(con, h, lo, hi, seed, check_sql)
     df = series(con, h, lo, hi)
     out = {"event_id": h.event_id, "metric": h.metric, "kpi": h.kpi, "segment": h.segment,
-           "control": (None if not h.vary else "mimo cíl (everything outside the target)"
+           "control": (f"stejné dny o {YOY_DAYS} dní dříve (same days {YOY_DAYS} days earlier)" if h.yoy
+                       else None if not h.vary else "mimo cíl (everything outside the target)"
                        if h.control_mode == "rest" else f"{h.vary} ∉ {{{', '.join(h.treated)}}}"),
+           "control_mode": h.control_mode if h.controlled else "none",
+           "control_reason": "" if h.controlled else h.note,
            "T": h.T.isoformat(), "direction": h.direction,
            "story_pct": h.story_pct, "expected_pct": h.expected_pct, "expected_unit": h.expected_unit,
            "claim_cs": h.claim_cs, "unit": h.unit, "measured_unit": h.measured_unit, "note": h.note,
@@ -1062,10 +1138,12 @@ def narrative_cs(res: dict) -> str:
                  f"{r['claim_cs']}".rstrip())
             out.append(s)
             continue
+        against = {"yoy": "oproti stejnému období před rokem",
+                   "none": "oproti 28 dnům předtím"}.get(r.get("control_mode"), "oproti kontrolní skupině")
         if r["kpi"] == "orders":
-            s = f"Od {_date_cs(r['T'])} {what} objednávky {who} {size} oproti kontrolní skupině"
+            s = f"Od {_date_cs(r['T'])} {what} objednávky {who} {size} {against}"
         else:
-            s = f"Od {_date_cs(r['T'])} {what} {who} ({size} oproti kontrolní skupině)"
+            s = f"Od {_date_cs(r['T'])} {what} {who} ({size} {against})"
         s += f" (z = {r['z']:.1f}). {r['claim_cs']}".rstrip()
         if "price" in r:
             s += f" Ceny dotčených produktů vzrostly o {r['price']['measured_pct']:.0f} %."
@@ -1088,6 +1166,8 @@ def narrate(res: dict, on_status=None) -> dict:
 {facts}
 
 Napiš 3 až 5 vět česky: co se stalo, kdy, u koho a jak velký byl naměřený efekt.
+Pole "kontrola" říká, s čím se srovnává: "yoy" = stejné období před rokem, "none" = 28 dní předtím,
+jinak kontrolní skupina.
 Pravidla: jen tyto události, žádné jiné. Každé datum a číslo musí pocházet z tabulky.
 Velikost efektu piš přesně jako v poli "zmena", s jeho jednotkou: "%" jen tam, kde jednotka je "%";
 "p. b." jsou procentní body, "/den" je počet za den, ne procenta.
@@ -1110,6 +1190,7 @@ def _fact(r: dict) -> dict:
     """One confirmed row for the narrator, with its unit spelled out."""
     f = {k: r.get(k) for k in ("event_id", "claim_cs", "kpi", "segment", "T", "measured_pct", "ci_pct", "z")}
     f["jednotka"] = r.get("measured_unit", "%")
+    f["kontrola"] = r.get("control_mode", "vary")
     f["zmena"] = ("+" if r["measured_pct"] > 0 else "-") + size_cs(r).removeprefix("o ")
     if "price" in r:
         f["price_pct"] = r["price"]["measured_pct"]

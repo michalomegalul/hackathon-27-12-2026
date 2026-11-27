@@ -334,7 +334,8 @@ def _verify_chart(r: dict):
         ctl = pd.Series(sr["control"], index=df.index)
         in_before = (df["date"] >= b0) & (df["date"] <= b1)
         scale = df.loc[in_before, "cílová skupina"].mean() / max(ctl[in_before].mean(), 1e-9)
-        df["kontrola (přeškálovaná)"] = ctl * scale
+        label = "před rokem (přeškálovaná)" if r.get("control_mode") == "yoy" else "kontrola (přeškálovaná)"
+        df[label] = ctl * scale
     long = df.set_index("date").rolling(7, center=True, min_periods=1).mean().reset_index().melt(
         "date", var_name="řada", value_name="7denní průměr")
     lines = alt.Chart(long).mark_line().encode(x="date:T", y="7denní průměr:Q",

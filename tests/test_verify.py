@@ -194,3 +194,71 @@ def test_narrate_falls_back_when_the_llm_mixes_units(monkeypatch):
     out = verify.narrate({"tests": [TICKETS]})
     assert out["source"].startswith("template (LLM failed: numbers do not match")
     assert "5.04 tiketu denně" in out["text"]
+
+
+# ---------------------------------------------------------------- an event for everyone: year over year
+
+
+def _brief(n=3000, start=None):
+    spec = load_spec("examples/brief/sport.yaml")
+    spec.entities.customers.n = n
+    if start is not None:  # same end, data from `start`
+        end = spec.meta.end
+        spec.meta.start = start
+        spec.meta.days = (end - start).days + 1
+    return spec
+
+
+@pytest.fixture(scope="module")
+def brief_small():
+    spec = _brief()
+    story, twin = simulate(spec, seed=1), simulate(without_story(spec), seed=1)
+    return spec, verify.verify_con(verify.world_con(story), spec, story.truth["answer_key"], verify.world_con(twin))
+
+
+def test_an_event_for_everyone_gets_a_year_over_year_control(brief_small):
+    spec, res = brief_small
+    r = res["tests"][0]
+    assert r["control_mode"] == "yoy" and r["control"].startswith("stejné dny o 364")
+    assert "an event for everyone" in r["note"] and not r["control_reason"]
+    assert r["sql_matches"] and r["twin"]["sql_matches"]
+    assert "JOIN kpi_daily prev ON prev.day = k.day - 364" in r["sql"]
+    assert "DATE '2026-04-03'" in r["sql"] and "DATE '2025-04-18'" in r["sql"]  # Good Friday, both years
+    assert r["story_pct"] == -5.0  # stated: not scaled
+
+
+def test_year_over_year_needs_a_year_of_data_before_T():
+    from datetime import date
+    spec = _brief(start=date(2025, 6, 1))  # T 2026-04-01 - 28 - 364 = 2025-03-05 is not in the data
+    story = simulate(spec, seed=1)
+    res = verify.verify_con(verify.world_con(story), spec, story.truth["answer_key"])
+    r = res["tests"][0]
+    assert r["control_mode"] == "none" and r["control"] is None
+    assert "year-over-year control needs" in r["control_reason"] and "plain before/after" in r["control_reason"]
+    assert r["sql_matches"] and "kpi_daily" not in r["sql"]
+
+
+def test_a_target_with_a_dimension_keeps_its_group_control():
+    spec = _spec()
+    hs = {h.event_id: h for h in verify.hypotheses(spec)}
+    assert hs["E5"].control_mode == "vary" and not hs["E5"].yoy and hs["E5"].controlled
+
+
+def test_calibration_measures_with_the_year_over_year_test():
+    from s2d import calibrate
+    spec = _brief()
+    out, table = calibrate.calibrate(spec, seed=1, log=lambda m: None)
+    r = table.iloc[0]
+    assert r["kpi"] == "orders" and r["d"] is not None and r["sigma"] > 0
+    assert bool(r["stated"]) and out.events[0].effects[0].size == -0.05
+
+
+def test_the_brief_story_is_confirmed_and_its_twin_is_not():
+    """"Od dubna 2026 klesly tržby o 5 %" at a customer count where -5 % is findable
+    (DECISIONS 92): measured about -5 %, not the -10 % of the plain before/after."""
+    spec = _brief(n=80000)
+    story, twin = simulate(spec, seed=2), simulate(without_story(spec), seed=2)
+    res = verify.verify_con(verify.world_con(story), spec, story.truth["answer_key"], verify.world_con(twin))
+    r = res["tests"][0]
+    assert r["confirmed"] and r["measured_pct"] == pytest.approx(-5, abs=1.5)
+    assert not r["twin"]["confirmed"] and abs(r["twin"]["measured_pct"]) < 2.5
