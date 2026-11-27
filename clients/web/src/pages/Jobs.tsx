@@ -8,7 +8,7 @@ export function Jobs() {
   const { data, error, isPending } = useQuery(jobsOptions())
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
       <div className="flex items-baseline justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Moje úlohy</h1>
         <Link to="/" className="text-sm text-accent hover:underline">

@@ -42,15 +42,15 @@ function Twin({ v }: { v: VerificationRow }) {
 function Detail({ v }: { v: VerificationRow }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="grid gap-3 text-sm">
+    <div className="grid grid-cols-1 gap-3 text-sm">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
         <dt className="text-muted">Kontrola</dt>
         <dd>
           {CONTROL_CS[v.control_mode] ?? v.control_mode}
-          {v.control && <span className="ml-1 font-mono text-xs text-muted">({v.control})</span>}
+          {v.control && <span className="ml-1 break-all font-mono text-xs text-muted">({v.control})</span>}
         </dd>
         <dt className="text-muted">Metrika</dt>
-        <dd className="font-mono text-xs leading-5">{v.metric}</dd>
+        <dd className="break-all font-mono text-xs leading-5">{v.metric}</dd>
         {v.expected_size !== null && (
           <>
             <dt className="text-muted">Očekáváno</dt>
@@ -111,8 +111,9 @@ const Chevron = ({ open }: { open: boolean }) => (
 )
 
 function VerificationTable({ rows }: { rows: VerificationRow[] }) {
-  const [open, setOpen] = useState<Set<string>>(new Set())
-  const toggle = (id: string) =>
+  // one event can give several rows (e.g. tickets and stockouts), so rows are keyed by index
+  const [open, setOpen] = useState<Set<number>>(new Set())
+  const toggle = (id: number) =>
     setOpen((s) => {
       const n = new Set(s)
       if (n.has(id)) n.delete(id)
@@ -123,10 +124,10 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
   return (
     <>
       {/* phones: one card per event */}
-      <ul className="grid gap-3 md:hidden">
-        {rows.map((v) => (
-          <li key={v.event_id} className="rounded-lg border border-line bg-bg/40">
-            <button className="grid w-full gap-2 p-3 text-left" onClick={() => toggle(v.event_id)} aria-expanded={open.has(v.event_id)}>
+      <ul className="grid grid-cols-1 gap-3 md:hidden">
+        {rows.map((v, i) => (
+          <li key={i} className="rounded-lg border border-line bg-bg/40">
+            <button className="grid w-full grid-cols-1 gap-2 p-3 text-left" onClick={() => toggle(i)} aria-expanded={open.has(i)}>
               <div className="flex items-start gap-2">
                 <span className="font-mono text-xs text-muted">{v.event_id}</span>
                 <span className="flex-1 text-sm">{v.claim_cs}</span>
@@ -137,7 +138,7 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
                 <dd>{KPI_CS[v.kpi] ?? v.kpi}</dd>
                 <dt className="text-muted">Cíl · od</dt>
                 <dd>
-                  <span className="font-mono">{v.target || 'všichni'}</span> · {dateCs(v.start)}
+                  <span className="break-all font-mono">{v.target || 'všichni'}</span> · {dateCs(v.start)}
                 </dd>
                 <dt className="text-muted">Příběh → naměřeno</dt>
                 <dd className="tabular-nums">
@@ -154,10 +155,10 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
               </dl>
               {v.status === 'not_testable' && v.reason && <p className="text-xs text-muted">{v.reason}</p>}
               <span className="text-xs text-accent">
-                <Chevron open={open.has(v.event_id)} /> {open.has(v.event_id) ? 'skrýt SQL' : 'zobrazit SQL a detail'}
+                <Chevron open={open.has(i)} /> {open.has(i) ? 'skrýt SQL' : 'zobrazit SQL a detail'}
               </span>
             </button>
-            {open.has(v.event_id) && (
+            {open.has(i) && (
               <div className="border-t border-line p-3">
                 <Detail v={v} />
               </div>
@@ -184,19 +185,19 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((v) => {
-              const isOpen = open.has(v.event_id)
+            {rows.map((v, i) => {
+              const isOpen = open.has(i)
               return (
-                <Fragment key={v.event_id}>
+                <Fragment key={i}>
                   <tr
                     className="cursor-pointer border-b border-line/60 align-top hover:bg-white/[0.03]"
-                    onClick={() => toggle(v.event_id)}
+                    onClick={() => toggle(i)}
                     aria-expanded={isOpen}
                   >
                     <td className="py-2.5">
                       <Chevron open={isOpen} />
                     </td>
-                    <td className="py-2.5 pr-3">
+                    <td className="min-w-64 py-2.5 pr-3">
                       <div className="font-mono text-xs text-muted">
                         {v.event_id} · od {dateCs(v.start)}
                       </div>
@@ -237,7 +238,7 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
 export function Result({ r }: { r: JobResult }) {
   const rowCounts = Object.entries(r.rows).filter(([, n]) => n > 0)
   return (
-    <div className="grid gap-5">
+    <div className="grid grid-cols-1 gap-5">
       <SummaryTiles r={r} />
 
       <Card>
@@ -259,8 +260,8 @@ export function Result({ r }: { r: JobResult }) {
             <>
               <h2 className="mb-2 font-semibold">Neověřené události</h2>
               <ul className="mb-4 grid gap-2 text-sm">
-                {r.untested.map((u) => (
-                  <li key={u.event_id} className="rounded-lg border border-line px-3 py-2">
+                {r.untested.map((u, i) => (
+                  <li key={i} className="rounded-lg border border-line px-3 py-2">
                     <span className="mr-2 font-mono text-xs text-muted">{u.event_id}</span>
                     {u.claim_cs || u.type}
                     <div className="text-xs text-muted">{u.reason}</div>

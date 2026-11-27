@@ -124,7 +124,7 @@ export function JobPage() {
     )
 
   return (
-    <div className="grid gap-5">
+    <div className="grid grid-cols-1 gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto min-w-0">
           <Link to="/jobs" className="text-sm text-muted hover:text-white">

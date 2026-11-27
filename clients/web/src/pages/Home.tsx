@@ -94,7 +94,7 @@ export function Home() {
   const generalError = create.error && Object.keys(errs).length === 0 ? create.error.message : null
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <Card>
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Z příběhu data</h1>
         <p className="mt-1 text-sm text-muted">
