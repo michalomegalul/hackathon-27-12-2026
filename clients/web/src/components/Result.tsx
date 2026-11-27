@@ -1,14 +1,14 @@
 import { Fragment, useState } from 'react'
 import { Link } from 'react-router'
 import type { JobResult, VerificationRow } from '../api'
-import { CONTROL_CS, KPI_CS, dateCs, intCs, num, withUnit } from '../format'
-import { Badge, Card, VerificationBadge } from './ui'
+import { CONTROL_CS, KPI_CS, dateCs, num, withUnit } from '../format'
+import { Badge, VerificationBadge } from './ui'
 import type { SqlCheck } from '../pages/DataPage'
 
 /** "4/4" → [4, 4] */
 const frac = (s: string) => s.split('/').map(Number) as [number, number]
 
-function SummaryTiles({ r }: { r: JobResult }) {
+export function SummaryTiles({ r }: { r: JobResult }) {
   const [sOk, sAll] = frac(r.summary.story)
   const [tHit] = frac(r.summary.twin)
   const storyGood = sAll > 0 && sOk === sAll
@@ -108,13 +108,13 @@ function Detail({ v }: { v: VerificationRow }) {
   )
 }
 
-/** Opens /jobs/:id/data with this row's SQL pre-filled and run, and its sql_result to compare against. */
+/** Opens /run/:id/data with this row's SQL pre-filled and run, and its sql_result to compare against. */
 function RunSql({ jobId, v, className = '' }: { jobId: string; v: VerificationRow; className?: string }) {
   if (!v.sql) return null
   const state: SqlCheck = { sql: v.sql, label: `${v.event_id} · ${KPI_CS[v.kpi] ?? v.kpi}`, expect: v.sql_result }
   return (
     <Link
-      to={`/jobs/${jobId}/data`}
+      to={`/run/${jobId}/data`}
       state={state}
       onClick={(e) => e.stopPropagation()}
       title="Spustí SQL tohoto řádku nad daty úlohy a porovná výsledek"
@@ -129,7 +129,7 @@ const Chevron = ({ open }: { open: boolean }) => (
   <span className={`inline-block text-muted transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
 )
 
-function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jobId: string }) {
+export function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jobId: string }) {
   // one event can give several rows (e.g. tickets and stockouts), so rows are keyed by index
   const [open, setOpen] = useState<Set<number>>(new Set())
   const toggle = (id: number) =>
@@ -265,73 +265,34 @@ function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jobId: st
   )
 }
 
-export function Result({ r }: { r: JobResult }) {
-  const rowCounts = Object.entries(r.rows).filter(([, n]) => n > 0)
+/** Events the simulator cannot model, and the pipeline's warnings. */
+export function Notes({ r }: { r: JobResult }) {
+  if (!r.untested.length && !r.warnings.length) return null
   return (
-    <div className="grid grid-cols-1 gap-5">
-      <SummaryTiles r={r} />
-
-      <Card>
-        <h2 className="mb-1 font-semibold">Ověření příběhu</h2>
-        <p className="mb-4 text-xs text-muted">
-          Každá událost z příběhu, změřená v datech (rozdíl v rozdílech proti kontrolní skupině). Klepnutím zobrazíte SQL, které
-          dá stejné číslo.
-        </p>
-        {r.verification.length ? (
-          <VerificationTable rows={r.verification} jobId={r.job_id} />
-        ) : (
-          <p className="text-sm text-muted">Příběh neobsahuje žádné ověřitelné události.</p>
-        )}
-      </Card>
-
-      {(r.untested.length > 0 || r.warnings.length > 0) && (
-        <Card>
-          {r.untested.length > 0 && (
-            <>
-              <h2 className="mb-2 font-semibold">Neověřené události</h2>
-              <ul className="mb-4 grid gap-2 text-sm">
-                {r.untested.map((u, i) => (
-                  <li key={i} className="rounded-lg border border-line px-3 py-2">
-                    <span className="mr-2 font-mono text-xs text-muted">{u.event_id}</span>
-                    {u.claim_cs || u.type}
-                    <div className="text-xs text-muted">{u.reason}</div>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {r.warnings.length > 0 && (
-            <>
-              <h2 className="mb-2 font-semibold">Upozornění</h2>
-              <ul className="grid gap-1.5 text-sm text-amber-100/90">
-                {r.warnings.map((w, i) => (
-                  <li key={i}>⚠ {w}</li>
-                ))}
-              </ul>
-            </>
-          )}
-        </Card>
-      )}
-
-      {r.narrative?.text && (
-        <Card>
-          <h2 className="mb-2 font-semibold">Co je v datech</h2>
-          <div className="whitespace-pre-line leading-relaxed text-slate-200">{r.narrative.text}</div>
-          {r.narrative.source && <p className="mt-3 text-xs text-muted">Text: {r.narrative.source}</p>}
-        </Card>
-      )}
-
-      {rowCounts.length > 0 && (
-        <Card>
-          <h2 className="mb-2 font-semibold">Tabulky</h2>
-          <ul className="flex flex-wrap gap-2 text-sm">
-            {rowCounts.map(([t, n]) => (
-              <li key={t} className="rounded-md bg-bg px-2.5 py-1">
-                <span className="font-mono text-xs">{t}</span> <span className="tabular-nums text-muted">{intCs(n)}</span>
+    <div className="grid gap-3">
+      {r.untested.length > 0 && (
+        <div>
+          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Neověřitelné události</h3>
+          <ul className="grid gap-1.5 text-sm">
+            {r.untested.map((u, i) => (
+              <li key={i} className="rounded-lg border border-line px-3 py-2">
+                <span className="mr-2 font-mono text-xs text-muted">{u.event_id}</span>
+                {u.claim_cs || u.type}
+                <div className="text-xs text-muted">{u.reason}</div>
               </li>
             ))}
           </ul>
-        </Card>
+        </div>
+      )}
+      {r.warnings.length > 0 && (
+        <div>
+          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Upozornění</h3>
+          <ul className="grid gap-1 text-sm text-amber-100/90">
+            {r.warnings.map((w, i) => (
+              <li key={i}>⚠ {w}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   )
