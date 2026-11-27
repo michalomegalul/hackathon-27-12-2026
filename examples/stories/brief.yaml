@@ -1,0 +1,14 @@
+title: SportMax (zadání hackathonu)
+# The official brief as our input: a sporting goods retailer whose sales dropped 5 % from
+# April 2026. The hand-written spec of the same story is examples/brief/sport.yaml
+# (DECISIONS 92: −5 % for everyone needs ~80k customers to confirm usually, 160k every seed).
+company: >
+  SportMax s.r.o. prodává sportovní potřeby: obuv, oblečení, vybavení a doplňky. Asi 60 % tržeb
+  dělá e-shop, zbytek dvě kamenné prodejny, jedna v Praze a jedna v Brně (Praha je větší trh).
+  Zboží bere od tří dodavatelů: oblečení a obuv od Sport Distribution CZ, vybavení od Outdoor
+  Gear EU, doplňky od Doplňků Morava. Zákazníci jsou hlavně rekreační sportovci, k tomu aktivní
+  sportovci a rodiny s dětmi. Má asi 160 000 zákazníků a ročně roste asi o 10 %.
+story: >
+  Data od ledna 2025 na dva roky. Od dubna 2026 klesly tržby o 5 %, u všech zákazníků, ve všech
+  kanálech i městech, a už se nevrátily. Jinak je to běžný rok sportovního obchodu: jarní
+  a předvánoční sezóna, Black Friday, Vánoce, o státních svátcích jsou prodejny zavřené.
