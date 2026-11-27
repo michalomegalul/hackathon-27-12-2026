@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, searchForWorkspaceRoot } from 'vite'
 
 export default defineConfig({
+  base: '/web/', // nginx serves the build at https://hack.dobsinsky.dev/web/
   plugins: [react(), tailwindcss()],
   server: {
     // The code only calls relative /v1/... URLs, as in production (nginx routes /v1/ to the API).
