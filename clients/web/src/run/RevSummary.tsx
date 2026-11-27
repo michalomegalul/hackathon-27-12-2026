@@ -117,23 +117,27 @@ function FoundCard({ e, m, hover, setHover }: { e: DetectEvent; m: Matching; hov
       tag={tag}
       dashed={!pair}
       head={
+        e.kind === 'stockout' ? (
+          <>One SKU with no sales ({e.segment})</>
+        ) : (
         <>
           {metricCs(e.metric)} <span className={e.direction === 'down' ? 'text-rose-300' : 'text-emerald-300'}>{arrow(e.direction)}</span>{' '}
           <span className="tabular-nums text-slate-300">{pct(e.magnitude_pct)}</span>
         </>
+        )
       }
       meta={
         <>
           <span className="font-mono">{e.segment || 'everyone'}</span>
           <span>
-            {KIND_CS[e.kind] ?? e.kind} od {dateCs(e.start_date)}
+            {KIND_CS[e.kind] ?? e.kind} from {dateCs(e.start_date)}
           </span>
           <span className="tabular-nums" title="detective confidence">
-            jistota {Math.round(e.confidence * 100)} %
+            confidence {Math.round(e.confidence * 100)} %
           </span>
           {pair && (
             <span className="tabular-nums" title="match per s2d/score.py: 0.4 time + 0.4 segment + 0.2 size">
-              shoda {num(pair.score, 2)}, posun {pair.slots.deltaDays > 0 ? '+' : ''}
+              match {num(pair.score, 2)}, offset {pair.slots.deltaDays > 0 ? '+' : ''}
               {pair.slots.deltaDays} d
             </span>
           )}
@@ -317,6 +321,10 @@ export default function RevSummary({ run }: { run: Run }) {
   // found: pairs first in planted order, then consequences, then false finds; planted in story order
   const order = new Map(planted.map((t, i) => [t.event_id, i]))
   const foundSorted = [...found].sort((a, b) => rank(a) - rank(b))
+  // stock-outs of single SKUs that are no planted event: folded into one line instead of a wall of "false find"
+  const isLooseStockout = (e: DetectEvent) =>
+    e.kind === 'stockout' && !m!.pairs.some((p) => p.found.id === e.id) && !m!.consequences.some((c) => c.found.id === e.id)
+  const looseStockouts = foundSorted.filter(isLooseStockout)
   function rank(e: DetectEvent) {
     const p = m!.pairs.find((x) => x.found.id === e.id)
     if (p) return order.get(p.planted.event_id) ?? 0
@@ -338,11 +346,26 @@ export default function RevSummary({ run }: { run: Run }) {
             <p className="text-sm text-muted">The detective wrote no story.</p>
           )}
           {found.length ? (
-            <ul className="grid gap-1.5">
-              {foundSorted.map((e) => (
-                <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
-              ))}
-            </ul>
+            <>
+              <ul className="grid gap-1.5">
+                {foundSorted.filter((e) => !isLooseStockout(e)).map((e) => (
+                  <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
+                ))}
+              </ul>
+              {looseStockouts.length > 0 && (
+                <details className="border-l-2 border-dashed border-line py-1 pl-3 text-sm">
+                  <summary className="cursor-pointer text-slate-300 select-none hover:text-white">
+                    {looseStockouts.length} single-SKU stock-outs that match no planted event{' '}
+                    <span className="text-xs text-muted">(the simulator's inventory also runs out by itself; counted as false finds in the score)</span>
+                  </summary>
+                  <ul className="mt-2 grid gap-1.5">
+                    {looseStockouts.map((e) => (
+                      <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
           ) : (
             <p className="text-sm text-muted">The detective found nothing in the data.</p>
           )}
