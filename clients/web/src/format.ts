@@ -63,3 +63,14 @@ export const CONTROL_CS: Record<string, string> = {
   yoy: 'meziročně (stejné dny o 364 dní dříve)',
   none: 'jen před / po',
 }
+
+/** The detective's metrics and kinds (s2d/detective/narrate.py METRIC_CS, KIND_CS). */
+export const METRIC_CS: Record<string, string> = {
+  purchase_rate: 'objednávky',
+  churn_hazard: 'odchod zákazníků',
+  acquisition_rate: 'noví zákazníci',
+  rating_mean: 'hodnocení',
+  ticket_rate: 'tikety',
+  delivery_days: 'doba doručení',
+}
+export const KIND_CS: Record<string, string> = { shift: 'trvalejší změna', spike: 'krátký výkyv', stockout: 'výpadek zásob' }

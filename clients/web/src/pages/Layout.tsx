@@ -50,7 +50,7 @@ function NetBanner() {
 }
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap ${isActive ? 'bg-white/[0.07] text-white' : 'text-muted hover:text-white'}`
+  `rounded-md px-2 py-1.5 text-sm whitespace-nowrap sm:px-2.5 ${isActive ? 'bg-white/[0.07] text-white' : 'text-muted hover:text-white'}`
 
 const NAV: [to: string, label: string, end?: boolean][] = [
   ['/', 'Story', true],
@@ -69,7 +69,7 @@ function Shell({ children }: { children: ReactNode }) {
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
           <Link to="/" className="flex shrink-0 items-center gap-1.5 font-semibold tracking-tight">
             <Spiral />
-            <span className="hidden min-[380px]:inline">Story2Data</span>
+            <span className="hidden sm:inline">Story2Data</span>
           </Link>
           <nav className="-mx-1 flex min-w-0 gap-0.5 overflow-x-auto px-1">
             {NAV.map(([to, label, end]) => (

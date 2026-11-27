@@ -7,7 +7,7 @@ import { tablesOptions, type DetectEvent, type DetectScore, type JobResult, type
 import { DownloadButton } from '../components/Download'
 import { Notes, VerificationTable } from '../components/Result'
 import { Alert, Spinner } from '../components/ui'
-import { KPI_CS, dateCs, duration, intCs, num, withUnit } from '../format'
+import { KIND_CS, KPI_CS, METRIC_CS, dateCs, duration, intCs, num, withUnit } from '../format'
 import { Section } from './RunView'
 import type { Run } from './useRun'
 
@@ -77,7 +77,7 @@ function EventsTable({ r }: { r: JobResult }) {
               <th className="py-2 pr-3 font-medium">KPI</th>
               <th className="py-2 pr-3 font-medium">Koho</th>
               <th className="py-2 pr-3 font-medium">Od</th>
-              <th className="py-2 text-right font-medium">Uvedená velikost</th>
+              <th className="py-2 text-right font-medium whitespace-nowrap">Velikost v příběhu</th>
             </tr>
           </thead>
           <tbody>
@@ -205,12 +205,12 @@ function FoundEvent({ e }: { e: DetectEvent }) {
     <li className="grid gap-1 rounded-lg border border-line bg-bg/40 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <span className="font-mono text-xs text-muted">{e.id}</span>
-        <span>
-          {kpi(e.metric)} <span className={e.direction === 'down' ? 'text-rose-300' : 'text-emerald-300'}>{arrow(e.direction)}</span>
+        <span title={KIND_CS[e.kind] ?? e.kind}>
+          {METRIC_CS[e.metric] ?? e.metric} <span className={e.direction === 'down' ? 'text-rose-300' : 'text-emerald-300'}>{arrow(e.direction)}</span>
         </span>
         <span className="font-mono text-xs text-slate-400">{e.segment || 'všichni'}</span>
         <span className="text-xs text-muted">
-          od {dateCs(e.start_date)}
+          {KIND_CS[e.kind] ?? e.kind}, od {dateCs(e.start_date)}
           {e.end_date && ` do ${dateCs(e.end_date)}`}
         </span>
         {e.magnitude_pct !== null && <span className="ml-auto tabular-nums">{withUnit(e.magnitude_pct, '%')}</span>}

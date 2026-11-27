@@ -8,7 +8,8 @@ import { Spinner } from '../components/ui'
 
 const chip = 'rounded-full border border-line px-3 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
 
-export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => void; busy: boolean; error?: string | null }) {
+/** `onSubmit` resolves once the run exists: then the input clears, as in a chat. */
+export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => Promise<unknown>; busy: boolean; error?: string | null }) {
   const [text, setText] = useState('')
   const [spec, setSpec] = useState<{ name: string; yaml: string } | null>(null)
   const [fileErr, setFileErr] = useState<string | null>(null)
@@ -18,8 +19,14 @@ export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => v
   const canSend = !busy && (Boolean(spec) || text.trim().length > 0)
   const send = () => {
     if (!canSend) return
-    if (spec) onSubmit({ body: { spec_yaml: spec.yaml }, specName: spec.name })
-    else onSubmit({ body: splitPrompt(text) })
+    const s: Submit = spec ? { body: { spec_yaml: spec.yaml }, specName: spec.name } : { body: splitPrompt(text) }
+    onSubmit(s).then(
+      () => {
+        setText('')
+        setSpec(null)
+      },
+      () => {}, // the error shows under the input; keep the text
+    )
   }
 
   return (
@@ -41,7 +48,7 @@ export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => v
           className={chip}
           disabled={busy}
           title="Pošle hotovou specifikaci examples/a.yaml, krok AI se přeskočí"
-          onClick={() => onSubmit({ body: { spec_yaml: FAST_TEST_SPEC }, specName: 'examples/a.yaml' })}
+          onClick={() => void onSubmit({ body: { spec_yaml: FAST_TEST_SPEC }, specName: 'examples/a.yaml' }).catch(() => {})}
         >
           Rychlý test bez AI
         </button>
@@ -55,7 +62,7 @@ export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => v
         )}
       </div>
       <form
-        className="flex items-end gap-2 rounded-2xl border border-line bg-panel p-2 focus-within:border-slate-500"
+        className="flex items-end gap-2 rounded-2xl border border-line bg-panel p-1.5 sm:p-2 focus-within:border-slate-500"
         onSubmit={(e) => {
           e.preventDefault()
           send()
@@ -96,10 +103,10 @@ export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => v
               send()
             }
           }}
-          rows={Math.min(8, Math.max(2, text.split('\n').length))}
+          rows={Math.min(8, Math.max(1, text.split('\n').length))}
           placeholder={spec ? 'Pošle se přiložená specifikace (text se nepoužije).' : 'První odstavec: firma. Pak příběh.'}
           aria-label="Firma a příběh"
-          className="max-h-60 min-h-[2.75rem] flex-1 resize-none bg-transparent px-1 py-2 text-[16px] leading-relaxed placeholder:text-slate-500 focus:outline-none sm:text-sm"
+          className="max-h-60 min-h-9 flex-1 resize-none bg-transparent px-1 py-2 text-[16px] leading-relaxed placeholder:text-slate-500 focus:outline-none sm:text-sm"
         />
         <button
           type="submit"
