@@ -1,0 +1,33 @@
+/* Story page only (lazy chunk): React Flow controls and the uPlot legend on the dark theme. */
+
+.react-flow__controls-button {
+  background: var(--color-panel);
+  border-color: var(--color-line);
+  color: #cbd5e1;
+  fill: #cbd5e1;
+}
+.react-flow__controls-button:hover {
+  background: oklch(0.26 0.012 260);
+}
+.react-flow__attribution {
+  background: transparent;
+  opacity: 0.5;
+}
+
+.uplot-dark .uplot {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: #cfd4db;
+}
+.uplot-dark .u-legend {
+  font-size: 11px;
+  text-align: left;
+  padding-top: 4px;
+}
+.uplot-dark .u-legend .u-marker {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+.uplot-dark .u-select {
+  background: rgba(255, 255, 255, 0.08);
+}
