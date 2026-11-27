@@ -1,20 +1,16 @@
 // Story "/" and "/run/:id": a chat. Sending runs everything automatically (useRun); the URL
 // becomes /run/:id, so a reload or a shared link reopens the run.
-import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router'
-import { inputOptions } from '../api'
 import { Composer } from '../run/Composer'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { useRun } from '../run/useRun'
-import { recallSent, resendBody, useSend } from '../run/useSend'
+import { recallSent, useResend, useSend } from '../run/useSend'
 
 export function Story() {
   const { id } = useParams()
   const send = useSend()
-  const input = useQuery({ ...inputOptions(id ?? ''), enabled: Boolean(id) })
-  const body = resendBody(id, input.data)
-  const run = useRun(id, body ? () => send.mutate({ body, specName: recallSent(id)?.specName }) : undefined)
+  const run = useRun(id, useResend(id, send))
 
   return (
     <RunView

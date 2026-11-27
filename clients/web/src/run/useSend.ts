@@ -1,8 +1,8 @@
 // Sending a prompt: POST /v1/jobs, remember what was sent (so "Zkusit znovu" can resend it and a
 // spec job can show its file name after a reload), then go to /run/:id.
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { createJob, type JobInput, type NewJob } from '../api'
+import { createJob, inputOptions, type JobInput, type NewJob } from '../api'
 import type { Submit } from './prompt'
 
 const key = (id: string) => `s2d_sent_${id}`
@@ -41,4 +41,11 @@ export function useSend(base = '/run') {
       void navigate(`${base}/${created.job_id}`)
     },
   })
+}
+
+/** "Zkusit znovu" for a failed job: send the same prompt again as a new run (undefined if unknown). */
+export function useResend(id: string | undefined, send: ReturnType<typeof useSend>) {
+  const input = useQuery({ ...inputOptions(id ?? ''), enabled: Boolean(id) })
+  const body = resendBody(id, input.data)
+  return body ? () => send.mutate({ body, specName: recallSent(id)?.specName }) : undefined
 }

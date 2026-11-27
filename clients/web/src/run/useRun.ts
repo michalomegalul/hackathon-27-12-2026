@@ -95,7 +95,9 @@ export function useRun(id: string | undefined, retryJob?: () => void): Run {
     started.current = id
     startMutate(id)
   }, [id, result.data, startMutate])
-  const detect = useQuery(detectOptions(id ?? '', Boolean(id) && start.isSuccess))
+  // mutation state belongs to the run it was started for (/run/A → /run/B reuses this hook)
+  const startedHere = Boolean(id) && start.variables === id
+  const detect = useQuery(detectOptions(id ?? '', startedHere && start.isSuccess))
 
   if (!id) return idleRun()
 
@@ -137,7 +139,7 @@ export function useRun(id: string | undefined, retryJob?: () => void): Run {
             : { state: 'running', sub: j.step ?? (jobDone ? 'načítám výsledek' : undefined) },
     detect: !r
       ? pending
-      : start.error
+      : startedHere && start.error
         ? { state: 'error', error: start.error.message, retry: retryDetect }
         : d?.status === 'error'
           ? { state: 'error', error: d.error ?? 'Detektiv skončil chybou.', retry: retryDetect }

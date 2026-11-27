@@ -4,7 +4,7 @@ import { jobsOptions } from '../api'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { useRun } from '../run/useRun'
-import { recallSent } from '../run/useSend'
+import { recallSent, useResend, useSend } from '../run/useSend'
 import { Alert, Card, JobStatusBadge, Spinner } from '../components/ui'
 import { dateTimeCs, duration } from '../format'
 
@@ -70,7 +70,8 @@ export function History() {
 /** "/history/:id": an earlier run in the same view as Story, rebuilt from /input, /result and /detect. */
 export function HistoryRun() {
   const { id } = useParams()
-  const run = useRun(id)
+  const send = useSend() // a resent prompt is a new run: it opens in Story
+  const run = useRun(id, useResend(id, send))
   return (
     <RunView
       run={run}
