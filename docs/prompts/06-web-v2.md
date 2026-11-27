@@ -13,6 +13,12 @@ These prompts turn it into the site we actually want:
    (`CREATE TABLE` with types, primary and foreign keys, sample rows like `psql`), never the spec YAML.
    The YAML stays only behind a small "pro vývojáře" toggle.
 
+**The team's flipchart (the layout to follow).**
+The top bar is the pipeline itself, read left to right, and each item is a page:
+`🌀` (home; an "API" link under it to `/docs`) | **Prompt** | **Parametry z AI** | **Simulace → DB a porovnání** | **Detektiv** (with **SKÓRE** under it) | **PP** (the tech page: model, tests).
+The input box has two fields, **company** and **prompt**, and an **upload** for YAML (a ready spec) and CSV.
+The key chart, labelled "Chyb.", has two lines that run together and then split at the event: the database with the story against the twin without it, with the gap being the story.
+
 Most building blocks exist on `main`: the ERD with word → column arrows (`src/story/`), the uPlot charts, anime.js, the virtualized grid, the API client.
 Reuse them; restructure, don't rewrite.
 
@@ -62,9 +68,22 @@ and ALL of clients/web/src first: reuse the existing api.ts, components, story/ 
 KpiChart), DataGrid; restructure, don't rewrite. Only touch clients/web/. No Co-Authored-By,
 small commits, never merge to main.
 
-1. Layout and nav: logo 🌀 (spiral emoji, slow rotation with anime.js, respects prefers-reduced-motion)
-   + "Story2Data", nav: "Prompt Space" | "Moje DB" | "Jak to funguje". Keep all existing routes
-   working (old links /jobs/:id, /jobs/:id/data, /jobs/:id/story must still open).
+1. Layout: the top bar from the flipchart (vision at the top of 06-web-v2.md) is the pipeline,
+   left to right: 🌀 (home, spiral emoji, slow rotation with anime.js, respects
+   prefers-reduced-motion; a small "API" link under it to /docs) | Prompt | Parametry z AI |
+   Simulace → DB a porovnání | Detektiv (+ Skóre under it) | PP (tech). When a job is open, the
+   bar becomes its stepper: each item links to that job's page and lights up as the step finishes
+   (from GET /v1/jobs/{id} steps). Plus "Moje DB" and "Jak to funguje" at the right, a drawer on
+   the phone. Keep all existing routes working (old links /jobs/:id, /jobs/:id/data,
+   /jobs/:id/story must still open).
+   Pages for the bar items that later prompts don't build: "Parametry z AI" = the spec as
+   readable Czech parameters (company, segments with shares, cities, channels, and the events
+   as a table: type, from-to, who, stated size, lag), never YAML; the YAML only behind
+   "pro vývojáře". "PP" = the tech page: stack (Gemma 4 26b on the homelab GPU, numpy
+   simulation, DuckDB, FastAPI, React), the model's role (only spec and narrative; statistics are
+   deterministic), tests (number of pytest tests, what they cover), and the detection curves
+   from docs/detection_curve_a.png and docs/verify_curve_a.png (copy them into public/), each
+   with one Czech sentence.
 2. Homepage "/": a big animated 🌀 hero with one sentence ("Napiš příběh firmy, dostaneš databázi,
    ve které se opravdu stal, a důkaz.") and two buttons (Prompt Space, ukázka). Under it a
    Grafana-style dashboard: dark panels with rounded corners, thin borders, small caps titles,
@@ -92,8 +111,11 @@ Continue on feat/c-web-v2 (git pull main, rebase). Read docs/API.md (POST /v1/jo
 /result, POST+GET /v1/jobs/{id}/detect) and the existing Home.tsx/JobPage.tsx/Result.tsx.
 "/prompt" Prompt Space, a chat-like window (messages top to bottom, input at the bottom):
 - Mode switch at the input: "Text → data" | "Data → příběh".
-- Text → data: the user writes the company + story (or picks "Ukázkový prompt" = the demo story,
-  or "Rychlý test bez AI" = examples/a.yaml spec). Sending creates the job; the reply bubble shows
+- Text → data: the input box from the flipchart: two fields, "Firma" (company) and "Prompt"
+  (story), and an upload: a .yaml file is sent as spec_yaml (no AI step); a .csv upload is
+  shown but disabled with "brzy" unless the API has a CSV endpoint (it doesn't today; don't
+  build one). Or the user picks "Ukázkový prompt" = the demo story, or "Rychlý test bez AI" =
+  examples/a.yaml spec. Sending creates the job; the reply bubble shows
   the 5 steps live (reuse the progress component), then a result card: "příběh 4/4, dvojče 0/4",
   the confirmed events as chips, and buttons "Otevřít DB schéma" (→ the scheme with arrows),
   "Data" (→ grid/SQL), "Stáhnout ZIP".
@@ -148,7 +170,8 @@ Tab "Co se změnilo" on /db/:id, and a short version in the Prompt Space result 
    should be ~0). A small horizontal chart with the four on one axis, zero marked, and a verdict
    badge (✅ potvrzeno / ❌ / nelze ověřit + reason). The twin value close to zero is the point:
    say it ("ve světě bez příběhu se nic nestalo").
-2. Under it the daily KPI chart with THREE lines: target with the story, the same target in the
+2. Under it the daily KPI chart with THREE lines (this is the "Chyb." chart from the flipchart:
+   story and twin run together, then split at the event; make that split the visual focus): target with the story, the same target in the
    twin (run the row's daily SQL with "world": "twin"), and the control; the event start marked,
    the gap between story and twin shaded after it. Reuse KpiChart, add the twin series.
 3. A "Před / po" mini table per event: the KPI before vs after the start, story vs twin, as the SQL
