@@ -1108,3 +1108,11 @@ the top of `s2d/detective/scan.py`.
     the real Gemma is not done**: the homelab Ollama (192.168.4.19) is not reachable from the
     notebook on the venue Wi-Fi and there is no Claude key; run it on the server:
     `uv run python scripts/e2e.py examples/stories/brief.yaml --n-customers 160000`.
+102. **The brief with the real Gemma (2026-11-27, `scripts/e2e.py examples/stories/brief.yaml
+    --seed 7`, gemma4:26b, no cache, through an SSH tunnel to the homelab).** Valid on the 2nd
+    try (1st: `zipf_s` 1.5 > 1.4). Gemma took the count from the text (n 160 000, data
+    2025-01-01 + 730 days, difficulty easy), one event for everyone: `price_change`,
+    purchase_rate −0.05, `size_stated: true`, from 2026-04-01. Orders, year-over-year control:
+    **−4.32 %, CI [−4.75, −3.70], z 6.05, confirmed**; twin −0.02 %, z 0.23. Story 1/1, twin
+    0/1. Compile 38.6 s, calibration + sim + twin 129 s, verification 12.1 s, 225 s in all.
+    The narrator (gemma) says "u metriky orders" instead of "objednávky": worth a prompt fix.
