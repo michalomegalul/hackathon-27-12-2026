@@ -1,6 +1,7 @@
 // Example inputs from the repo's examples/ folder, bundled as text with Vite's ?raw.
 import briefYaml from '../../../examples/stories/brief.yaml?raw'
 import specA from '../../../examples/a.yaml?raw'
+import nahapravdaYaml from '../../../examples/stories/nahapravda.yaml?raw'
 
 /** The hand-written spec for the fast test (no AI): POST {spec_yaml}. */
 export const FAST_TEST_SPEC = specA
@@ -29,4 +30,10 @@ function topLevelText(yaml: string, key: string): string {
 export const BRIEF_EXAMPLE = {
   company: topLevelText(briefYaml, 'company'),
   story: topLevelText(briefYaml, 'story'),
+}
+
+/** examples/stories/nahapravda.yaml: demo scenario 3, the model's limits. */
+export const NAHAPRAVDA_EXAMPLE = {
+  company: topLevelText(nahapravdaYaml, 'company'),
+  story: topLevelText(nahapravdaYaml, 'story'),
 }

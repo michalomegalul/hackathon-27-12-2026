@@ -275,8 +275,9 @@ export function About() {
         <Panel title="Kalibrace">
           <p className="text-sm text-slate-300">Efekt musí být nad šumem, jinak ho nejde ověřit.</p>
           <p className="mt-2 text-sm text-muted">
-            Před simulací se každý efekt změří v jednotkách šumu ověřovacího testu na dvojčeti (jiný seed) a zvětší se, dokud nedosáhne cíle obtížnosti: z 5 /
-            3,5 / 2,5. Pokles má realistický strop (−30 %). Velikost, kterou příběh výslovně řekne, se nemění.
+            Před simulací se každý efekt změří v jednotkách šumu ověřovacího testu na třech dvojčatech (jiné seedy, počítá ten nejslabší) a zvětší se, dokud
+            nedosáhne cíle obtížnosti: z 5 / 4,3 / 2,5. Pokles má realistický strop (−30 %). Velikost, kterou příběh výslovně řekne, se nemění; když je na
+            ověření moc malá, přidají se zákazníci.
           </p>
         </Panel>
       </div>

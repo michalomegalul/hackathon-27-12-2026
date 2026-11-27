@@ -1196,3 +1196,13 @@ the top of `s2d/detective/scan.py`.
      - **Server:** CT 106 (`hack`, the API's container) went from 4 cores / 6 GB to
        8 cores / 12 GB (`pct set 106 --cores 8 --memory 12288 --swap 1024`, live). Three
        seeds at 100k need about 7–8 GB.
+130. **Medium aims at d 4.3, not 3.5** (`TARGET_D`, chosen with the user, 2026-11-28).
+     Even when d is known exactly, the realized z of one run scatters by about ±1 around it.
+     At 3.5, half a unit above `Z_CONFIRM` 3.0, about one test in three missed. With
+     decision 129 (three seeds) Example A medium came out 87 % (26/30), twin 0 %. At 4.3
+     (1.3 units above the threshold) it is **96.7 % (29/30), twin 0 %** (`_curve_level`,
+     seeds 1–5, 40k; the one miss is the stated E5 on seed 3, z 3.23, and the curve does not
+     raise customers). The price is size: E1 −13.5 % (story −6 %, cap −20 %), E4 hazard
+     ×2.44 (story ×1.8), E2 at the +400 % cap. Stated sizes are untouched (decision 90),
+     and `customers_for_stated` now aims at 4.3 too, so it adds a few more customers. Easy
+     (5) and hard (2.5) stay.

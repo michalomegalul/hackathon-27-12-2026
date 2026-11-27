@@ -1330,7 +1330,7 @@ def curve(spec_path: str, out_png: str, seeds: list[int], n: int = 40000, cal_se
     ax.axhline(0.9, color="#999", lw=0.8, ls=":")
     ax.axhline(0.1, color="#999", lw=0.8, ls=":")
     ax.set_ylim(-0.02, 1.02)
-    ax.set_xlabel("difficulty (target z 5 / 3.5 / 2.5)")
+    ax.set_xlabel("difficulty (target z 5 / 4.3 / 2.5)")
     ax.set_ylabel("share of event tests confirmed")
     ax.set_title(f"{Path(spec_path).stem}: verifier, {len(seeds)} seeds, {n} customers")
     ax.legend()

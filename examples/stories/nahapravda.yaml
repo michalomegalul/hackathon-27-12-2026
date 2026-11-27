@@ -1,0 +1,15 @@
+title: Nahá pravda
+# Demo scenario 3 (the model's limits): a subscription video site. Traffic and the
+# +100 GB a day of database load have no table in the engine (no visits, no infrastructure
+# metrics), and 2002/2021 lie before the at most 3 years of data. The domain is invented.
+company: >
+  Nahá pravda s.r.o. provozuje stránku pro dospělé www.nahapravda.cz s placeným předplatným
+  a širokým sortimentem videí. Prodává přes web a mobilní aplikaci, předplatitelé jsou z celé
+  Česka, nejvíc z Prahy a Brna. Asi 60 000 předplatitelů: stálí fanoušci, občasní návštěvníci
+  a tvůrci vlastního obsahu.
+story: >
+  Pornografická stránka www.nahapravda.cz funguje od roku 2002 a nabízí široký sortiment videí.
+  Přibližně do roku 2021 měla stabilní a stálý přírůstek fanoušků. V poslední době kvůli nárůstu
+  popularity obsahu generovaného umělou inteligencí a erotických chatbotů její měsíční návštěvnost
+  klesla o 20 %. Po zavedení sekce pro vlastní generovaná videa se část uživatelů vrátila a začala
+  generovat velké množství nového obsahu, čímž zatížila databázi o 100 GB denně.

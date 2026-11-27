@@ -46,9 +46,10 @@ from s2d.sim import simulate, without_story
 from s2d.sim.events import mechanism, size_scale
 from s2d.spec import Difficulty, EventType, StorySpec, Target
 
-# Target d of the verifier's single test (DECISIONS 62). verify.Z_CONFIRM is 3:
-# medium sits half a noise unit above it, hard half a unit below.
-TARGET_D = {Difficulty.easy: 5.0, Difficulty.medium: 3.5, Difficulty.hard: 2.5}
+# Target d of the verifier's single test (DECISIONS 62, 130). verify.Z_CONFIRM is 3:
+# medium sits 1.3 noise units above it (the realized z scatters about +-1 around d, so
+# about 90 % of tests confirm), hard half a unit below.
+TARGET_D = {Difficulty.easy: 5.0, Difficulty.medium: 4.3, Difficulty.hard: 2.5}
 # Plausibility caps on the simulated size (relative multiplier - 1, or churn_pct).
 SIZE_CAP = {"down": -0.85, "up": 4.0}
 CHURN_PCT_CAP = 60.0
