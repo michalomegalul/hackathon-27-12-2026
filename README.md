@@ -92,6 +92,17 @@ Every Ollama call sends `num_ctx 16384`, `keep_alive -1` and `stream false`. Cal
 schema send `think false` plus `format`. A different `num_ctx` would make Ollama reload
 the model.
 
+### HTTP API
+
+`docs/API.md` is the contract (every request and response). On the server the `api` service
+runs it on port 8000 and nginx sends `/v1/`, `/docs` and `/openapi.json` there. Locally:
+
+```
+uv run python -m s2d.api token michal admin          # prints a token, stored in data/api/tokens.json
+uv run uvicorn s2d.api.main:app --port 8000          # one process: it holds the job queue
+curl -s localhost:8000/v1/health
+```
+
 ### Command line
 
 ```

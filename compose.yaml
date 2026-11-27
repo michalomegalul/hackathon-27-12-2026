@@ -1,18 +1,32 @@
+x-env: &env
+  LLM_BACKEND: ${LLM_BACKEND:-ollama}
+  OLLAMA_URL: ${OLLAMA_URL:-http://192.168.4.19:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:26b}
+  OLLAMA_DESKTOP_URL: ${OLLAMA_DESKTOP_URL:-}
+  OLLAMA_DESKTOP_MODEL: ${OLLAMA_DESKTOP_MODEL:-gemma4:12b}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  DATA_DIR: /data
+  LLM_CACHE_DIR: /data/llm_cache
+  TEXT_POOL_DIR: /data/text_pools
+
 services:
   app:
     build:
       context: .
       dockerfile: app/Dockerfile
-    environment:
-      LLM_BACKEND: ${LLM_BACKEND:-ollama}
-      OLLAMA_URL: ${OLLAMA_URL:-http://192.168.4.19:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:26b}
-      OLLAMA_DESKTOP_URL: ${OLLAMA_DESKTOP_URL:-}
-      OLLAMA_DESKTOP_MODEL: ${OLLAMA_DESKTOP_MODEL:-gemma4:12b}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      DATA_DIR: /data
-      LLM_CACHE_DIR: /data/llm_cache
-      TEXT_POOL_DIR: /data/text_pools
+    environment: *env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # The HTTP API (docs/API.md). Same image; one process, because the job queue and its
+  # single worker thread live in it (one GPU): never run it with --workers > 1.
+  api:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    command: ["uvicorn", "s2d.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *env
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -26,4 +40,5 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - app
+      - api
     restart: unless-stopped
