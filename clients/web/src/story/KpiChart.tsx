@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { sqlOptions, type Cell, type VerificationRow } from '../api'
-import { KPI_CS, dateCs } from '../format'
+import { CONTROL_CS, KPI_CS, dateCs } from '../format'
 import { Alert, Spinner } from '../components/ui'
 import { dailySql, daySec, rolling } from './model'
 
@@ -110,7 +110,7 @@ function SplitPlot({ data, v, hasControl, height }: { data: uPlot.AlignedData; v
         { label: 'story', stroke: T.story, width: 2.2, points: { show: false } },
         { label: 'twin without the story', stroke: T.twin, width: 1.6, dash: [6, 4], points: { show: false } },
         ...(hasControl
-          ? [{ label: `kontrola: ${controlLabel(v)}`, stroke: T.control, width: 1, alpha: 0.55, scale: 'c', points: { show: false } }]
+          ? [{ label: `control: ${controlLabel(v)}`, stroke: T.control, width: 1, alpha: 0.55, scale: 'c', points: { show: false } }]
           : []),
       ],
       axes: [
@@ -174,6 +174,12 @@ export function KpiChart({ jobId, v, height = 200 }: { jobId: string; v: Verific
   return (
     <>
       <SplitPlot data={series.data} v={v} hasControl={series.hasControl} height={height} />
+      {series.hasControl && (
+        <p className="text-[11px] text-slate-500">
+          <span className="text-[#8ab8ff]">Control (blue, right axis):</span> {CONTROL_CS[v.control_mode] ?? v.control_mode}
+          {v.control_mode !== 'yoy' && v.control ? ` — ${v.control}` : ''}. Same SQL as the story line, run on the comparison rows.
+        </p>
+      )}
       {twin.error && <p className="text-xs text-amber-300">Twin did not load: {twin.error.message}</p>}
     </>
   )

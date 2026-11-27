@@ -4,11 +4,12 @@
 // same input into Story to run it again.
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
+import { REPLAY_STATE, useDemoRun, type DemoKey } from '../run/demos'
 import { BRIEF_EXAMPLE, FAST_TEST_SPEC, NAHAPRAVDA_EXAMPLE } from '../examples'
 import type { Draft } from '../run/useSend'
 
-// Pre-generated runs on hack.dobsinsky.dev (fill in after generating; '' hides the button).
-const RUN_IDS = { brief: '', coffee: '', nahapravda: '' }
+// Pre-generated runs are found in the job list (run/demos.ts); an id here overrides the lookup.
+const RUN_IDS: Record<DemoKey, string> = { brief: '', coffee: '', nahapravda: '' }
 
 type Fit = 'yes' | 'partly' | 'no'
 const FIT_MARK: Record<Fit, string> = { yes: '✅', partly: '⚠️', no: '❌' }
@@ -20,7 +21,7 @@ type Scenario = {
   lead: string
   points: ReactNode[]
   fit?: [story: string, engine: string, fit: Fit][]
-  run: string
+  run: DemoKey
   draft: Draft
 }
 
@@ -35,7 +36,7 @@ const SCENARIOS: Scenario[] = [
       'An event for everyone has no group to compare with, so the test compares with the same weeks a year earlier.',
       'A −5 % change is close to the noise: it needs about 160 000 customers to confirm reliably.',
     ],
-    run: RUN_IDS.brief,
+    run: 'brief',
     draft: { text: `${BRIEF_EXAMPLE.company}\n\n${BRIEF_EXAMPLE.story}` },
   },
   {
@@ -53,7 +54,7 @@ const SCENARIOS: Scenario[] = [
       'Churn is only visible through orders, so calibrated churn sizes end far above the story’s +60 % / +80 %.',
       'At most 3 years of data and a fixed list of event types and metrics.',
     ],
-    run: RUN_IDS.coffee,
+    run: 'coffee',
     draft: { spec: { name: 'examples/a.yaml', yaml: FAST_TEST_SPEC } },
   },
   {
@@ -70,12 +71,23 @@ const SCENARIOS: Scenario[] = [
       ['monthly traffic', 'no visits table: orders and subscriptions stand in', 'partly'],
       ['+100 GB a day in the database', 'no infrastructure metrics: dropped and listed as unsupported', 'no'],
     ],
-    run: RUN_IDS.nahapravda,
+    run: 'nahapravda',
     draft: { text: `${NAHAPRAVDA_EXAMPLE.company}\n\n${NAHAPRAVDA_EXAMPLE.story}` },
   },
 ]
 
 const btn = 'border border-line px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500 hover:text-white'
+
+function OpenRun({ k }: { k: DemoKey }) {
+  const found = useDemoRun(k)
+  const id = RUN_IDS[k] || found
+  if (!id) return null
+  return (
+    <Link to={`/run/${id}`} state={REPLAY_STATE} className={`${btn} border-accent text-white`}>
+      Open the run
+    </Link>
+  )
+}
 
 export function Demo() {
   return (
@@ -119,11 +131,7 @@ export function Demo() {
               </table>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
-              {s.run && (
-                <Link to={`/run/${s.run}`} className={`${btn} border-accent text-white`}>
-                  Open the run
-                </Link>
-              )}
+              <OpenRun k={s.run} />
               <Link to="/" state={{ draft: s.draft }} className={btn}>
                 Run it yourself
               </Link>

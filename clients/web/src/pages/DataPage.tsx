@@ -177,7 +177,7 @@ function QueryError({ err }: { err: Error }) {
   if (isStatus(err, 400))
     return (
       <div className="border-l-2 border-rose-500/70 py-1 pl-3 text-sm text-rose-200">
-        <div className="mb-1 font-medium">Chyba v SQL</div>
+        <div className="mb-1 font-medium">SQL error</div>
         <pre className="overflow-x-auto whitespace-pre font-mono text-xs leading-relaxed">{err.message}</pre>
       </div>
     )

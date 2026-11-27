@@ -15,3 +15,20 @@ export function splitPrompt(text: string): { company: string; story: string } {
 }
 
 export type Submit = { body: NewJob; specName?: string }
+
+// Words that turn up in any real company story, Czech or English. Keyboard mashing has none.
+const COMMON = new Set(
+  'a i v ve na se je jsou od do z ze že s o u k pro po při za to ta ten byl byla bylo firma firmy společnost zákazníci zákazníků tržby prodej the and of in on is are was were from to for with by company customers sales since after'.split(' '),
+)
+
+/** A cheap guard before a prompt is sent: null when it reads like text, else what to tell the user. */
+export function promptProblem(text: string): string | null {
+  const words = (text.toLowerCase().match(/\p{L}+/gu) ?? []).filter((w) => w.length > 0)
+  if (words.length < 5) return 'Invalid prompt: describe the company and what happened to it in a few sentences.'
+  const real = words.filter((w) => w.length >= 3)
+  const withVowel = real.filter((w) => /[aeiouyáéěíóúůý]/.test(w)).length
+  const common = words.filter((w) => COMMON.has(w)).length
+  if (real.length === 0 || withVowel / real.length < 0.6 || common < 1 || new Set(words).size < 4)
+    return 'Invalid prompt: this does not read like a company story. Say what the company does and what changed, and when.'
+  return null
+}

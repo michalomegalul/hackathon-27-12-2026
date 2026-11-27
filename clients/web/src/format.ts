@@ -39,6 +39,27 @@ export function dateTimeCs(iso: string): string {
     : d.toLocaleString('en-GB', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+/** The API's step names and notes are Czech (docs/API.md); the pages show them in English. */
+const STEP_EN: Record<string, string> = {
+  'specifikace (AI)': 'spec (LLM)',
+  'kalibrace a simulace': 'calibration and simulation',
+  'dvojče bez příběhu': 'twin without the story',
+  'ověření': 'verification',
+  'český příběh (AI)': 'Czech story (LLM)',
+  detektiv: 'detective',
+}
+export function stepEn(s: string): string {
+  return (
+    STEP_EN[s] ??
+    s
+      .replace(/^platná na (\d+)\. pokus/, 'valid on attempt $1')
+      .replace('spec zadán (bez AI)', 'spec given (no LLM)')
+      .replace('(z cache)', '(cached)')
+      .replace(/(\d+) zákazníků/, '$1 customers')
+      .replace(/(\d+) dní/, '$1 days')
+  )
+}
+
 /** 75 → "1 min 15 s", 40 → "40 s" */
 export function duration(s: number): string {
   const r = Math.max(0, Math.round(s))

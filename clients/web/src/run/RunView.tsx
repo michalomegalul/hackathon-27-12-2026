@@ -2,7 +2,7 @@
 // on the phone) with a sticky status block, and the six sections in the main column.
 import { useEffect, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
-import { duration } from '../format'
+import { duration, stepEn } from '../format'
 import { STAGES, scrollToStage, sectionId, type Run, type StageId, type StageState, type Status } from './useRun'
 
 // ---- status block ----------------------------------------------------------------------
@@ -72,7 +72,7 @@ function ProcessList({ run, onPick }: { run: Run; onPick?: () => void }) {
               >
                 {st.label}
               </span>
-              {s.state === 'running' && s.sub && <span className="truncate text-[11px] text-muted">{s.sub}</span>}
+              {s.state === 'running' && s.sub && <span className="truncate text-[11px] text-muted">{stepEn(s.sub)}</span>}
             </span>
           </>
         )
@@ -170,7 +170,7 @@ export function Section({
       <header className="mb-3 flex items-baseline gap-2">
         <span className="font-mono text-xs text-slate-500">{n}</span>
         <h2 className={`font-semibold ${s.state === 'pending' ? 'text-slate-500' : ''}`}>{title}</h2>
-        {s.state === 'running' && <span className="text-xs text-accent">{s.sub ?? 'running'}…</span>}
+        {s.state === 'running' && <span className="text-xs text-accent">{s.sub ? stepEn(s.sub) : 'running'}…</span>}
         {hint && s.state === 'done' && <span className="ml-auto text-xs text-muted">{hint}</span>}
       </header>
       {s.state === 'done' ? (

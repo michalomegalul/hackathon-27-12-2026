@@ -4,7 +4,7 @@ import { Suspense, lazy, useState, type ReactNode } from 'react'
 import { type DetectEvent, type DetectScore, type JobResult, type Step } from '../api'
 import { Notes, VerificationTable } from '../components/Result'
 import { ShowMore, Spinner } from '../components/ui'
-import { KIND_CS, KPI_CS, METRIC_CS, dateCs, duration, intCs, num, withUnit } from '../format'
+import { KIND_CS, KPI_CS, METRIC_CS, dateCs, duration, intCs, num, stepEn, withUnit } from '../format'
 import { useSpec, type Spec } from '../spec'
 import { Section } from './RunView'
 import { sectionId } from './useRun'
@@ -117,7 +117,7 @@ function EventsTable({ r }: { r: JobResult }) {
 
 export function SpecSection({ run, spec }: { run: Run; spec: Spec | null }) {
   const step = run.job?.steps[0]
-  const note = step?.done ? step.note : ''
+  const note = step?.done ? stepEn(step.note) : ''
   return (
     <Section
       run={run}
@@ -159,8 +159,8 @@ function SubSteps({ steps, current }: { steps: Step[]; current: number }) {
             <span className={`w-4 text-center text-xs ${s.done ? 'text-accent' : running ? 'text-accent' : 'text-slate-600'}`}>
               {s.done ? '✓' : running ? <Spinner /> : '·'}
             </span>
-            <span className={s.done ? 'text-slate-300' : running ? 'text-white' : 'text-slate-500'}>{s.name}</span>
-            {s.done && s.note && <span className="truncate text-xs text-muted">{s.note}</span>}
+            <span className={s.done ? 'text-slate-300' : running ? 'text-white' : 'text-slate-500'}>{stepEn(s.name)}</span>
+            {s.done && s.note && <span className="truncate text-xs text-muted">{stepEn(s.note)}</span>}
             <span className="ml-auto shrink-0 text-xs tabular-nums text-muted">{s.done ? duration(s.s) : `~${duration(s.eta_s)}`}</span>
           </li>
         )

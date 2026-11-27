@@ -1,12 +1,71 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Outlet, isRouteErrorResponse, useLocation, useRouteError } from 'react-router'
-import { getNetDown, inputOptions, isStatus, jobOptions, subscribeNet } from '../api'
+import { getNetDown, inputOptions, isStatus, jobOptions, statsOptions, subscribeNet } from '../api'
+import { duration, stepEn } from '../format'
 import { clearActive, useActive, useLastRun } from '../run/lastRun'
 import { recallSent } from '../run/useSend'
 import { Alert, Card } from '../components/ui'
 import { Spiral } from '../components/Spiral'
 import { setToken, useLoginRequired, useToken, useTokenInvalid } from '../token'
+
+/**
+ * The server queue, in every page of the header (also on Story, also while your own run is open):
+ * "Queue: idle" or "Queue: 1 running, 2 waiting". Click for what the running job is doing now
+ * (GET /v1/stats; the API reports only the running job's step and the number of waiting ones).
+ */
+function QueueChip() {
+  const { data: s } = useQuery(statsOptions())
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('mousedown', away)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [open])
+  if (!s) return null
+  const label = !s.running && !s.waiting ? 'idle' : `${s.running ? '1 running' : '0 running'}${s.waiting ? `, ${s.waiting} waiting` : ''}`
+  return (
+    <div ref={box} className="relative shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="border border-line px-2.5 py-1 text-xs whitespace-nowrap text-slate-300 hover:border-slate-500 hover:text-white sm:text-sm"
+      >
+        <span className="hidden sm:inline">Queue: </span>
+        {label}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-2 grid w-72 gap-3 border border-line bg-panel p-3 text-sm shadow-xl">
+          {s.running ? (
+            <div className="grid gap-1.5">
+              <div className="text-xs text-muted">Running now</div>
+              <div className="font-medium">{stepEn(s.running.step ?? 'starting')}</div>
+              <div className="h-1.5 overflow-hidden bg-white/10">
+                <div className="h-full bg-accent transition-[width] duration-700" style={{ width: `${Math.round(Math.min(1, s.running.progress) * 100)}%` }} />
+              </div>
+              <div className="flex justify-between text-xs tabular-nums text-muted">
+                <span>{Math.round(Math.min(1, s.running.progress) * 100)} %</span>
+                <span>~{duration(s.running.eta_s)} left</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted">Nothing is running.</p>
+          )}
+          <div className="text-xs text-muted">
+            {s.waiting ? `${s.waiting} waiting behind it.` : 'Nobody is waiting.'} Median run {s.median_run_s === null ? 'unknown' : duration(s.median_run_s)}.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** Shown while the API can't be reached; retries every active query (and by itself when the browser comes back online). */
 function NetBanner() {
@@ -70,7 +129,7 @@ function ActiveRun() {
   return (
     <Link
       to={a.path}
-      title={`Back to ${name}${j.step && j.status === 'running' ? ` · ${j.step}` : ''}`}
+      title={`Back to ${name}${j.step && j.status === 'running' ? ` · ${stepEn(j.step)}` : ''}`}
       className={`inline-flex min-w-0 shrink items-center gap-1.5 rounded-full border bg-white/[0.03] px-2.5 py-1 text-xs hover:bg-white/[0.07] ${tone}`}
     >
       <span className={`size-2 shrink-0 rounded-full ${dot}`} />
@@ -108,6 +167,7 @@ function Shell({ children }: { children: ReactNode }) {
           </nav>
           <span className="ml-auto" />
           <ActiveRun />
+          <QueueChip />
           <Link to="/about" aria-current={pathname.startsWith('/about') ? 'page' : undefined} className={navCls({ isActive: pathname.startsWith('/about') })}>
             About
           </Link>

@@ -152,7 +152,7 @@ function PlantedCard({ t, m, hover, setHover }: { t: PlantedEvent; m: Matching; 
   const tag: Tag = !t.simulated
     ? { text: 'not simulated', t: 'gray' }
     : pair
-      ? { text: `nalezeno ${pair.found.id}`, t: 'green' }
+      ? { text: `found ${pair.found.id}`, t: 'green' }
       : { text: 'nenalezeno', t: 'amber' }
   return (
     <Card

@@ -7,16 +7,19 @@ import { Composer } from '../run/Composer'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { useRun } from '../run/useRun'
+import { useReplay } from '../run/replay'
 import { recallSent, useResend, useSend, type Draft } from '../run/useSend'
 import { forgetLast, useRememberLast } from '../run/lastRun'
 
 export function Story() {
   const { id } = useParams()
   const send = useSend()
-  const run = useRun(id, useResend(id, send))
+  const real = useRun(id, useResend(id, send))
   // History "Edit" navigates here with the prompt (or spec) as a draft
   const location = useLocation()
   const draft = (location.state as { draft?: Draft } | null)?.draft
+  // Example / Demo open a finished run with { replay: true }: it plays like a live one (run/replay.ts)
+  const run = useReplay(real, Boolean((location.state as { replay?: boolean } | null)?.replay))
   useRememberLast('story', id)
 
   return (

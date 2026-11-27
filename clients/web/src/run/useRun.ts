@@ -16,7 +16,7 @@ import {
   type JobInput,
   type JobResult,
 } from '../api'
-import { duration } from '../format'
+import { duration, stepEn } from '../format'
 
 export type StageId = 'prompt' | 'spec' | 'data' | 'detect' | 'score' | 'summary'
 export type StageState = 'pending' | 'running' | 'done' | 'error'
@@ -159,7 +159,7 @@ function status(j: Job | undefined, d: Detect | undefined, haveResult: boolean, 
   const err = Object.entries(stages).find(([, s]) => s.state === 'error')
   if (err) {
     const label = STAGES.find((s) => s.id === err[0])?.label ?? err[0]
-    return { title: `Chyba: ${label}`, detail: err[1].error, progress: null, etaS: null, position: null, tone: 'error' }
+    return { title: `Error: ${label}`, detail: err[1].error, progress: null, etaS: null, position: null, tone: 'error' }
   }
   if (!j) return { title: 'Loading…', progress: null, etaS: null, position: null, tone: 'busy' }
 
@@ -183,8 +183,8 @@ function status(j: Job | undefined, d: Detect | undefined, haveResult: boolean, 
     }
   if (j.status === 'running') {
     return {
-      title: `${j.step_index <= 1 ? 'Spec' : 'Data'}: ${j.step ?? ''}`,
-      detail: `krok ${j.step_index}/${j.steps_total}`,
+      title: `${j.step_index <= 1 ? 'Spec' : 'Data'}: ${stepEn(j.step ?? '')}`,
+      detail: `step ${j.step_index}/${j.steps_total}`,
       progress,
       etaS,
       position: null,
@@ -202,5 +202,5 @@ function status(j: Job | undefined, d: Detect | undefined, haveResult: boolean, 
       tone: 'busy',
     }
   if (d.status === 'running') return { title: 'Detective is looking for the story', detail: 'without knowing it', progress, etaS, position: null, tone: 'busy' }
-  return { title: 'Hotovo', detail: `za ${duration(elapsed)}`, progress: 1, etaS: null, position: null, tone: 'done' }
+  return { title: 'Done', detail: `in ${duration(elapsed)}`, progress: 1, etaS: null, position: null, tone: 'done' }
 }

@@ -2,7 +2,9 @@
 // Shift+Enter is a new line), chips for the example and the no-AI test, and a paperclip that
 // attaches a .yaml spec.
 import { useRef, useState } from 'react'
-import { splitPrompt, type Submit } from './prompt'
+import { useNavigate } from 'react-router'
+import { promptProblem, splitPrompt, type Submit } from './prompt'
+import { REPLAY_STATE, useDemoRun } from './demos'
 import type { Draft } from './useSend'
 import { BRIEF_EXAMPLE, FAST_TEST_SPEC } from '../examples'
 import { Spinner } from '../components/ui'
@@ -28,12 +30,18 @@ export function Composer({
   const [text, setText] = useState(initial && 'text' in initial ? initial.text : '')
   const [spec, setSpec] = useState<{ name: string; yaml: string } | null>(initial && 'spec' in initial ? initial.spec : null)
   const [fileErr, setFileErr] = useState<string | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const briefRun = useDemoRun('brief')
   const file = useRef<HTMLInputElement>(null)
   const area = useRef<HTMLTextAreaElement>(null)
 
   const canSend = !busy && (Boolean(spec) || text.trim().length > 0)
   const send = () => {
     if (!canSend) return
+    const bad = spec ? null : promptProblem(text)
+    if (bad) return setProblem(bad)
+    setProblem(null)
     const s: Submit = spec ? { body: { spec_yaml: spec.yaml }, specName: spec.name } : { body: splitPrompt(text) }
     onSubmit(s).then(
       () => {
@@ -50,9 +58,13 @@ export function Composer({
         <button
           type="button"
           className={chip}
+          title="Opens a finished run of the example and plays it, so nobody waits for the model"
           onClick={() => {
+            // a finished run, replayed; without one (not generated yet) the example text just fills the box
+            if (briefRun) return void navigate(`/run/${briefRun}`, { state: REPLAY_STATE })
             setText(`${BRIEF_EXAMPLE.company}\n\n${BRIEF_EXAMPLE.story}`)
             setSpec(null)
+            setProblem(null)
             area.current?.focus()
           }}
         >
@@ -111,7 +123,10 @@ export function Composer({
         <textarea
           ref={area}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            setProblem(null)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
@@ -140,7 +155,7 @@ export function Composer({
           )}
         </button>
       </form>
-      {(error || fileErr) && <p className="mt-1.5 text-xs text-rose-300">{fileErr ?? error}</p>}
+      {(problem || error || fileErr) && <p className="mt-1.5 text-xs text-rose-300">{problem ?? fileErr ?? error}</p>}
       <p className="mt-1.5 hidden text-[11px] text-slate-500 sm:block">Enter sends, Shift+Enter adds a line. A run takes 1–2 minutes.</p>
     </div>
   )
