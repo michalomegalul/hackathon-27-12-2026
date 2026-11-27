@@ -1,6 +1,7 @@
 # Prompts: content and the pitch (role B, Pepa)
 
 Three prompts, one Claude Code session each, in this order (each needs the previous one's stories).
+The demo has three stories: a short one (run live), a big one (a chain takes over a rival, pre-generated) and an optional random one for Q&A.
 Each one stops and reports; Michal merges.
 They don't touch any code, so they run in parallel with the web page (`04-web.md`).
 
@@ -21,25 +22,36 @@ Two ways to run a story, both used below:
 Rule: send each new story to the API **once** to get its spec, then iterate on the spec locally with `try.sh`.
 No API jobs after midnight on Friday: the queue is for the final demo runs.
 
-## Prompt 1: five demo stories that work (Fri 15:00–20:00)
+## Prompt 1: three demo stories (Fri 15:00–20:00)
 
 ```text
 Story2Data hackathon, role B: the demo stories. Repo: git@github.com:michalomegalul/hackathon-27-12-2026.git,
 git pull on main, create branch feat/b-content. Read docs/PLAN.md, README.md, docs/API.md, DECISIONS.md
 (at least the entries about stated sizes, customer counts and the year-over-year control, and the
 latest ones), examples/stories/*.yaml (format: title, company, story in Czech), examples/brief/sport.yaml
-and s2d/spec.py (which event types and targets the simulator supports). Don't change any code under
-s2d/, app/ or clients/. No Co-Authored-By lines, small commits, never merge to main.
-The team API token is in .env.local as S2D_TOKEN; never print it or commit it.
+and s2d/spec.py (EventType and Metric: the only event types and metrics the simulator supports).
+Don't change any code under s2d/, app/ or clients/. No Co-Authored-By lines, small commits, never
+merge to main. The team API token is in .env.local as S2D_TOKEN; never print it or commit it.
 
-Goal: 5 demo stories in examples/stories/demo-*.yaml that a TV executive and a banker get in 10 s,
-and that the verifier confirms reliably. Each one:
-- a different industry from the existing examples (or a better version of brief.yaml, SportMax),
-  realistic Czech company text with cities, channels and segments;
-- 2–4 events, each tied to a specific city, segment or channel, with a date and a stated size
-  ("o 15 %"), at least one with a lag ("o šest týdnů později") and one that only shows after a JOIN;
-- uses only event types the simulator supports (s2d/spec.py); if a story needs an unsupported
-  one, rewrite the story rather than asking for code.
+Goal: three demo stories, each understood by a TV executive and a banker in 10 s, each confirmed
+reliably by the verifier. Use invented company names only (no real chains or brands).
+
+1. SHORT (examples/stories/demo-short.yaml): the opening demo, as small as
+   examples/stories/kavarny.yaml. One small company, ~10–20k customers, 2 events, each tied to one
+   city or segment, with a date and a stated size ("o 20 %"), one with a lag. Must finish on the
+   live API in about a minute, so it can run live on stage.
+2. BIG (examples/stories/demo-big.yaml): "a supermarket chain buys a rival chain", e.g. Kupka a.s.
+   takes over the 40 stores of Trhovna. 80–100k customers (API max 100000), several cities and
+   segments, 3–4 events over two years. There is no "acquisition" event type, so tell the takeover
+   through the supported ones, e.g.: the taken-over stores' customers churn after the rebranding
+   (churn_shock), new customers arrive in the cities where the new stores open (campaign or
+   competitor_entry with acquisition_rate), prices of the old brand go up (price_change), the IT
+   migration breaks the e-shop for two weeks (service_outage), a new courier (courier_change).
+   At least one effect only shows after a JOIN (a segment or a city), and one with a lag.
+   Pre-generate it before midnight; on stage we open the finished job, we don't wait for it.
+3. RANDOM (optional, only if 1 and 2 are done): a wild card in a different industry, 2–3 events,
+   for Q&A ("give us any story": it shows nothing is hand-tuned).
+
 Process per story:
 1. Send it ONCE to the live API (POST /v1/jobs, company + story, difficulty medium), poll
    GET /v1/jobs/{id} every 5 s, then GET /result. Save the returned spec_yaml as
@@ -48,9 +60,10 @@ Process per story:
    seeds (edit meta.seed). Target: every event confirmed on all 3 seeds, twin 0 false alarms.
    If an event fails, change the story text (bigger stated size, narrower target, longer window)
    and the spec together; pick n_customers from DECISIONS (whole-population effects need far more).
+   When the story is final, send it to the API once more: that job is the one we open on stage.
 3. Write docs/demo-stories.md: one section per story with the one-sentence pitch, the events,
-   n_customers, seeds tried, story x/y and twin x/y per seed, run time, and which one we open the
-   demo with.
+   n_customers, seeds tried, story x/y and twin x/y per seed, run time, the stage job_id, and
+   what we say while it is on screen.
 Stop and report the table of results.
 ```
 
@@ -62,7 +75,7 @@ docs/research/notes/hackathon_judging.md (the jury are FIS teachers: databases, 
 mining). Use the local data from scripts/try.sh in data/try/<name>/story/story.duckdb, schema main
 only (never _truth: students won't have it). Don't change code.
 
-For each of the 5 demo stories write docs/teaching/<name>.md in Czech:
+For each demo story (short, big, and random if it exists) write docs/teaching/<name>.md in Czech:
 - "Zadání pro studenty": the company text, the table list with one line per table, and 5 questions
   from easy to hard: 1 a plain SELECT/GROUP BY, 2 a JOIN of 2–3 tables, 3 a time series by week,
   4 a comparison segment vs the rest (before/after the event date), 5 an open question
