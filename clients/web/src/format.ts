@@ -74,3 +74,13 @@ export const METRIC_CS: Record<string, string> = {
   delivery_days: 'doba doručení',
 }
 export const KIND_CS: Record<string, string> = { shift: 'trvalejší změna', spike: 'krátký výkyv', stockout: 'výpadek zásob' }
+
+/** DuckDB type → the Postgres type /ddl uses (docs/API.md, GET /ddl). */
+export function pgType(t: string): string {
+  const u = t.toUpperCase()
+  if (u === 'VARCHAR') return 'text'
+  if (u === 'DOUBLE' || u === 'FLOAT') return 'double precision'
+  if (u.startsWith('DECIMAL')) return u.replace('DECIMAL', 'numeric').toLowerCase()
+  if (['BIGINT', 'INTEGER', 'DATE', 'TIMESTAMP', 'BOOLEAN'].includes(u)) return u.toLowerCase()
+  return 'text'
+}

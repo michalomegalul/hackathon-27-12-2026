@@ -5,6 +5,15 @@ import { defineConfig, searchForWorkspaceRoot } from 'vite'
 export default defineConfig({
   base: '/web/', // nginx serves the build at https://hack.dobsinsky.dev/web/
   plugins: [react(), tailwindcss()],
+  build: {
+    rolldownOptions: {
+      // React Flow's react-compiler-runtime starts with "use no memo"; bundling drops the directive, harmlessly
+      onLog(level, log, handler) {
+        if (log.code === 'MODULE_LEVEL_DIRECTIVE' && log.message.includes('react-compiler-runtime')) return
+        handler(level, log)
+      },
+    },
+  },
   server: {
     // The code only calls relative /v1/... URLs, as in production (nginx routes /v1/ to the API).
     // Local API: `API_URL=http://localhost:8000 npm run dev`.

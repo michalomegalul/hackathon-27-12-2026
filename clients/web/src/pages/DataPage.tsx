@@ -52,11 +52,33 @@ function TableList({ tables, active, onPick }: { tables: TableInfo[]; active?: s
 
 // ---- one table, paged by offset as you scroll --------------------------------------------
 
-function TableView({ id, name, onSortAll }: { id: string; name: string; onSortAll: (col: string, desc: boolean) => void }) {
+/** WHERE over every column as text: the whole table, not just the loaded pages. */
+const searchSql = (table: string, columns: Column[], text: string) =>
+  `SELECT *\nFROM ${quoteId(table)}\nWHERE ${columns
+    .map((c) => `CAST(${quoteId(c.name)} AS VARCHAR) ILIKE '%${text.replaceAll("'", "''")}%'`)
+    .join('\n   OR ')}\nLIMIT 1000`
+
+function TableView({
+  id,
+  name,
+  onSortAll,
+  onSql,
+}: {
+  id: string
+  name: string
+  onSortAll: (col: string, desc: boolean) => void
+  onSql: (sql: string) => void
+}) {
   const q = useInfiniteQuery(tableRowsOptions(id, name, true))
   const pages = q.data?.pages
-  const rows = useMemo(() => pages?.flatMap((p) => p.rows) ?? [], [pages])
+  const loaded = useMemo(() => pages?.flatMap((p) => p.rows) ?? [], [pages])
   const columns = useMemo<Column[]>(() => pages?.[0]?.columns ?? [], [pages])
+  const [search, setSearch] = useState('')
+  const needle = search.trim().toLowerCase()
+  const rows = useMemo(
+    () => (needle ? loaded.filter((r) => r.some((c) => c !== null && String(c).toLowerCase().includes(needle))) : loaded),
+    [loaded, needle],
+  )
   const { hasNextPage, isFetchingNextPage, fetchNextPage, isFetchNextPageError } = q
   const loadMore = useCallback(() => {
     if (!isFetchNextPageError) void fetchNextPage()
@@ -70,13 +92,36 @@ function TableView({ id, name, onSortAll }: { id: string; name: string; onSortAl
     )
   if (q.isError && !pages) return <Alert>{q.error.message}</Alert>
 
+  const total = pages?.[0]?.total ?? 0
   return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={`Hledat v ${name}…`}
+          className="w-full max-w-xs rounded-lg border border-line bg-bg px-3 py-1.5 text-[16px] focus:border-accent focus:outline-none sm:text-sm"
+        />
+        {needle && (
+          <>
+            <span className="text-xs tabular-nums text-muted">
+              {rowsCs(rows.length)} z {intCs(loaded.length)} načtených
+            </span>
+            {loaded.length < total && (
+              <button onClick={() => onSql(searchSql(name, columns, search.trim()))} className="text-xs text-accent hover:underline">
+                Hledat v celé tabulce ({intCs(total)}) přes SQL
+              </button>
+            )}
+          </>
+        )}
+      </div>
     <DataGrid
       key={name}
       columns={columns}
       rows={rows}
-      total={pages?.[0]?.total}
-      hasMore={hasNextPage && !isFetchNextPageError}
+      total={needle ? rows.length : pages?.[0]?.total}
+      hasMore={!needle && hasNextPage && !isFetchNextPageError}
       loadingMore={isFetchingNextPage}
       onLoadMore={loadMore}
       onSortAll={onSortAll}
@@ -91,6 +136,7 @@ function TableView({ id, name, onSortAll }: { id: string; name: string; onSortAl
         )
       }
     />
+    </div>
   )
 }
 
@@ -141,14 +187,11 @@ function QueryError({ err }: { err: Error }) {
 
 // ---- page --------------------------------------------------------------------------------
 
-export function DataPage() {
-  const { id = '' } = useParams()
+/** The table list, the SQL box and the grid: on /run/:id/data and inside the run's Data section. */
+export function DataBrowser({ id, done = true }: { id: string; done?: boolean }) {
   const location = useLocation()
   const [params, setParams] = useSearchParams()
-  const job = useQuery(jobOptions(id))
-  const done = job.data?.status === 'done'
   const tables = useQuery(tablesOptions(id, done))
-
   const [sql, setSql] = useState('')
   const [check, setCheck] = useState<SqlCheck | null>(null)
   const [view, setView] = useState<'table' | 'query'>('table')
@@ -192,6 +235,142 @@ export function DataPage() {
     run(s)
   }
 
+  return (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <Card className="self-start p-2 sm:p-2">
+        <h2 className="px-3 pb-1 pt-1 text-xs uppercase tracking-wide text-muted">Tabulky</h2>
+        {tables.data ? (
+          <TableList tables={tables.data.tables} active={view === 'table' ? tableName : undefined} onPick={pickTable} />
+        ) : tables.error ? (
+          <div className="p-2">
+            <Alert>{tables.error.message}</Alert>
+          </div>
+        ) : (
+          <p className="px-3 py-2 text-sm text-muted">
+            <Spinner /> Načítám…
+          </p>
+        )}
+      </Card>
+
+      <div className="grid min-w-0 grid-cols-1 gap-4">
+        <Card>
+          <form
+            className="grid gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              setCheck(null)
+              run(sql)
+            }}
+          >
+            <label htmlFor="sql" className="flex items-baseline justify-between gap-2">
+              <span className="font-semibold">SQL</span>
+              <span className="text-xs text-muted">DuckDB · nejvýš 1000 řádků · limit 20 s · Ctrl+Enter spustí</span>
+            </label>
+            {check?.label && (
+              <p className="text-xs text-muted">
+                Ověřujete <b className="text-slate-200">{check.label}</b>: dotaz má dát stejná čísla, jaká naměřilo ověření.
+              </p>
+            )}
+            <textarea
+              id="sql"
+              ref={sqlRef}
+              value={sql}
+              onChange={(e) => {
+                setSql(e.target.value)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault()
+                  e.currentTarget.form?.requestSubmit()
+                }
+              }}
+              rows={Math.min(16, Math.max(4, sql.split('\n').length + 1))}
+              spellCheck={false}
+              placeholder={`SELECT *\nFROM ${tableName ?? 'orders'}\nLIMIT 100`}
+              className="w-full resize-y rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[16px] leading-relaxed focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-xs"
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                disabled={query.isPending || !sql.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-60"
+              >
+                {query.isPending ? <Spinner /> : '▶'} Spustit
+              </button>
+              {query.data && !query.isPending && (
+                <span className="text-xs tabular-nums text-muted">
+                  {rowsCs(query.data.rows.length)} za {num(query.data.seconds, 2)} s
+                </span>
+              )}
+              {check?.expect && query.data && !query.isPending && <CheckResult expect={check.expect} res={query.data} />}
+            </div>
+            {query.error && !query.isPending && <QueryError err={query.error} />}
+          </form>
+        </Card>
+
+        <Card className="min-w-0">
+          <div className="mb-3 flex flex-wrap items-center gap-1 text-sm" role="tablist">
+            {tableName && (
+              <button
+                role="tab"
+                aria-selected={view === 'table'}
+                onClick={() => setView('table')}
+                className={`rounded-md px-2.5 py-1 font-mono ${view === 'table' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
+              >
+                {tableName}
+              </button>
+            )}
+            {(query.data || query.isPending || query.error) && (
+              <button
+                role="tab"
+                aria-selected={view === 'query'}
+                onClick={() => setView('query')}
+                className={`rounded-md px-2.5 py-1 ${view === 'query' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
+              >
+                Výsledek dotazu
+              </button>
+            )}
+          </div>
+
+          {view === 'table' && tableName && (
+            <TableView
+              id={id}
+              name={tableName}
+              onSortAll={sortAll}
+              onSql={(s) => {
+                setSql(s)
+                setCheck(null)
+                run(s)
+              }}
+            />
+          )}
+          {view === 'query' &&
+            (query.isPending ? (
+              <p className="py-10 text-center text-sm text-muted">
+                <Spinner /> Dotaz běží…
+              </p>
+            ) : query.data ? (
+              <div className="grid gap-2">
+                {query.data.truncated && (
+                  <Alert t="amber">
+                    Výsledek je zkrácený na prvních {intCs(query.data.rows.length)} řádků. Pro celý výsledek přidejte agregaci, WHERE
+                    nebo si stáhněte ZIP s analyst.duckdb.
+                  </Alert>
+                )}
+                <DataGrid key={query.submittedAt} columns={query.data.columns} rows={query.data.rows} fit />
+              </div>
+            ) : query.error ? (
+              <p className="py-6 text-center text-sm text-muted">Dotaz skončil chybou, viz výše.</p>
+            ) : null)}
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+export function DataPage() {
+  const { id = '' } = useParams()
+  const job = useQuery(jobOptions(id))
+  const done = job.data?.status === 'done'
   const back = (
     <Link to={`/run/${id}#s-data`} className="text-sm text-muted hover:text-white">
       ← Zpět na běh {id}
@@ -235,123 +414,7 @@ export function DataPage() {
         <h1 className="text-xl font-semibold tracking-tight">Data</h1>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <Card className="self-start p-2 sm:p-2">
-          <h2 className="px-3 pb-1 pt-1 text-xs uppercase tracking-wide text-muted">Tabulky</h2>
-          {tables.data ? (
-            <TableList tables={tables.data.tables} active={view === 'table' ? tableName : undefined} onPick={pickTable} />
-          ) : tables.error ? (
-            <div className="p-2">
-              <Alert>{tables.error.message}</Alert>
-            </div>
-          ) : (
-            <p className="px-3 py-2 text-sm text-muted">
-              <Spinner /> Načítám…
-            </p>
-          )}
-        </Card>
-
-        <div className="grid min-w-0 grid-cols-1 gap-4">
-          <Card>
-            <form
-              className="grid gap-2"
-              onSubmit={(e) => {
-                e.preventDefault()
-                setCheck(null)
-                run(sql)
-              }}
-            >
-              <label htmlFor="sql" className="flex items-baseline justify-between gap-2">
-                <span className="font-semibold">SQL</span>
-                <span className="text-xs text-muted">DuckDB · nejvýš 1000 řádků · limit 20 s · Ctrl+Enter spustí</span>
-              </label>
-              {check?.label && (
-                <p className="text-xs text-muted">
-                  Ověřujete <b className="text-slate-200">{check.label}</b>: dotaz má dát stejná čísla, jaká naměřilo ověření.
-                </p>
-              )}
-              <textarea
-                id="sql"
-                ref={sqlRef}
-                value={sql}
-                onChange={(e) => {
-                  setSql(e.target.value)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault()
-                    e.currentTarget.form?.requestSubmit()
-                  }
-                }}
-                rows={Math.min(16, Math.max(4, sql.split('\n').length + 1))}
-                spellCheck={false}
-                placeholder={`SELECT *\nFROM ${tableName ?? 'orders'}\nLIMIT 100`}
-                className="w-full resize-y rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[16px] leading-relaxed focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-xs"
-              />
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  disabled={query.isPending || !sql.trim()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-60"
-                >
-                  {query.isPending ? <Spinner /> : '▶'} Spustit
-                </button>
-                {query.data && !query.isPending && (
-                  <span className="text-xs tabular-nums text-muted">
-                    {rowsCs(query.data.rows.length)} za {num(query.data.seconds, 2)} s
-                  </span>
-                )}
-                {check?.expect && query.data && !query.isPending && <CheckResult expect={check.expect} res={query.data} />}
-              </div>
-              {query.error && !query.isPending && <QueryError err={query.error} />}
-            </form>
-          </Card>
-
-          <Card className="min-w-0">
-            <div className="mb-3 flex flex-wrap items-center gap-1 text-sm" role="tablist">
-              {tableName && (
-                <button
-                  role="tab"
-                  aria-selected={view === 'table'}
-                  onClick={() => setView('table')}
-                  className={`rounded-md px-2.5 py-1 font-mono ${view === 'table' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
-                >
-                  {tableName}
-                </button>
-              )}
-              {(query.data || query.isPending || query.error) && (
-                <button
-                  role="tab"
-                  aria-selected={view === 'query'}
-                  onClick={() => setView('query')}
-                  className={`rounded-md px-2.5 py-1 ${view === 'query' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
-                >
-                  Výsledek dotazu
-                </button>
-              )}
-            </div>
-
-            {view === 'table' && tableName && <TableView id={id} name={tableName} onSortAll={sortAll} />}
-            {view === 'query' &&
-              (query.isPending ? (
-                <p className="py-10 text-center text-sm text-muted">
-                  <Spinner /> Dotaz běží…
-                </p>
-              ) : query.data ? (
-                <div className="grid gap-2">
-                  {query.data.truncated && (
-                    <Alert t="amber">
-                      Výsledek je zkrácený na prvních {intCs(query.data.rows.length)} řádků. Pro celý výsledek přidejte agregaci, WHERE
-                      nebo si stáhněte ZIP s analyst.duckdb.
-                    </Alert>
-                  )}
-                  <DataGrid key={query.submittedAt} columns={query.data.columns} rows={query.data.rows} fit />
-                </div>
-              ) : query.error ? (
-                <p className="py-6 text-center text-sm text-muted">Dotaz skončil chybou, viz výše.</p>
-              ) : null)}
-          </Card>
-        </div>
-      </div>
+      <DataBrowser id={id} />
     </div>
   )
 }

@@ -286,6 +286,8 @@ export const getTable = (id: string, name: string, limit = 100, offset = 0, sign
     `/v1/jobs/${encodeURIComponent(id)}/tables/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}&world=${world}`,
     { signal },
   )
+/** GET /ddl: the analyst tables as Postgres CREATE TABLE statements (text/plain). */
+export const getDdl = async (id: string) => (await request(`/v1/jobs/${encodeURIComponent(id)}/ddl`)).text()
 export const runQuery = (id: string, sql: string, world: World = 'story') =>
   api<QueryResult>(`/v1/jobs/${encodeURIComponent(id)}/query`, { method: 'POST', body: JSON.stringify({ sql, world }) })
 
@@ -357,6 +359,28 @@ export const tablesOptions = (id: string, enabled: boolean) =>
     queryKey: ['tables', id],
     queryFn: () => getTables(id),
     enabled,
+    staleTime: Infinity,
+    retry: retryTransient,
+  })
+
+export const ddlOptions = (id: string) =>
+  queryOptions({ queryKey: ['ddl', id], queryFn: () => getDdl(id), staleTime: Infinity, retry: retryTransient })
+
+/** The first `n` rows of a table, like `SELECT * FROM t LIMIT n` in psql. */
+export const tableHeadOptions = (id: string, name: string, n = 5, world: World = 'story') =>
+  queryOptions({
+    queryKey: ['tablehead', id, name, n, world],
+    queryFn: ({ signal }) => getTable(id, name, n, 0, signal, world),
+    staleTime: Infinity,
+    retry: retryTransient,
+  })
+
+/** A query whose answer never changes (a finished job's data). */
+export const sqlOptions = (id: string, sql: string | undefined, world: World = 'story') =>
+  queryOptions({
+    queryKey: ['sql', id, world, sql],
+    queryFn: () => runQuery(id, sql!, world),
+    enabled: Boolean(sql),
     staleTime: Infinity,
     retry: retryTransient,
   })
