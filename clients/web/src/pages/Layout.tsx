@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, isRouteErrorResponse, useRouteError } from 'react-router'
-import { getHealth, hasToken } from '../api'
-import { Alert } from '../components/ui'
+import { getHealth } from '../api'
+import { Alert, Card } from '../components/ui'
+import { setToken, useToken } from '../token'
 
 function QueueInfo() {
   const { data } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 10_000 })
@@ -36,26 +37,66 @@ function Shell({ children }: { children: ReactNode }) {
             Moje úlohy
           </NavLink>
         </nav>
+        <Logout />
       </header>
       <main className="flex-1 pb-12">{children}</main>
     </div>
   )
 }
 
-export function Layout() {
+function Logout() {
+  const token = useToken()
+  const qc = useQueryClient()
+  if (!token) return null
   return (
-    <Shell>
-      {!hasToken && (
-        <div className="mb-4">
-          <Alert t="amber">
-            Chybí token: nastavte <code>VITE_API_TOKEN</code> v <code>clients/web/.env.local</code> a restartujte{' '}
-            <code>npm run dev</code>.
-          </Alert>
-        </div>
-      )}
-      <Outlet />
-    </Shell>
+    <button
+      className="text-xs text-muted hover:text-white"
+      title="Zapomenout token v tomto prohlížeči"
+      onClick={() => {
+        setToken('')
+        qc.clear()
+      }}
+    >
+      Odhlásit
+    </button>
   )
+}
+
+function TokenForm() {
+  const [value, setValue] = useState('')
+  const qc = useQueryClient()
+  return (
+    <Card className="mx-auto mt-6 max-w-md">
+      <h1 className="text-lg font-semibold">Přihlášení</h1>
+      <p className="mt-1 text-sm text-muted">
+        Zadejte přístupový token k API (dostanete ho od týmu). Uloží se jen v tomto prohlížeči.
+      </p>
+      <form
+        className="mt-4 grid gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          qc.clear()
+          setToken(value)
+        }}
+      >
+        <input
+          type="password"
+          autoComplete="current-password"
+          required
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="token"
+          className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-[16px] focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-sm"
+        />
+        <button className="rounded-lg bg-accent px-4 py-2.5 font-medium text-slate-950 hover:brightness-110">Pokračovat</button>
+      </form>
+    </Card>
+  )
+}
+
+export function Layout() {
+  const token = useToken()
+  return <Shell>{token ? <Outlet /> : <TokenForm />}</Shell>
 }
 
 export function RouteError() {

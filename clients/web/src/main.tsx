@@ -20,7 +20,7 @@ const router = createBrowserRouter([
       { path: 'jobs/:id', Component: JobPage },
     ],
   },
-])
+], { basename: import.meta.env.BASE_URL.replace(/\/$/, '') }) // served at /web/
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } })
 
 createRoot(document.getElementById('root')!).render(

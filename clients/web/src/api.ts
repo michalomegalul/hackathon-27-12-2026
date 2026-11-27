@@ -1,6 +1,7 @@
 // Typed client for docs/API.md. All URLs are relative (/v1/...): the Vite dev proxy and
 // nginx in production both route them to the API.
 import { queryOptions } from '@tanstack/react-query'
+import { getToken, setToken } from './token'
 
 // ---- shapes ----------------------------------------------------------------------------
 
@@ -131,17 +132,17 @@ export class ApiError extends Error {
 
 // ---- transport -------------------------------------------------------------------------
 
-const TOKEN = import.meta.env.VITE_API_TOKEN ?? ''
-
 async function request(path: string, init?: RequestInit): Promise<Response> {
+  const token = getToken()
   const res = await fetch(path, {
     ...init,
     headers: {
-      ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },
   })
+  if (res.status === 401 && token) setToken('') // unknown token: ask for a new one
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: string | ValidationIssue[] } | null
     throw new ApiError(res.status, body?.detail ?? res.statusText ?? `HTTP ${res.status}`)
@@ -217,5 +218,3 @@ export const jobsOptions = () =>
     // keep the list fresh while something is still queued/running
     refetchInterval: (query) => (query.state.data?.jobs.some((j) => !finished(j.status)) ? 3000 : false),
   })
-
-export const hasToken = TOKEN !== ''
