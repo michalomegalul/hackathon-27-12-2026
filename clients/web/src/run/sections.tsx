@@ -1,12 +1,13 @@
 // The six sections of the run view, in order. Each is a grey placeholder (RunView.Section) until
 // its stage is done. Data and Shrnutí are lazy chunks (React Flow, TanStack Table, uPlot, anime.js).
-import { Suspense, lazy, type ReactNode } from 'react'
+import { Suspense, lazy, useState, type ReactNode } from 'react'
 import { type DetectEvent, type DetectScore, type JobResult, type Step } from '../api'
 import { Notes, VerificationTable } from '../components/Result'
-import { Spinner } from '../components/ui'
+import { ShowMore, Spinner } from '../components/ui'
 import { KIND_CS, KPI_CS, METRIC_CS, dateCs, duration, intCs, num, withUnit } from '../format'
 import { useSpec, type Spec } from '../spec'
 import { Section } from './RunView'
+import { sectionId } from './useRun'
 import { SpecView } from './SpecView'
 import type { Run } from './useRun'
 
@@ -27,8 +28,19 @@ function Waiting({ children }: { children: ReactNode }) {
 
 // ---- 1. Prompt -------------------------------------------------------------------------
 
-export function PromptSection({ run, specName }: { run: Run; specName?: string }) {
+export function PromptSection({ run, specName, composer }: { run: Run; specName?: string; composer?: ReactNode }) {
   const i = run.input
+  // a new run: the prompt is typed right here
+  if (composer)
+    return (
+      <section id={sectionId('prompt')} className="scroll-mt-32 border-t border-line pt-5 lg:scroll-mt-20">
+        <header className="mb-3 flex items-baseline gap-2">
+          <span className="font-mono text-xs text-slate-500">1</span>
+          <h2 className="font-semibold">Prompt</h2>
+        </header>
+        {composer}
+      </section>
+    )
   return (
     <Section run={run} id="prompt" title="Prompt" hint={run.id && <span className="font-mono">{run.id}</span>}>
       {!i ? (
@@ -38,7 +50,7 @@ export function PromptSection({ run, specName }: { run: Run; specName?: string }
           Hotová specifikace{specName ? <span className="font-mono"> {specName}</span> : null}, bez AI.
         </p>
       ) : (
-        <div className="ml-auto grid max-w-3xl gap-2 rounded-xl rounded-tr-sm border border-line bg-bg/60 px-4 py-3 text-sm leading-relaxed">
+        <div className="grid max-w-3xl gap-2 border-l-2 border-line py-1 pl-4 text-sm leading-relaxed">
           <p className="text-slate-300">{i.company}</p>
           {i.story && i.story !== i.company && <p className="whitespace-pre-line text-slate-100">{i.story}</p>}
         </div>
@@ -58,7 +70,7 @@ function EventsTable({ r }: { r: JobResult }) {
     <>
       <ul className="grid gap-2 md:hidden">
         {rows.map((v) => (
-          <li key={v.event_id} className="rounded-lg border border-line bg-bg/40 p-3 text-sm">
+          <li key={v.event_id} className="border-l-2 border-line py-1 pl-3 text-sm">
             <div className="flex gap-2">
               <span className="font-mono text-xs text-muted">{v.event_id}</span>
               <span className="flex-1">{v.claim_cs}</span>
@@ -181,7 +193,7 @@ const arrow = (d: string) => (d === 'up' ? '↑' : d === 'down' ? '↓' : '·')
 
 function FoundEvent({ e }: { e: DetectEvent }) {
   return (
-    <li className="grid gap-1 rounded-lg border border-line bg-bg/40 px-3 py-2 text-sm">
+    <li className="grid gap-1 border-l-2 border-line py-1 pl-3 text-sm">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <span className="font-mono text-xs text-muted">{e.id}</span>
         <span title={KIND_CS[e.kind] ?? e.kind}>
@@ -201,8 +213,12 @@ function FoundEvent({ e }: { e: DetectEvent }) {
   )
 }
 
+const FIRST_FOUND = 10
+
 export function DetectSection({ run }: { run: Run }) {
   const d = run.detect
+  const [all, setAll] = useState(false)
+  const found = d?.events ?? []
   return (
     <Section
       run={run}
@@ -217,12 +233,17 @@ export function DetectSection({ run }: { run: Run }) {
     >
       {d && (
         <div className="grid gap-4">
-          {d.events?.length ? (
-            <ul className="grid gap-1.5">
-              {d.events.map((e) => (
-                <FoundEvent key={e.id} e={e} />
-              ))}
-            </ul>
+          {found.length ? (
+            <div className="grid gap-2">
+              <ul className="grid gap-1.5">
+                {(all ? found : found.slice(0, FIRST_FOUND)).map((e) => (
+                  <FoundEvent key={e.id} e={e} />
+                ))}
+              </ul>
+              {found.length > FIRST_FOUND && (
+                <ShowMore open={all} onClick={() => setAll((a) => !a)} more={found.length - FIRST_FOUND} noun={['nález', 'nálezy', 'nálezů']} />
+              )}
+            </div>
           ) : (
             <p className="text-sm text-muted">Detektiv v datech nic nenašel.</p>
           )}
@@ -240,11 +261,20 @@ export function DetectSection({ run }: { run: Run }) {
 
 // ---- 5. Skóre --------------------------------------------------------------------------
 
-function Tile({ label, value, sub, good }: { label: string; value: ReactNode; sub: string; good: boolean | null }) {
+type Light = 'green' | 'amber' | 'red' | null
+const LIGHT: Record<string, [string, string]> = {
+  green: ['border-emerald-500/70', 'text-emerald-300'],
+  amber: ['border-amber-500/70', 'text-amber-300'],
+  red: ['border-rose-500/70', 'text-rose-300'],
+}
+
+function Tile({ label, value, sub, good, light }: { label: string; value: ReactNode; sub: string; good?: boolean | null; light?: Light }) {
+  const l = light !== undefined ? light : good === null || good === undefined ? null : good ? 'green' : 'amber'
+  const [border, text] = l ? LIGHT[l] : ['border-line', '']
   return (
-    <div className="rounded-xl border border-line bg-bg/40 p-3.5">
+    <div className={`border-l-2 py-1 pl-3 ${border}`}>
       <div className="text-xs text-muted">{label}</div>
-      <div className={`text-2xl font-semibold tabular-nums ${good === null ? '' : good ? 'text-accent' : 'text-amber-300'}`}>{value}</div>
+      <div className={`text-2xl font-semibold tabular-nums ${text}`}>{value}</div>
       <div className="text-xs text-muted">{sub}</div>
     </div>
   )
@@ -272,11 +302,16 @@ export function ScoreSection({ run }: { run: Run }) {
           <div className="grid gap-3 sm:grid-cols-3">
             {(() => {
               const [ok, all] = frac(r.summary.story)
-              const [hit, tAll] = frac(r.summary.twin)
+              const [hit] = frac(r.summary.twin)
               return (
                 <>
                   <Tile label="příběh" value={`${ok}/${all}`} sub="událostí potvrzeno v datech" good={all > 0 && ok === all} />
-                  <Tile label="dvojče" value={`${hit}/${tAll}`} sub="falešných poplachů bez příběhu" good={hit === 0} />
+                  <Tile
+                    label="neidentifikované události"
+                    value={hit}
+                    sub="nalezeno v dvojčeti, které příběh nemá (má být 0)"
+                    light={hit === 0 ? 'green' : hit === 1 ? 'amber' : 'red'}
+                  />
                 </>
               )
             })()}
@@ -315,11 +350,11 @@ export function SummarySection({ run, spec, mode = 'story' }: { run: Run; spec: 
 /** story: Shrnutí links the prompt to charts and tables; rev: the detective's story against the prompt. */
 export type Mode = 'story' | 'rev'
 
-export function Sections({ run, specName, mode = 'story' }: { run: Run; specName?: string; mode?: Mode }) {
+export function Sections({ run, specName, mode = 'story', composer }: { run: Run; specName?: string; mode?: Mode; composer?: ReactNode }) {
   const spec = useSpec(run.result?.spec_yaml)
   return (
     <>
-      <PromptSection run={run} specName={specName} />
+      <PromptSection run={run} specName={specName} composer={composer} />
       <SpecSection run={run} spec={spec} />
       <DataSection run={run} />
       <DetectSection run={run} />

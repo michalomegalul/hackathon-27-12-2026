@@ -1,5 +1,6 @@
-// The Story chat input: one textarea (Enter sends, Shift+Enter is a new line), chips for the
-// example and the no-AI test, and a paperclip that attaches a .yaml spec.
+// The Story prompt field, inside the Prompt section of a new run: one textarea (Enter sends,
+// Shift+Enter is a new line), chips for the example and the no-AI test, and a paperclip that
+// attaches a .yaml spec.
 import { useRef, useState } from 'react'
 import { splitPrompt, type Submit } from './prompt'
 import type { Draft } from './useSend'
@@ -7,7 +8,7 @@ import { BRIEF_EXAMPLE, FAST_TEST_SPEC } from '../examples'
 import { Spinner } from '../components/ui'
 
 
-const chip = 'rounded-full border border-line px-3 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
+const chip = 'border border-line px-3 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
 
 /**
  * `onSubmit` resolves once the run exists: then the input clears, as in a chat. `initial` is what
@@ -44,7 +45,7 @@ export function Composer({
   }
 
   return (
-    <div data-chrome="bottom" className="sticky bottom-0 z-10 -mx-3 bg-bg/95 px-3 pb-3 pt-2 backdrop-blur sm:mx-0 sm:px-0">
+    <div className="max-w-4xl">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -67,16 +68,16 @@ export function Composer({
           Rychlý test bez AI
         </button>
         {spec && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] py-1 pl-3 pr-1.5 text-xs">
+          <span className="inline-flex items-center gap-1.5 border border-line py-1 pl-3 pr-1.5 text-xs">
             <span className="font-mono">{spec.name}</span>
-            <button type="button" aria-label="Odebrat soubor" className="rounded-full px-1 text-muted hover:text-white" onClick={() => setSpec(null)}>
+            <button type="button" aria-label="Odebrat soubor" className="px-1 text-muted hover:text-white" onClick={() => setSpec(null)}>
               ×
             </button>
           </span>
         )}
       </div>
       <form
-        className="flex items-end gap-2 rounded-2xl border border-line bg-panel p-1.5 sm:p-2 focus-within:border-slate-500"
+        className="flex items-end gap-2 border border-line bg-panel p-1.5 sm:p-2 focus-within:border-slate-500"
         onSubmit={(e) => {
           e.preventDefault()
           send()
@@ -85,7 +86,7 @@ export function Composer({
         <button
           type="button"
           onClick={() => file.current?.click()}
-          className="grid size-9 shrink-0 place-items-center rounded-xl text-muted hover:bg-white/[0.06] hover:text-white"
+          className="grid size-9 shrink-0 place-items-center text-muted hover:bg-white/[0.06] hover:text-white"
           title="Přiložit specifikaci (.yaml)"
           aria-label="Přiložit specifikaci (.yaml)"
         >
@@ -117,16 +118,16 @@ export function Composer({
               send()
             }
           }}
-          autoFocus={Boolean(initial)}
-          rows={Math.min(8, Math.max(1, text.split('\n').length))}
+          autoFocus
+          rows={Math.min(14, Math.max(6, text.split('\n').length + 1))}
           placeholder={spec ? 'Pošle se přiložená specifikace (text se nepoužije).' : 'První odstavec: firma. Pak příběh.'}
           aria-label="Firma a příběh"
-          className="max-h-60 min-h-9 flex-1 resize-none bg-transparent px-1 py-2 text-[16px] leading-relaxed placeholder:text-slate-500 focus:outline-none sm:text-sm"
+          className="max-h-[28rem] min-h-9 flex-1 resize-y bg-transparent px-1 py-2 text-[16px] leading-relaxed placeholder:text-slate-500 focus:outline-none sm:text-sm"
         />
         <button
           type="submit"
           disabled={!canSend}
-          className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-slate-950 hover:brightness-110 disabled:bg-white/10 disabled:text-slate-500"
+          className="grid size-9 shrink-0 place-items-center bg-accent text-slate-950 hover:brightness-110 disabled:bg-white/10 disabled:text-slate-500"
           aria-label="Odeslat"
           title="Odeslat (Enter)"
         >

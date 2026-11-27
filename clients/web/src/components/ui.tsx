@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { JobStatus, VerificationStatus } from '../api'
+import { plural } from '../format'
 
 // ---- badges ----------------------------------------------------------------------------
 
@@ -14,7 +15,7 @@ export type Tone = keyof typeof tone
 
 export function Badge({ t, children }: { t: Tone; children: ReactNode }) {
   return (
-    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone[t]}`}>
+    <span className={`inline-flex items-center whitespace-nowrap px-1.5 py-0.5 text-xs font-medium ${tone[t]}`}>
       {children}
     </span>
   )
@@ -40,14 +41,28 @@ export const VerificationBadge = ({ s }: { s: VerificationStatus }) => (
 // ---- layout bits -----------------------------------------------------------------------
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-xl border border-line bg-panel p-4 sm:p-5 ${className}`}>{children}</section>
+  return <section className={`border-t border-line pt-5 ${className}`}>{children}</section>
 }
 
 export function Alert({ children, t = 'red' }: { children: ReactNode; t?: 'red' | 'amber' }) {
-  const c = t === 'red' ? 'border-rose-500/40 bg-rose-500/10 text-rose-200' : 'border-amber-500/40 bg-amber-500/10 text-amber-100'
-  return <div className={`rounded-lg border px-3 py-2 text-sm ${c}`}>{children}</div>
+  const c = t === 'red' ? 'border-rose-500/70 text-rose-200' : 'border-amber-500/70 text-amber-100'
+  return <div className={`border-l-2 py-1 pl-3 text-sm ${c}`}>{children}</div>
 }
 
 export const Spinner = () => (
   <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-r-transparent align-[-2px]" />
 )
+
+/** "Zobrazit další 4 tabulky" / "Zobrazit méně" under a cut-off list. */
+export function ShowMore({ open, onClick, more, noun }: { open: boolean; onClick: () => void; more: number; noun: [string, string, string] }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      className="justify-self-start border border-line px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500 hover:text-white"
+    >
+      {open ? 'Zobrazit méně ▴' : `Zobrazit další ${more} ${plural(more, noun)} ▾`}
+    </button>
+  )
+}

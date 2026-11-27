@@ -19,7 +19,7 @@ const Src = ({ file, label }: { file: string; label: string }) => (
 
 function Panel({ title, children, className = '' }: { title: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-xl border border-line bg-panel p-4 sm:p-5 ${className}`}>
+    <section className={`border-t border-line pt-5 ${className}`}>
       <h2 className="mb-3 font-semibold">{title}</h2>
       {children}
     </section>
@@ -105,12 +105,12 @@ function Pipeline() {
       <span aria-hidden className="rail absolute top-3 bottom-3 left-[13px] w-px origin-top bg-accent" />
       {STEPS.map((s, i) => (
         <li key={s.n} className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-x-4">
-          <span className="node z-10 grid size-7 place-items-center rounded-full border border-line bg-panel font-mono text-xs text-muted">{i + 1}</span>
+          <span className="node z-10 grid size-7 place-items-center border border-line bg-bg font-mono text-xs text-muted">{i + 1}</span>
           <div className="grid gap-1.5">
             <h3 className="font-medium leading-7">{s.n}</h3>
             <p className="text-sm text-slate-300">{s.what}</p>
             <p className="text-sm text-muted">{s.how}</p>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-lg border border-line bg-bg/50 px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-l-2 border-line pl-3 py-1 text-sm">
               {s.ex}
               <Src file={s.src[0]} label={s.src[1]} />
             </div>
@@ -125,7 +125,7 @@ function Pipeline() {
 
 function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'good' | 'warn' }) {
   return (
-    <div className="grid content-between gap-1 rounded-lg border border-line bg-[#181b1f] p-3">
+    <div className="grid content-between gap-1 border-l-2 border-line pl-3 py-1">
       <div className="text-[11px] tracking-wide text-muted uppercase">{label}</div>
       <div className={`text-2xl font-semibold tabular-nums ${tone === 'good' ? 'text-[#73bf69]' : tone === 'warn' ? 'text-[#f2cc0c]' : 'text-slate-100'}`}>
         {value}
@@ -139,7 +139,7 @@ function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; su
 function Timeline({ t }: { t: Stats['timeline'] }) {
   const max = Math.max(1, ...t.map((h) => h.jobs))
   return (
-    <div className="grid gap-1 rounded-lg border border-line bg-[#181b1f] p-3">
+    <div className="grid gap-1 border-l-2 border-line pl-3 py-1">
       <div className="flex items-baseline justify-between text-[11px] tracking-wide text-muted uppercase">
         <span>Hotové běhy za hodinu, 24 h</span>
         <span className="normal-case tracking-normal text-slate-500">max {max}</span>
@@ -149,7 +149,7 @@ function Timeline({ t }: { t: Stats['timeline'] }) {
           <div
             key={h.hour}
             title={`${dateTimeCs(h.hour)}: ${h.jobs} běhů${h.median_run_s ? `, medián ${duration(h.median_run_s)}` : ''}`}
-            className="min-h-px flex-1 rounded-t-[2px] bg-[#73bf69]/80 hover:bg-[#73bf69]"
+            className="min-h-px flex-1 bg-[#73bf69]/80 hover:bg-[#73bf69]"
             style={{ height: `${(h.jobs / max) * 100}%`, opacity: h.jobs ? 1 : 0.25 }}
           />
         ))}
@@ -233,7 +233,7 @@ const TESTS_TOTAL = TESTS.reduce((a, [, n]) => a + n, 0)
 
 export function About() {
   return (
-    <div className="mx-auto grid max-w-4xl gap-5">
+    <div className="grid max-w-4xl gap-5">
       <div className="px-1">
         <h1 className="text-xl font-semibold tracking-tight">Jak to funguje</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
@@ -303,13 +303,13 @@ export function About() {
       <Panel title="Křivky">
         <div className="grid gap-4 md:grid-cols-2">
           <figure className="grid gap-2">
-            <img src={asset('verify_curve_a.png')} alt="Podíl potvrzených událostí podle obtížnosti: příběh 0,9 / 0,9 / 0,55, dvojče 0" className="w-full rounded-lg bg-white" loading="lazy" />
+            <img src={asset('verify_curve_a.png')} alt="Podíl potvrzených událostí podle obtížnosti: příběh 0,9 / 0,9 / 0,55, dvojče 0" className="w-full bg-white" loading="lazy" />
             <figcaption className="text-xs text-muted">
               Ověřovač, příklad A, 40 000 zákazníků, 5 seedů: příběh 90 / 90 / 55 %, dvojče 0 %. <Src file="DECISIONS.md#L581" label="DECISIONS 65" />
             </figcaption>
           </figure>
           <figure className="grid gap-2">
-            <img src={asset('detection_curve_a.png')} alt="Detektiv naslepo: F1 0,19 easy, 0,04 medium a hard" className="w-full rounded-lg bg-white" loading="lazy" />
+            <img src={asset('detection_curve_a.png')} alt="Detektiv naslepo: F1 0,19 easy, 0,04 medium a hard" className="w-full bg-white" loading="lazy" />
             <figcaption className="text-xs text-muted">
               Detektiv naslepo, 10 000 zákazníků: F1 0,19 / 0,04 / 0,04. Hledat bez nápovědy je mnohem těžší, proto je hlavní důkaz ověřovač a detektiv je bonus.{' '}
               <Src file="DECISIONS.md#L492" label="DECISIONS 61, 62" />

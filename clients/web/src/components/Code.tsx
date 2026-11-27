@@ -13,7 +13,7 @@ export function CopyButton({ text, label = 'Kopírovat', className = '' }: { tex
           setTimeout(() => setDone(false), 1500)
         })
       }}
-      className={`rounded-md border border-line px-2 py-0.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white ${className}`}
+      className={`border border-line px-2 py-0.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white ${className}`}
     >
       {done ? 'Zkopírováno ✓' : label}
     </button>
@@ -57,7 +57,7 @@ function highlight(sql: string): ReactNode[] {
 /** Highlighted SQL in a scrolling box, with a copy button in its corner. */
 export function SqlBlock({ sql, maxH = 'max-h-96', title }: { sql: string; maxH?: string; title?: ReactNode }) {
   return (
-    <div className="relative min-w-0 rounded-lg border border-line bg-bg/70">
+    <div className="relative min-w-0 border border-line bg-bg/70">
       <div className="flex items-center gap-2 border-b border-line/70 px-3 py-1.5 text-xs text-muted">
         <span className="min-w-0 flex-1 truncate">{title ?? 'SQL'}</span>
         <CopyButton text={sql} />

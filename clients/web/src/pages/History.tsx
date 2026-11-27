@@ -17,7 +17,7 @@ const FILTERS: [Filter, string][] = [
   ['demo', 'ukázky'],
 ]
 
-const btn = 'rounded-md border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
+const btn = 'border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
 
 /** "Znovu" (same prompt, new seed: a new run in Story) and "Upravit" (the prompt into the Story input). */
 function Actions({ j }: { j: JobListItem }) {
@@ -44,7 +44,7 @@ function Actions({ j }: { j: JobListItem }) {
 
 function Row({ j }: { j: JobListItem }) {
   return (
-    <li className="grid gap-x-4 gap-y-2 rounded-xl border border-line bg-panel px-4 py-3 hover:border-slate-500 sm:grid-cols-[minmax(0,1fr)_auto]">
+    <li className="grid gap-x-4 gap-y-2 border-b border-line py-3 hover:bg-white/[0.02] sm:grid-cols-[minmax(0,1fr)_auto]">
       <Link to={`/history/${j.job_id}`} className="grid min-w-0 gap-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="truncate font-medium">{j.title || 'Bez názvu'}</span>
@@ -96,16 +96,16 @@ export function History() {
           onChange={(e) => setQ(e.target.value)}
           placeholder="Hledat firmu nebo příběh…"
           aria-label="Hledat"
-          className="min-w-0 flex-1 basis-full rounded-lg border border-line bg-panel px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:max-w-sm sm:basis-auto sm:text-sm"
+          className="min-w-0 flex-1 basis-full border border-line bg-panel px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:max-w-sm sm:basis-auto sm:text-sm"
         />
-        <div role="radiogroup" aria-label="Filtr" className="flex rounded-lg border border-line bg-panel p-0.5">
+        <div role="radiogroup" aria-label="Filtr" className="flex border border-line bg-panel p-0.5">
           {FILTERS.map(([f, label]) => (
             <button
               key={f}
               role="radio"
               aria-checked={filter === f}
               onClick={() => setFilter(f)}
-              className={`rounded-md px-3 py-1.5 text-sm ${filter === f ? 'bg-white/[0.08] text-white' : 'text-muted hover:text-white'}`}
+              className={`px-3 py-1.5 text-sm ${filter === f ? 'bg-white/[0.08] text-white' : 'text-muted hover:text-white'}`}
             >
               {label}
               {data && <span className="ml-1.5 text-xs tabular-nums text-slate-500">{count(f)}</span>}

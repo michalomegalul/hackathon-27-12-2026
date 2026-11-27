@@ -84,3 +84,6 @@ export function pgType(t: string): string {
   if (['BIGINT', 'INTEGER', 'DATE', 'TIMESTAMP', 'BOOLEAN'].includes(u)) return u.toLowerCase()
   return 'text'
 }
+
+/** Czech plural: [1, 2–4, 5+] */
+export const plural = (n: number, [one, few, many]: [string, string, string]) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many)

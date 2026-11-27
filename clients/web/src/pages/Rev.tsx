@@ -18,7 +18,7 @@ function Pick({ j, onPick }: { j: JobListItem; onPick: () => void }) {
     <li>
       <button
         onClick={onPick}
-        className="grid w-full gap-0.5 rounded-lg border border-line bg-bg/40 px-3 py-2 text-left hover:border-slate-500 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-x-3"
+        className="grid w-full gap-0.5 border-b border-line px-1 py-2 text-left hover:bg-white/[0.03] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-x-3"
       >
         <span className="grid min-w-0 gap-0.5">
           <span className="flex min-w-0 items-baseline gap-2">
@@ -58,7 +58,7 @@ function Picker() {
   const rest = jobs.filter((j) => !isDemo(j))
 
   return (
-    <div className="grid gap-4 rounded-xl border border-line bg-panel p-4 sm:p-5">
+    <div className="grid gap-4 border-t border-line pt-5">
       <div>
         <h1 className="text-lg font-semibold">Rev story: z dat příběh</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
@@ -73,12 +73,12 @@ function Picker() {
           onChange={(e) => setQ(e.target.value)}
           placeholder="Hledat podle firmy nebo příběhu…"
           aria-label="Hledat databázi"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:text-sm"
+          className="min-w-0 flex-1 border border-line bg-bg px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:text-sm"
         />
         <button
           onClick={() => file.current?.click()}
           disabled={send.isPending}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 border border-line px-3 py-2 text-sm text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
           title="Přiložit specifikaci (.yaml): nejdřív se z ní vyrobí data, pak detektiv"
         >
           {send.isPending ? (

@@ -1,13 +1,11 @@
-// Shrnutí, the end of the run page and the demo's money shot: the prompt as sent with each
-// event's phrase highlighted, and from each highlight an arrow to (a) its chart, the story
-// against the twin without it, and (b) its Postgres card, the table and column it changed with
-// the before/after numbers and the SQL that proves it. Arrows: a fixed SVG overlay in screen
-// pixels (the SpanArrow recipe of docs/research/web-stack.md, DOM to DOM), drawn in one by one
-// with anime.js when the section scrolls into view. Lazy chunk (uPlot, anime.js).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+// Shrnutí, the end of the run page and the demo's money shot: the prompt as sent on top with
+// each event's phrase highlighted (dim until hovered); clicking a phrase pins that event, and
+// under the prompt come its chart (the story against the twin without it, as big as it gets)
+// and its Postgres card, the table and column it changed with the before/after numbers and the
+// SQL that proves it. The first event is pinned to start with. Lazy chunk (uPlot).
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
-import { createScope, createTimeline, onScroll, stagger, svg, utils } from 'animejs'
 import { sqlOptions, tablesOptions, type Cell, type JobInput, type JobResult, type TableInfo, type VerificationRow } from '../api'
 import { CopyButton, SqlBlock } from '../components/Code'
 import { VerificationBadge } from '../components/ui'
@@ -20,32 +18,17 @@ import { PsqlTable } from './DataView'
 import { findHighlights, rowKey } from './highlight'
 import type { Run } from './useRun'
 
-// ---- media queries ---------------------------------------------------------------------
-
-function useMedia(q: string) {
-  return useSyncExternalStore(
-    (cb) => {
-      const m = matchMedia(q)
-      m.addEventListener('change', cb)
-      return () => m.removeEventListener('change', cb)
-    },
-    () => matchMedia(q).matches,
-  )
-}
-const REDUCE = '(prefers-reduced-motion: reduce)'
-const WIDE = '(min-width: 1024px)' // lg: prompt beside the blocks, arrows on
-
 // ---- the verdict -----------------------------------------------------------------------
 
 function Verdict({ r, run, spec }: { r: JobResult; run: Run; spec: Spec | null }) {
   const score = run.detect?.score
   const n = spec?.events.length ?? new Set(r.verification.map((v) => v.event_id)).size
   const found = score && n ? Math.round(score.recall * n) : null
+  const twinHit = Number(r.summary.twin.split('/')[0])
   return (
     <p className="text-base font-medium sm:text-lg">
-      Příběh <b className="text-accent tabular-nums">{r.summary.story}</b> potvrzeno, dvojče{' '}
-      <b className={`tabular-nums ${r.summary.twin.startsWith('0/') ? 'text-accent' : 'text-amber-300'}`}>{r.summary.twin}</b> falešných
-      poplachů
+      Příběh <b className="text-accent tabular-nums">{r.summary.story}</b> potvrzeno, neidentifikované události{' '}
+      <b className={`tabular-nums ${twinHit === 0 ? 'text-emerald-300' : twinHit === 1 ? 'text-amber-300' : 'text-rose-300'}`}>{twinHit}</b>
       {found !== null && (
         <>
           , detektiv našel{' '}
@@ -66,12 +49,31 @@ function HighlightedPrompt({
   rows,
   hover,
   setHover,
+  pinned,
+  pin,
 }: {
   input: JobInput
   rows: VerificationRow[]
   hover: string | null
   setHover: (e: string | null) => void
+  pinned: string | null
+  pin: (e: string) => void
 }) {
+  const act = (ev: string) => ({
+    'data-hl': ev,
+    tabIndex: 0,
+    role: 'button',
+    'aria-pressed': pinned === ev,
+    onMouseEnter: () => setHover(ev),
+    onMouseLeave: () => setHover(null),
+    onClick: () => pin(ev),
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        pin(ev)
+      }
+    },
+  })
   const text = input.story ?? ''
   const h = useMemo(() => findHighlights(text, rows), [text, rows])
   const parts: ReactNode[] = []
@@ -79,18 +81,16 @@ function HighlightedPrompt({
   for (const s of h.spans) {
     if (s.start > at) parts.push(text.slice(at, s.start))
     const ev = s.events[0]
-    const on = hover === ev
     parts.push(
       <mark
         key={s.start}
-        data-hl={ev}
-        tabIndex={0}
-        onMouseEnter={() => setHover(ev)}
-        onMouseLeave={() => setHover(null)}
-        onFocus={() => setHover(ev)}
-        onBlur={() => setHover(null)}
-        className={`mx-px cursor-default rounded-t-[3px] border-b-2 px-0.5 text-inherit transition-colors duration-200 [box-decoration-break:clone] ${
-          on ? 'border-accent bg-accent/30 text-white' : 'border-accent/45 bg-accent/[0.09] hover:bg-accent/20'
+        {...act(ev)}
+        className={`mx-px cursor-pointer border-b-2 px-0.5 transition-colors duration-200 [box-decoration-break:clone] focus:outline-none ${
+          pinned === ev
+            ? 'border-accent bg-accent/25 text-white'
+            : hover === ev
+              ? 'border-accent/70 bg-accent/15 text-slate-100'
+              : 'border-accent/30 bg-accent/[0.05] text-slate-300'
         }`}
       >
         <sup className="mr-0.5 font-mono text-[9px] text-accent">{ev}</sup>
@@ -106,7 +106,7 @@ function HighlightedPrompt({
     <div className="grid gap-3">
       {input.company && input.company !== input.story && <p className="text-xs leading-relaxed text-muted">{input.company}</p>}
       {text ? (
-        <p className="text-[15px] leading-7 whitespace-pre-line text-slate-200">{parts}</p>
+        <p className="max-w-4xl text-base leading-8 whitespace-pre-line text-slate-500">{parts}</p>
       ) : (
         <p className="text-sm text-muted">Běh vznikl z hotové specifikace, bez textového zadání. Události:</p>
       )}
@@ -115,12 +115,9 @@ function HighlightedPrompt({
           {(text ? h.unmatched : [...claims.keys()]).map((ev) => (
             <li key={ev}>
               <span
-                data-hl={ev}
-                tabIndex={0}
-                onMouseEnter={() => setHover(ev)}
-                onMouseLeave={() => setHover(null)}
-                className={`inline-flex items-baseline gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                  hover === ev ? 'border-accent/60 bg-accent/20 text-white' : 'border-line bg-bg/60 text-slate-300'
+                {...act(ev)}
+                className={`inline-flex cursor-pointer items-baseline gap-1.5 border-b-2 px-0.5 py-0.5 text-xs transition-colors focus:outline-none ${
+                  pinned === ev ? 'border-accent text-white' : hover === ev ? 'border-accent/70 text-slate-100' : 'border-line text-slate-400'
                 }`}
               >
                 <span className="font-mono text-accent">{ev}</span>
@@ -214,7 +211,7 @@ function PgCard({ jobId, v, tables, lit }: { jobId: string; v: VerificationRow; 
   return (
     <div
       data-target={`${rowKey(v)}:pg`}
-      className={`grid min-w-0 gap-2.5 rounded-lg border bg-bg/50 p-3 transition-colors duration-300 ${lit ? 'border-accent/50' : 'border-line'}`}
+      className={`grid min-w-0 max-w-3xl gap-2.5 border-l-2 py-1 pl-3 transition-colors duration-300 ${lit ? 'border-accent' : 'border-line'}`}
     >
       <header className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
         <span className="text-muted">Postgres</span>
@@ -263,31 +260,19 @@ function Block({
   jobId,
   v,
   tables,
-  hover,
-  setHover,
 }: {
   jobId: string
   v: VerificationRow
   tables: TableInfo[]
-  hover: string | null
-  setHover: (e: string | null) => void
 }) {
-  const on = hover === v.event_id
-  const dim = hover !== null && !on
   return (
-    <article
-      onMouseEnter={() => setHover(v.event_id)}
-      onMouseLeave={() => setHover(null)}
-      className={`grid min-w-0 gap-3 rounded-xl border p-3 transition-[opacity,border-color] duration-300 sm:p-4 ${
-        on ? 'border-accent/40 bg-accent/[0.03]' : 'border-line'
-      } ${dim ? 'opacity-45' : ''}`}
-    >
+    <article className="grid min-w-0 gap-4 border-t border-line pt-4">
       <header className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-sm">
         <span className="font-mono text-xs text-accent">{v.event_id}</span>
         <span className="min-w-0 flex-1">{v.claim_cs}</span>
         <VerificationBadge s={v.status} />
       </header>
-      <figure data-target={`${rowKey(v)}:chart`} className="grid gap-1.5 rounded-lg border border-line bg-[#181b1f] p-2.5">
+      <figure data-target={`${rowKey(v)}:chart`} className="grid gap-1.5 py-1">
         <figcaption className="flex flex-wrap items-baseline gap-x-3 text-xs">
           <span className="font-medium text-slate-200">{KPI_CS[v.kpi] ?? v.kpi}</span>
           <span className="font-mono text-muted">{v.target || 'všichni'}</span>
@@ -301,112 +286,10 @@ function Block({
             )}
           </span>
         </figcaption>
-        <KpiChart jobId={jobId} v={v} height={180} />
+        <KpiChart jobId={jobId} v={v} height={420} />
       </figure>
-      <PgCard jobId={jobId} v={v} tables={tables} lit={on} />
+      <PgCard jobId={jobId} v={v} tables={tables} lit />
     </article>
-  )
-}
-
-// ---- the arrows --------------------------------------------------------------------------
-
-type Path = { key: string; ev: string; d: string; x2: number; y2: number; off: boolean }
-type Band = { left: number; top: number; width: number; height: number }
-
-/**
- * From the highlight's last line box (right edge) to the target's left edge, near its top.
- * The band is the summary's part of the screen between the sticky header and the chat input;
- * an arrow whose target is outside it is hidden (it would only point off-screen).
- */
-function geometry(root: HTMLElement): { paths: Path[]; band: Band } {
-  const r = root.getBoundingClientRect()
-  const head = document.querySelector('[data-chrome="top"]')?.getBoundingClientRect().bottom ?? 0
-  const input = document.querySelector('[data-chrome="bottom"]')?.getBoundingClientRect().top ?? innerHeight
-  const top = Math.max(r.top, head)
-  const bottom = Math.min(r.bottom, innerHeight, input)
-  const band = { left: r.left - 8, top, width: r.width + 16, height: Math.max(0, bottom - top) }
-  const paths: Path[] = []
-  for (const tgt of root.querySelectorAll<HTMLElement>('[data-target]')) {
-    const [key, kind] = tgt.dataset.target!.split(':')
-    const ev = key.split('·')[0]
-    const from = root.querySelector<HTMLElement>(`[data-hl="${CSS.escape(ev)}"]`)
-    if (!from) continue
-    const rects = from.getClientRects()
-    const a = rects[rects.length - 1] ?? from.getBoundingClientRect()
-    const b = tgt.getBoundingClientRect()
-    const x1 = a.right + 3
-    const y1 = a.top + a.height / 2
-    const x2 = b.left - 5
-    const y2 = b.top + Math.min(26, b.height / 2)
-    const dx = Math.max(40, (x2 - x1) * 0.5)
-    const off = y2 < top + 4 || y2 > bottom - 4 || y1 < top || y1 > bottom
-    paths.push({ key: `${key}:${kind}`, ev, x2, y2, off, d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` })
-  }
-  return { paths, band }
-}
-
-function Arrows({ root, hover, reduce }: { root: HTMLElement; hover: string | null; reduce: boolean }) {
-  const [g, setG] = useState(() => geometry(root))
-  // redraw on scroll, resize and any size change inside (charts and cards load late)
-  useLayoutEffect(() => {
-    let raf = 0
-    const update = () => {
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => setG(geometry(root)))
-    }
-    update()
-    window.addEventListener('scroll', update, { passive: true, capture: true })
-    window.addEventListener('resize', update)
-    const ro = new ResizeObserver(update)
-    ro.observe(root)
-    root.querySelectorAll('[data-target], [data-hl]').forEach((el) => ro.observe(el))
-    return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('scroll', update, { capture: true })
-      window.removeEventListener('resize', update)
-      ro.disconnect()
-    }
-  }, [root])
-
-  // draw in one by one when the section scrolls into view; reduced motion: drawn already
-  const svgRef = useRef<SVGSVGElement>(null)
-  const n = g.paths.length
-  useEffect(() => {
-    if (reduce || !n || !svgRef.current) return
-    const el = svgRef.current
-    const scope = createScope().add(() => {
-      const lines = svg.createDrawable(el.querySelectorAll<SVGPathElement>('path.arrow'))
-      const heads = el.querySelectorAll('.head')
-      utils.set(lines, { draw: '0 0' })
-      utils.set(heads, { opacity: 0 })
-      createTimeline({ autoplay: onScroll({ target: root, enter: 'bottom-=25% top' }) })
-        .add(lines, { draw: ['0 0', '0 1'], duration: 650, delay: stagger(260), ease: 'inOutQuad' })
-        .add(heads, { opacity: [0, 1], duration: 200, delay: stagger(260) }, 450)
-    })
-    return () => scope.revert()
-  }, [n, reduce, root])
-
-  const c = g.band
-  return (
-    <svg ref={svgRef} className="pointer-events-none fixed inset-0 z-20 h-full w-full overflow-visible" aria-hidden>
-      <defs>
-        <clipPath id="summary-clip">
-          <rect x={c.left} y={c.top} width={c.width} height={c.height} />
-        </clipPath>
-      </defs>
-      <g clipPath="url(#summary-clip)">
-        {g.paths.map((p) => {
-          const on = hover === p.ev
-          const op = p.off ? 0 : hover === null ? 0.7 : on ? 1 : 0.1
-          return (
-            <g key={p.key} style={{ opacity: op, transition: 'opacity 250ms' }}>
-              <path className="arrow" d={p.d} fill="none" stroke="var(--color-accent)" strokeWidth={on ? 2.2 : 1.5} strokeLinecap="round" />
-              <circle className="head" cx={p.x2} cy={p.y2} r={on ? 4.5 : 3.5} fill="var(--color-accent)" />
-            </g>
-          )
-        })}
-      </g>
-    </svg>
   )
 }
 
@@ -416,43 +299,39 @@ export default function Summary({ run, spec }: { run: Run; spec: Spec | null }) 
   const r = run.result!
   const id = run.id!
   const tables = useQuery(tablesOptions(id, true))
-  const [hover, setHover] = useState<string | null>(null)
-  const reduce = useMedia(REDUCE)
-  const wide = useMedia(WIDE)
-  const [root, setRoot] = useState<HTMLDivElement | null>(null)
   const rows = r.verification
-  const ready = Boolean(run.input && tables.data)
+  const [hover, setHover] = useState<string | null>(null)
+  // one event's charts at a time: the first to start with, then whichever phrase was clicked last
+  const [picked, pin] = useState<string | null>(null)
+  const pinned = picked ?? rows[0]?.event_id ?? null
+  const shown = rows.filter((v) => v.event_id === pinned)
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-5">
       <Verdict r={r} run={run} spec={spec} />
-      <div ref={setRoot} className="grid gap-4 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:gap-x-16 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-        <div className="self-start rounded-xl border border-line bg-bg/40 p-4 lg:sticky lg:top-20">
-          <h3 className="mb-2 text-xs text-muted">Zadání, jak přišlo</h3>
-          {run.input ? (
-            <HighlightedPrompt input={run.input} rows={rows} hover={hover} setHover={setHover} />
-          ) : (
-            <p className="text-sm text-muted">Načítám zadání…</p>
-          )}
-          {r.narrative?.text && (
-            <details className="mt-4 text-sm">
-              <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">Příběh, jak ho napsala data</summary>
-              <p className="mt-2 leading-relaxed whitespace-pre-line text-slate-300">{r.narrative.text}</p>
-            </details>
-          )}
-        </div>
-        <div className="grid min-w-0 content-start gap-4">
-          {rows.length === 0 && <p className="text-sm text-muted">Příběh nemá žádnou ověřitelnou událost.</p>}
-          {tables.data &&
-            rows.map((v) => <Block key={rowKey(v)} jobId={id} v={v} tables={tables.data.tables} hover={hover} setHover={setHover} />)}
-          {r.untested.length > 0 && (
-            <p className="text-xs text-muted">
-              Neověřeno: {r.untested.map((u) => `${u.event_id} (${u.reason})`).join('; ')}.
-            </p>
-          )}
-        </div>
+      <div className="grid gap-2">
+        <h3 className="text-xs text-muted">Zadání, jak přišlo · klikněte na zvýrazněnou část a ukážou se její grafy</h3>
+        {run.input ? (
+          <HighlightedPrompt input={run.input} rows={rows} hover={hover} setHover={setHover} pinned={pinned} pin={pin} />
+        ) : (
+          <p className="text-sm text-muted">Načítám zadání…</p>
+        )}
+        {r.narrative?.text && (
+          <details className="mt-2 text-sm">
+            <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">Příběh, jak ho napsala data</summary>
+            <p className="mt-2 max-w-4xl leading-relaxed whitespace-pre-line text-slate-300">{r.narrative.text}</p>
+          </details>
+        )}
       </div>
-      {ready && wide && root && <Arrows root={root} hover={hover} reduce={reduce} />}
+      <div className="grid min-w-0 content-start gap-4">
+        {rows.length === 0 && <p className="text-sm text-muted">Příběh nemá žádnou ověřitelnou událost.</p>}
+        {tables.data && shown.map((v) => <Block key={rowKey(v)} jobId={id} v={v} tables={tables.data.tables} />)}
+        {r.untested.length > 0 && (
+          <p className="text-xs text-muted">
+            Neověřeno: {r.untested.map((u) => `${u.event_id} (${u.reason})`).join('; ')}.
+          </p>
+        )}
+      </div>
     </div>
   )
 }

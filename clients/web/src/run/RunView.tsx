@@ -10,9 +10,9 @@ import { STAGES, scrollToStage, sectionId, type Run, type StageId, type StageSta
 function Bar({ value, tone }: { value: number; tone: Status['tone'] }) {
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100)
   return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+    <div className="h-1.5 overflow-hidden bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
       <div
-        className={`h-full rounded-full transition-[width] duration-700 ease-out ${tone === 'error' ? 'bg-rose-400' : 'bg-accent'}`}
+        className={`h-full transition-[width] duration-700 ease-out ${tone === 'error' ? 'bg-rose-400' : 'bg-accent'}`}
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -21,7 +21,7 @@ function Bar({ value, tone }: { value: number; tone: Status['tone'] }) {
 
 function StatusBlock({ s, compact = false }: { s: Status; compact?: boolean }) {
   const dot =
-    s.tone === 'busy' ? 'bg-accent animate-pulse' : s.tone === 'done' ? 'bg-accent' : s.tone === 'error' ? 'bg-rose-400' : 'bg-slate-500'
+    s.tone === 'busy' ? 'bg-accent' : s.tone === 'done' ? 'bg-accent' : s.tone === 'error' ? 'bg-rose-400' : 'bg-slate-500'
   return (
     <div className="grid gap-2" aria-live="polite">
       <div className="flex items-baseline gap-2">
@@ -44,16 +44,15 @@ function StatusBlock({ s, compact = false }: { s: Status; compact?: boolean }) {
 // ---- process list ----------------------------------------------------------------------
 
 function Marker({ state, n }: { state: StageState; n: number }) {
-  if (state === 'done') return <span className="grid size-5 place-items-center rounded-full bg-accent/15 text-[11px] font-bold text-accent">✓</span>
-  if (state === 'error') return <span className="grid size-5 place-items-center rounded-full bg-rose-500/20 text-[11px] font-bold text-rose-300">!</span>
+  if (state === 'done') return <span className="grid size-5 place-items-center bg-accent/15 text-[11px] font-bold text-accent">✓</span>
+  if (state === 'error') return <span className="grid size-5 place-items-center bg-rose-500/20 text-[11px] font-bold text-rose-300">!</span>
   if (state === 'running')
     return (
-      <span className="relative grid size-5 place-items-center">
-        <span className="absolute inset-0 animate-ping rounded-full bg-accent/25 motion-reduce:animate-none" />
+      <span className="grid size-5 place-items-center">
         <span className="size-2.5 rounded-full bg-accent" />
       </span>
     )
-  return <span className="grid size-5 place-items-center rounded-full border border-line text-[10px] text-slate-500">{n}</span>
+  return <span className="grid size-5 place-items-center border border-line text-[10px] text-slate-500">{n}</span>
 }
 
 function ProcessList({ run, onPick }: { run: Run; onPick?: () => void }) {
@@ -85,7 +84,7 @@ function ProcessList({ run, onPick }: { run: Run; onPick?: () => void }) {
                   scrollToStage(st.id)
                   onPick?.()
                 }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-white/[0.05]"
+                className="flex w-full items-center gap-2.5 px-2 py-1.5 text-left hover:bg-white/[0.05]"
               >
                 {label}
               </button>
@@ -106,7 +105,7 @@ function ProcessList({ run, onPick }: { run: Run; onPick?: () => void }) {
 function MobileBar({ run }: { run: Run }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="sticky top-14 z-20 -mx-3 mb-4 border-b border-line bg-bg/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:hidden">
+    <div className="sticky top-16 z-20 -mx-3 mb-4 border-b border-line bg-bg/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:hidden">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <StatusBlock s={run.status} compact />
@@ -114,13 +113,13 @@ function MobileBar({ run }: { run: Run }) {
         <button
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="shrink-0 rounded-md border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500"
+          className="shrink-0 border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500"
         >
           Průběh <span className={`inline-block transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
         </button>
       </div>
       {open && (
-        <div className="mt-2.5 rounded-xl border border-line bg-panel p-2">
+        <div className="mt-2.5 border-y border-line py-2">
           <ProcessList run={run} onPick={() => setOpen(false)} />
           {run.status.detail && <p className="px-2 pb-1 pt-2 text-xs text-muted">{run.status.detail}</p>}
         </div>
@@ -133,10 +132,10 @@ function MobileBar({ run }: { run: Run }) {
 
 function Skeleton({ busy }: { busy: boolean }) {
   return (
-    <div className={`grid gap-2 ${busy ? 'animate-pulse motion-reduce:animate-none' : ''}`} aria-hidden>
-      <div className="h-3 w-2/3 rounded bg-white/[0.06]" />
-      <div className="h-3 w-1/2 rounded bg-white/[0.06]" />
-      <div className="h-3 w-3/5 rounded bg-white/[0.06]" />
+    <div className={`grid gap-2 ${busy ? '' : 'opacity-60'}`} aria-hidden>
+      <div className="h-3 w-2/3 bg-white/[0.06]" />
+      <div className="h-3 w-1/2 bg-white/[0.06]" />
+      <div className="h-3 w-3/5 bg-white/[0.06]" />
     </div>
   )
 }
@@ -164,8 +163,8 @@ export function Section({
   return (
     <section
       id={sectionId(id)}
-      className={`scroll-mt-32 rounded-xl border p-4 sm:p-5 lg:scroll-mt-20 ${
-        s.state === 'done' ? 'border-line bg-panel' : s.state === 'error' ? 'border-rose-500/40 bg-panel' : 'border-line/70 bg-panel/40'
+      className={`scroll-mt-32 border-t pt-5 lg:scroll-mt-20 ${
+        s.state === 'error' ? 'border-rose-500/40' : 'border-line'
       }`}
     >
       <header className="mb-3 flex items-baseline gap-2">
@@ -180,7 +179,7 @@ export function Section({
         <div className="grid justify-items-start gap-3">
           <p className="text-sm text-rose-200">{s.error}</p>
           {s.retry && (
-            <button onClick={s.retry} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-sm text-rose-100 hover:bg-rose-500/10">
+            <button onClick={s.retry} className="border border-rose-400/40 px-3 py-1.5 text-sm text-rose-100 hover:bg-rose-500/10">
               Zkusit znovu
             </button>
           )}
@@ -211,10 +210,10 @@ export function RunView({ run, children, bottom, top }: { run: Run; children: Re
       <MobileBar run={run} />
       <aside className="hidden lg:block">
         <div className="sticky top-20 grid gap-4">
-          <div className="rounded-xl border border-line bg-panel p-3.5">
+          <div className="border-b border-line pb-4">
             <StatusBlock s={run.status} />
           </div>
-          <nav aria-label="Průběh" className="rounded-xl border border-line bg-panel p-1.5">
+          <nav aria-label="Průběh" className="">
             <ProcessList run={run} />
           </nav>
         </div>

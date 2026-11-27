@@ -34,7 +34,7 @@ function TableList({ tables, active, onPick }: { tables: TableInfo[]; active?: s
           <button
             onClick={() => onPick(t.name)}
             title={t.columns.map((c) => `${c.name} ${c.type}`).join('\n')}
-            className={`grid w-full grid-cols-[1fr_auto] items-baseline gap-x-2 rounded-lg px-3 py-1.5 text-left ${
+            className={`grid w-full grid-cols-[1fr_auto] items-baseline gap-x-2 px-3 py-1.5 text-left ${
               t.name === active ? 'bg-accent/15 ring-1 ring-accent/40' : 'hover:bg-white/5'
             }`}
           >
@@ -101,7 +101,7 @@ function TableView({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={`Hledat v ${name}…`}
-          className="w-full max-w-xs rounded-lg border border-line bg-bg px-3 py-1.5 text-[16px] focus:border-accent focus:outline-none sm:text-sm"
+          className="w-full max-w-xs border border-line bg-bg px-3 py-1.5 text-[16px] focus:border-accent focus:outline-none sm:text-sm"
         />
         {needle && (
           <>
@@ -161,7 +161,7 @@ function CheckResult({ expect, res }: { expect: Record<string, unknown>; res: Qu
           <li
             key={k}
             title={`ověření: ${show(want)} · dotaz: ${show(got)}`}
-            className={`rounded-md px-2 py-0.5 font-mono ring-1 ring-inset ${
+            className={`px-2 py-0.5 font-mono ring-1 ring-inset ${
               ok ? 'bg-emerald-500/10 text-emerald-200 ring-emerald-500/30' : 'bg-rose-500/10 text-rose-200 ring-rose-500/30'
             } ${k === 'did_pct' ? 'font-semibold' : ''}`}
           >
@@ -176,7 +176,7 @@ function CheckResult({ expect, res }: { expect: Record<string, unknown>; res: Qu
 function QueryError({ err }: { err: Error }) {
   if (isStatus(err, 400))
     return (
-      <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+      <div className="border-l-2 border-rose-500/70 py-1 pl-3 text-sm text-rose-200">
         <div className="mb-1 font-medium">Chyba v SQL</div>
         <pre className="overflow-x-auto whitespace-pre font-mono text-xs leading-relaxed">{err.message}</pre>
       </div>
@@ -287,12 +287,12 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
               rows={Math.min(16, Math.max(4, sql.split('\n').length + 1))}
               spellCheck={false}
               placeholder={`SELECT *\nFROM ${tableName ?? 'orders'}\nLIMIT 100`}
-              className="w-full resize-y rounded-lg border border-line bg-bg px-3 py-2 font-mono text-[16px] leading-relaxed focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-xs"
+              className="w-full resize-y border border-line bg-bg px-3 py-2 font-mono text-[16px] leading-relaxed focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-xs"
             />
             <div className="flex flex-wrap items-center gap-3">
               <button
                 disabled={query.isPending || !sql.trim()}
-                className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-60"
+                className="inline-flex items-center gap-2 bg-accent px-4 py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-60"
               >
                 {query.isPending ? <Spinner /> : '▶'} Spustit
               </button>
@@ -314,7 +314,7 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
                 role="tab"
                 aria-selected={view === 'table'}
                 onClick={() => setView('table')}
-                className={`rounded-md px-2.5 py-1 font-mono ${view === 'table' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
+                className={`px-2.5 py-1 font-mono ${view === 'table' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
               >
                 {tableName}
               </button>
@@ -324,7 +324,7 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
                 role="tab"
                 aria-selected={view === 'query'}
                 onClick={() => setView('query')}
-                className={`rounded-md px-2.5 py-1 ${view === 'query' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
+                className={`px-2.5 py-1 ${view === 'query' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
               >
                 Výsledek dotazu
               </button>

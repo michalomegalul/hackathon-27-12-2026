@@ -14,12 +14,12 @@ export function SummaryTiles({ r }: { r: JobResult }) {
   const storyGood = sAll > 0 && sOk === sAll
   return (
     <div className="grid grid-cols-2 gap-3">
-      <div className={`rounded-xl border p-4 ${storyGood ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+      <div className={`border-l-2 py-1 pl-4 ${storyGood ? 'border-emerald-500/70' : 'border-amber-500/70'}`}>
         <div className="text-xs uppercase tracking-wide text-muted">příběh</div>
         <div className="text-3xl font-semibold tabular-nums">{r.summary.story}</div>
         <div className="text-xs text-muted">událostí potvrzeno v datech</div>
       </div>
-      <div className={`rounded-xl border p-4 ${tHit === 0 ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-rose-500/40 bg-rose-500/10'}`}>
+      <div className={`border-l-2 py-1 pl-4 ${tHit === 0 ? 'border-emerald-500/70' : 'border-rose-500/70'}`}>
         <div className="text-xs uppercase tracking-wide text-muted">dvojče</div>
         <div className="text-3xl font-semibold tabular-nums">{r.summary.twin}</div>
         <div className="text-xs text-muted">„nálezů“ v datech bez příběhu (má být 0)</div>
@@ -87,7 +87,7 @@ function Detail({ v }: { v: VerificationRow }) {
       {v.sql ? (
         <div className="relative">
           <button
-            className="absolute right-2 top-2 rounded bg-white/10 px-2 py-0.5 text-xs hover:bg-white/20"
+            className="absolute right-2 top-2 bg-white/10 px-2 py-0.5 text-xs hover:bg-white/20"
             onClick={() => {
               void navigator.clipboard?.writeText(v.sql ?? '').then(() => {
                 setCopied(true)
@@ -97,7 +97,7 @@ function Detail({ v }: { v: VerificationRow }) {
           >
             {copied ? 'zkopírováno' : 'kopírovat'}
           </button>
-          <pre className="max-h-96 overflow-auto rounded-lg bg-bg p-3 pr-20 font-mono text-xs leading-relaxed text-slate-300">
+          <pre className="max-h-96 overflow-auto bg-bg p-3 pr-20 font-mono text-xs leading-relaxed text-slate-300">
             {v.sql}
           </pre>
         </div>
@@ -118,7 +118,7 @@ function RunSql({ jobId, v, className = '' }: { jobId: string; v: VerificationRo
       state={state}
       onClick={(e) => e.stopPropagation()}
       title="Spustí SQL tohoto řádku nad daty úlohy a porovná výsledek"
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-accent/15 px-2 py-1 text-xs font-medium text-accent ring-1 ring-inset ring-accent/30 hover:bg-accent/25 ${className}`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap bg-accent/15 px-2 py-1 text-xs font-medium text-accent ring-1 ring-inset ring-accent/30 hover:bg-accent/25 ${className}`}
     >
       ▶ Spustit SQL
     </Link>
@@ -145,7 +145,7 @@ export function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jo
       {/* phones: one card per event */}
       <ul className="grid grid-cols-1 gap-3 md:hidden">
         {rows.map((v, i) => (
-          <li key={i} className="rounded-lg border border-line bg-bg/40">
+          <li key={i} className="border-l-2 border-line pl-3">
             <button className="grid w-full grid-cols-1 gap-2 p-3 text-left" onClick={() => toggle(i)} aria-expanded={open.has(i)}>
               <div className="flex items-start gap-2">
                 <span className="font-mono text-xs text-muted">{v.event_id}</span>
@@ -275,7 +275,7 @@ export function Notes({ r }: { r: JobResult }) {
           <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Neověřitelné události</h3>
           <ul className="grid gap-1.5 text-sm">
             {r.untested.map((u, i) => (
-              <li key={i} className="rounded-lg border border-line px-3 py-2">
+              <li key={i} className="border-l-2 border-line pl-3 py-1">
                 <span className="mr-2 font-mono text-xs text-muted">{u.event_id}</span>
                 {u.claim_cs || u.type}
                 <div className="text-xs text-muted">{u.reason}</div>

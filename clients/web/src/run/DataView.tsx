@@ -1,24 +1,20 @@
 // Data: the generated database as Postgres tables. Tabs: psql-style cards (columns, types,
-// keys, the first 5 rows), the ERD from the keys, the DDL as SQL, and the grid + SQL box.
-// Lazy chunk: React Flow and TanStack Table load only with this section.
+// keys, the first 5 rows; the first 3 tables, the rest behind "show more") and the grid + SQL box.
+// Lazy chunk: TanStack Table loads only with this section.
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
-import { ReactFlowProvider } from '@xyflow/react'
-import { ddlOptions, tableHeadOptions, tablesOptions, type Cell, type TableInfo } from '../api'
-import { SqlBlock } from '../components/Code'
+import { tableHeadOptions, tablesOptions, type Cell, type TableInfo } from '../api'
 import { DownloadButton } from '../components/Download'
-import { Alert, Spinner } from '../components/ui'
+import { Alert, ShowMore, Spinner } from '../components/ui'
 import { intCs, pgType, rowsCs } from '../format'
 import { DataBrowser } from '../pages/DataPage'
-import { Erd } from '../story/Erd'
-import '../story/story.css'
 
 export function KeyBadge({ kind, title }: { kind: 'PK' | 'FK'; title?: string }) {
   return (
     <span
       title={title}
-      className={`rounded px-1 text-[9.5px] font-semibold leading-4 ${kind === 'PK' ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'}`}
+      className={`px-1 text-[9.5px] font-semibold leading-4 ${kind === 'PK' ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'}`}
     >
       {kind}
     </span>
@@ -126,7 +122,7 @@ export function PsqlTable({
 
 export function PsqlCard({ id, t, lit }: { id: string; t: TableInfo; lit?: string }) {
   return (
-    <article className="grid min-w-0 gap-2 rounded-lg border border-line bg-bg/50 p-3">
+    <article className="grid min-w-0 gap-2 border-l-2 border-line py-1 pl-3">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h3 className="font-mono text-sm font-semibold">
           <span className="text-slate-500">public.</span>
@@ -144,39 +140,17 @@ export function PsqlCard({ id, t, lit }: { id: string; t: TableInfo; lit?: strin
   )
 }
 
-type Tab = 'tables' | 'erd' | 'ddl' | 'browse'
+type Tab = 'tables' | 'browse'
 const TABS: [Tab, string][] = [
   ['tables', 'Tabulky'],
-  ['erd', 'ERD'],
-  ['ddl', 'CREATE TABLE'],
   ['browse', 'Hledat a SQL'],
 ]
-
-function Ddl({ id }: { id: string }) {
-  const q = useQuery(ddlOptions(id))
-  if (q.error) return <Alert>{q.error.message}</Alert>
-  if (!q.data)
-    return (
-      <p className="text-sm text-muted">
-        <Spinner /> Načítám DDL…
-      </p>
-    )
-  return (
-    <SqlBlock
-      sql={q.data}
-      maxH="max-h-[36rem]"
-      title={
-        <>
-          <span className="font-mono">schema.sql</span> · Postgres, spustí se v prázdném schématu <span className="font-mono">public</span>
-        </>
-      }
-    />
-  )
-}
+const FIRST_TABLES = 3
 
 export function DataView({ id }: { id: string }) {
   const q = useQuery(tablesOptions(id, true))
   const [tab, setTab] = useState<Tab>('tables')
+  const [all, setAll] = useState(false)
   if (q.error) return <Alert>{q.error.message}</Alert>
   if (!q.data)
     return (
@@ -194,7 +168,7 @@ export function DataView({ id }: { id: string }) {
             role="tab"
             aria-selected={tab === k}
             onClick={() => setTab(k)}
-            className={`rounded-md px-2.5 py-1 text-sm ${tab === k ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
+            className={`px-2.5 py-1 text-sm ${tab === k ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
           >
             {label}
           </button>
@@ -208,19 +182,14 @@ export function DataView({ id }: { id: string }) {
       </div>
       {tab === 'tables' && (
         <div className="grid min-w-0 gap-3">
-          {tables.map((t) => (
+          {(all ? tables : tables.slice(0, FIRST_TABLES)).map((t) => (
             <PsqlCard key={t.name} id={id} t={t} />
           ))}
+          {tables.length > FIRST_TABLES && (
+            <ShowMore open={all} onClick={() => setAll((a) => !a)} more={tables.length - FIRST_TABLES} noun={['tabulku', 'tabulky', 'tabulek']} />
+          )}
         </div>
       )}
-      {tab === 'erd' && (
-        <div className="h-[560px] overflow-hidden rounded-lg border border-line bg-bg">
-          <ReactFlowProvider>
-            <Erd tables={tables} />
-          </ReactFlowProvider>
-        </div>
-      )}
-      {tab === 'ddl' && <Ddl id={id} />}
       {tab === 'browse' && <DataBrowser id={id} />}
     </div>
   )

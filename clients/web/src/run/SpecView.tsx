@@ -11,7 +11,7 @@ const pct = (x: number) => `${Math.round(x * 100)} %`
 function Shares({ title, items }: { title: string; items: { label: string; share: number; note?: string }[] }) {
   if (!items.length) return null
   return (
-    <div className="rounded-lg border border-line bg-bg/40 p-3">
+    <div className="border-l-2 border-line py-1 pl-3">
       <h3 className="mb-2 text-xs text-muted">{title}</h3>
       <ul className="grid gap-1.5">
         {items.map((it) => (
@@ -21,8 +21,8 @@ function Shares({ title, items }: { title: string; items: { label: string; share
               {it.note && <span className="ml-1.5 text-xs text-muted">{it.note}</span>}
             </span>
             <span className="tabular-nums text-slate-300">{pct(it.share)}</span>
-            <span className="col-span-2 h-1 overflow-hidden rounded-full bg-white/[0.06]">
-              <span className="block h-full rounded-full bg-slate-400/60" style={{ width: `${Math.min(100, it.share * 100)}%` }} />
+            <span className="col-span-2 h-1 overflow-hidden bg-white/[0.06]">
+              <span className="block h-full bg-slate-400/60" style={{ width: `${Math.min(100, it.share * 100)}%` }} />
             </span>
           </li>
         ))}
@@ -103,7 +103,7 @@ function Events({ s }: { s: Spec }) {
     <>
       <ul className="grid gap-2 md:hidden">
         {s.events.map((e) => (
-          <li key={e.id} className="grid gap-1.5 rounded-lg border border-line bg-bg/40 p-3 text-sm">
+          <li key={e.id} className="grid gap-1.5 border-l-2 border-line py-1 pl-3 text-sm">
             <div className="flex gap-2">
               <span className="font-mono text-xs text-muted">{e.id}</span>
               <span className="flex-1">{e.narrative_cs || EVENT_TYPE_CS[e.type] || e.type}</span>
@@ -177,7 +177,7 @@ function DevYaml({ yaml }: { yaml: string }) {
             <span className="font-mono">spec.yaml</span>
             <CopyButton text={yaml} />
           </div>
-          <pre className="max-h-96 w-full overflow-auto rounded-lg border border-line bg-bg/70 px-3 py-2 font-mono text-[11.5px] leading-relaxed text-slate-300">
+          <pre className="max-h-96 w-full overflow-auto border border-line bg-bg/70 px-3 py-2 font-mono text-[11.5px] leading-relaxed text-slate-300">
             {yaml}
           </pre>
         </div>

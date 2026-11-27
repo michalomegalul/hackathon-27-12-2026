@@ -11,7 +11,7 @@ function QueueInfo() {
   if (!data) return null
   const busy = (data.queue.running ? 1 : 0) + data.queue.waiting
   return (
-    <span className="hidden items-center gap-1.5 text-xs text-muted sm:inline-flex" title={`${data.llm.backend} ${data.llm.model}`}>
+    <span className="hidden items-center gap-1.5 text-sm text-muted sm:inline-flex" title={`${data.llm.backend} ${data.llm.model}`}>
       <span className={`size-2 rounded-full ${data.ok && data.llm.reachable ? 'bg-emerald-400' : 'bg-rose-400'}`} />
       {busy === 0 ? 'fronta volná' : `ve frontě ${busy}`}
     </span>
@@ -32,12 +32,12 @@ function NetBanner() {
   return (
     <div
       role="alert"
-      className="sticky top-16 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-rose-500/40 bg-rose-950/90 px-3 py-2 text-sm text-rose-100 backdrop-blur"
+      className="sticky top-[4.5rem] z-30 mt-3 flex flex-wrap items-center gap-3 border border-rose-500/40 bg-rose-950/90 px-3 py-2 text-sm text-rose-100 backdrop-blur"
     >
       <span className="mr-auto">Server je nedostupný (výpadek sítě nebo restart API). Zkoušíme to znovu.</span>
       <button
         disabled={busy}
-        className="rounded-md bg-white/10 px-3 py-1 font-medium hover:bg-white/20 disabled:opacity-60"
+        className="bg-white/10 px-3 py-1 font-medium hover:bg-white/20 disabled:opacity-60"
         onClick={() => {
           setBusy(true)
           void qc.refetchQueries({ type: 'active' }).finally(() => setBusy(false))
@@ -50,7 +50,7 @@ function NetBanner() {
 }
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-2 py-1.5 text-sm whitespace-nowrap sm:px-2.5 ${isActive ? 'bg-white/[0.07] text-white' : 'text-muted hover:text-white'}`
+  `border-b-2 px-2 py-1.5 text-base whitespace-nowrap sm:px-3 ${isActive ? 'border-accent text-white' : 'border-transparent text-muted hover:text-white'}`
 
 const NAV: [to: string, label: string, end?: boolean][] = [
   ['/', 'Story', true],
@@ -66,8 +66,8 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col">
       <header data-chrome="top" className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
-          <Link to="/" className="flex shrink-0 items-center gap-1.5 font-semibold tracking-tight">
+        <div className="flex h-16 items-center gap-3 px-3 sm:gap-6 sm:px-6">
+          <Link to="/" className="flex shrink-0 items-center gap-2 text-xl font-semibold tracking-tight">
             <Spiral />
             <span className="hidden sm:inline">Story2Data</span>
           </Link>
@@ -83,10 +83,10 @@ function Shell({ children }: { children: ReactNode }) {
           <Logout />
         </div>
       </header>
-      <div className="mx-auto w-full max-w-7xl px-3 sm:px-6">
+      <div className="w-full max-w-7xl px-3 sm:px-6">
         <NetBanner />
       </div>
-      <main className="mx-auto w-full max-w-7xl flex-1 px-3 pb-12 pt-4 sm:px-6 sm:pt-6">{children}</main>
+      <main className="w-full max-w-7xl flex-1 px-3 pb-12 pt-4 sm:px-6 sm:pt-6">{children}</main>
     </div>
   )
 }
@@ -97,7 +97,7 @@ function Logout() {
   if (!token) return null
   return (
     <button
-      className="text-xs text-muted hover:text-white"
+      className="text-sm text-muted hover:text-white"
       title="Zapomenout token v tomto prohlížeči"
       onClick={() => {
         setToken('')
@@ -114,7 +114,7 @@ function TokenForm() {
   const qc = useQueryClient()
   const invalid = useTokenInvalid()
   return (
-    <Card className="mx-auto mt-6 max-w-md">
+    <Card className="mt-6 max-w-md">
       <h1 className="text-lg font-semibold">Přihlášení</h1>
       {invalid && (
         <div className="mt-3">
@@ -139,9 +139,9 @@ function TokenForm() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="token"
-          className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-[16px] focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-sm"
+          className="w-full border border-line bg-bg px-3 py-2 text-[16px] focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-sm"
         />
-        <button className="rounded-lg bg-accent px-4 py-2.5 font-medium text-slate-950 hover:brightness-110">Pokračovat</button>
+        <button className="bg-accent px-4 py-2.5 font-medium text-slate-950 hover:brightness-110">Pokračovat</button>
       </form>
     </Card>
   )

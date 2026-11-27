@@ -154,23 +154,23 @@ export function DataGrid({ columns, rows, total, hasMore = false, loadingMore = 
   return (
     <div className="grid gap-2">
       {sorted && partial && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-100">
+        <div className="flex flex-wrap items-center gap-2 border-l-2 border-amber-500/70 py-1 pl-3 text-xs text-amber-100">
           Řazeno jen {intCs(rows.length)} načtených řádků z {intCs(total)}; další se během řazení nenačítají.
           {onSortAll && sortName && (
             <button
-              className="rounded bg-white/10 px-2 py-0.5 font-medium hover:bg-white/20"
+              className="bg-white/10 px-2 py-0.5 font-medium hover:bg-white/20"
               onClick={() => onSortAll(sortName, sortCol.desc)}
             >
               Seřadit celou tabulku v SQL
             </button>
           )}
-          <button className="rounded px-2 py-0.5 hover:bg-white/10" onClick={() => setSorting([])}>
+          <button className="px-2 py-0.5 hover:bg-white/10" onClick={() => setSorting([])}>
             Zrušit řazení
           </button>
         </div>
       )}
 
-      <div ref={scrollRef} className={`${fit ? 'max-h-[60vh]' : 'h-[60vh] min-h-72'} overflow-auto rounded-lg border border-line bg-bg/40 font-mono text-xs`}>
+      <div ref={scrollRef} className={`${fit ? 'max-h-[60vh]' : 'h-[60vh] min-h-72'} overflow-auto border border-line bg-bg/40 font-mono text-xs`}>
         <div style={{ minWidth }}>
           {/* display:grid rows so absolutely positioned rows keep the column widths */}
           <div
@@ -217,7 +217,7 @@ export function DataGrid({ columns, rows, total, hasMore = false, loadingMore = 
                         <Spinner /> <span className="ml-2">načítám další řádky…</span>
                       </>
                     ) : (
-                      <span className="h-2 w-1/3 rounded bg-white/5" />
+                      <span className="h-2 w-1/3 bg-white/5" />
                     )}
                   </div>
                 )

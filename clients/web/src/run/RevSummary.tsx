@@ -83,8 +83,8 @@ function Card({
       onMouseLeave={() => setHover(null)}
       onFocus={() => pairId && setHover(pairId)}
       onBlur={() => setHover(null)}
-      className={`grid gap-1 rounded-lg border px-3 py-2 text-sm transition-[opacity,border-color,background-color] duration-300 ${
-        on ? 'border-accent/60 bg-accent/[0.06]' : dashed ? 'border-dashed border-line' : 'border-line bg-bg/40'
+      className={`grid gap-1 border-l-2 py-1 pl-3 text-sm transition-[opacity,border-color,background-color] duration-300 ${
+        on ? 'border-accent bg-accent/[0.04]' : dashed ? 'border-dashed border-line' : 'border-line'
       } ${dim ? 'opacity-45' : ''}`}
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -253,7 +253,7 @@ function Prompt({ input }: { input: JobInput | undefined }) {
   if (!input) return <p className="text-sm text-muted">Načítám zadání…</p>
   if (input.spec_given) return <p className="text-sm text-muted">Běh vznikl z hotové specifikace, bez textového zadání; události jsou dole.</p>
   return (
-    <div className="grid gap-2 rounded-lg border border-line bg-bg/40 p-3 text-sm leading-relaxed">
+    <div className="grid gap-2 border-l-2 border-line py-1 pl-3 text-sm leading-relaxed">
       {input.company && input.company !== input.story && <p className="text-xs text-muted">{input.company}</p>}
       <p className="whitespace-pre-line text-slate-200">{input.story}</p>
     </div>
@@ -330,7 +330,7 @@ export default function RevSummary({ run }: { run: Run }) {
         <div className="grid content-start gap-3">
           <h3 className="text-xs text-muted">Detektiv, bez znalosti příběhu</h3>
           {d.narrative?.text ? (
-            <blockquote className="rounded-lg border border-line bg-bg/40 p-3 text-sm leading-relaxed whitespace-pre-line text-slate-200">
+            <blockquote className="border-l-2 border-line py-1 pl-3 text-sm leading-relaxed whitespace-pre-line text-slate-200">
               {d.narrative.text}
               {d.narrative.source && <footer className="mt-2 text-xs text-slate-500">{d.narrative.source}</footer>}
             </blockquote>

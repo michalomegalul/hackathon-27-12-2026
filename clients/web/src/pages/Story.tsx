@@ -1,5 +1,6 @@
-// Story "/" and "/run/:id": a chat. Sending runs everything automatically (useRun); the URL
-// becomes /run/:id, so a reload or a shared link reopens the run.
+// Story "/" and "/run/:id". On "/" the prompt is typed into the Prompt section itself; sending
+// runs everything automatically (useRun) and the URL becomes /run/:id, so a reload or a shared
+// link reopens the run. A new run starts from "Story" in the header.
 import { useLocation, useParams } from 'react-router'
 import { Composer } from '../run/Composer'
 import { RunView } from '../run/RunView'
@@ -29,17 +30,22 @@ export function Story() {
           </div>
         )
       }
-      bottom={
-        <Composer
-          key={location.key}
-          initial={draft}
-          onSubmit={(s) => send.mutateAsync(s)}
-          busy={send.isPending}
-          error={send.error?.message}
-        />
-      }
     >
-      <Sections run={run} specName={recallSent(id)?.specName} />
+      <Sections
+        run={run}
+        specName={recallSent(id)?.specName}
+        composer={
+          !id && (
+            <Composer
+              key={location.key}
+              initial={draft}
+              onSubmit={(s) => send.mutateAsync(s)}
+              busy={send.isPending}
+              error={send.error?.message}
+            />
+          )
+        }
+      />
     </RunView>
   )
 }
