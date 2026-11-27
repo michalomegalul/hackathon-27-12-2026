@@ -5,15 +5,20 @@
 
 from __future__ import annotations
 
+import statistics
+import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Literal
 
 import duckdb
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from s2d.sim import pg
 
 from . import bundle, pipeline, sandbox, store
 from .auth import User, current_user, staff_user
@@ -55,9 +60,14 @@ class JobIn(BaseModel):
         return self
 
 
+World = Literal["story", "twin"]
+ANALYST_DB = {"story": "analyst.duckdb", "twin": "analyst_twin.duckdb"}
+
+
 class QueryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sql: Annotated[str, Field(min_length=1, max_length=20_000)]
+    world: World = "story"
 
 
 # ---------------------------------------------------------------- helpers
@@ -150,6 +160,97 @@ def health():
             "queue": {"running": running, "waiting": worker.waiting()}}
 
 
+STATS_TTL_S = 5.0
+_stats_lock = threading.Lock()
+_stats_cache: dict = {"at": 0.0, "value": None}
+_job_facts: dict[str, dict] = {}  # per done job, from result.json (which no longer changes)
+
+
+def _facts(job_id: str) -> dict | None:
+    if job_id not in _job_facts:
+        res = store.read_json(pipeline.result_path(job_id))
+        if res is None:
+            return None
+        tested = [r for r in res.get("verification") or [] if r.get("status") != "not_testable"]
+        twin = [r for r in tested if r.get("twin_confirmed") is not None]
+        rows = res.get("rows") or {}
+        _job_facts[job_id] = {
+            "tested": len(tested), "confirmed": sum(bool(r.get("confirmed")) for r in tested),
+            "twin_tested": len(twin), "twin_false": sum(bool(r["twin_confirmed"]) for r in twin),
+            "customers": int(rows.get("customers") or 0), "rows": sum(int(v or 0) for v in rows.values()),
+            "summary": res.get("summary"),
+        }
+    return _job_facts[job_id]
+
+
+def _pct(part: int, whole: int) -> float | None:
+    return round(100 * part / whole, 1) if whole else None
+
+
+def _median_s(xs: list[float]) -> int | None:
+    return round(statistics.median(xs)) if xs else None
+
+
+def _running() -> dict | None:
+    item = worker.running
+    if not item:
+        return None
+    kind, jid = item
+    if kind == "generate":
+        st = store.load_job(jid)
+        if not st:
+            return None
+        s = status_of(st)
+        return {"job_id": jid, "step": s["step"], "step_index": s["step_index"],
+                "progress": s["progress"], "eta_s": s["eta_s"]}
+    d = store.load_detect(jid)
+    if not d:
+        return None
+    left, elapsed = store.detect_remaining(d), _elapsed(d)
+    return {"job_id": jid, "step": "detektiv", "step_index": 0,
+            "progress": round(min(elapsed / (elapsed + left), 0.99), 3) if elapsed + left else 0.0,
+            "eta_s": round(left)}
+
+
+def compute_stats(now: float | None = None) -> dict:
+    now = now or time.time()
+    jobs = store.all_jobs()
+    done = [st for st in jobs if st["status"] == "done" and st.get("started") and st.get("finished")]
+    facts = {st["job_id"]: f for st in done if (f := _facts(st["job_id"]))}
+    total = {k: sum(f[k] for f in facts.values())
+             for k in ("tested", "confirmed", "twin_tested", "twin_false", "customers", "rows")}
+    today = datetime.fromtimestamp(now).date()
+    run_s = {st["job_id"]: st["finished"] - st["started"] for st in done}
+    recent = sorted(done, key=lambda st: st["finished"], reverse=True)[:20]
+    h0 = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0).timestamp() - 23 * 3600
+    timeline = []
+    for i in range(24):
+        a = h0 + i * 3600
+        xs = [run_s[st["job_id"]] for st in done if a <= st["finished"] < a + 3600]
+        timeline.append({"hour": store.iso(a), "jobs": len(xs), "median_run_s": _median_s(xs)})
+    return {
+        "jobs_total": len(jobs), "jobs_done": len(done),
+        "jobs_today": sum(datetime.fromtimestamp(st["created"]).date() == today for st in jobs),
+        "running": _running(), "waiting": worker.waiting(),
+        "median_run_s": _median_s(list(run_s.values())),
+        "events_confirmed_pct": _pct(total["confirmed"], total["tested"]),
+        "twin_false_pct": _pct(total["twin_false"], total["twin_tested"]),
+        "customers_simulated": total["customers"], "rows_generated": total["rows"],
+        "recent": [{"job_id": st["job_id"], "title": st.get("title", ""), "finished": store.iso(st["finished"]),
+                    "elapsed_s": _elapsed(st), "summary": (facts.get(st["job_id"]) or {}).get("summary")}
+                   for st in recent],
+        "timeline": timeline,
+    }
+
+
+@app.get("/v1/stats")
+def stats():
+    with _stats_lock:
+        if _stats_cache["value"] is None or time.time() - _stats_cache["at"] >= STATS_TTL_S:
+            _stats_cache.update(value=compute_stats(), at=time.time())
+        return _stats_cache["value"]
+
+
 @app.post("/v1/jobs", status_code=202)
 def create_job(body: JobIn, user: User = Depends(current_user)):
     params = body.model_dump()
@@ -171,22 +272,39 @@ def create_job(body: JobIn, user: User = Depends(current_user)):
     return {"job_id": state["job_id"], "status": "queued", "position": position}
 
 
+def _story_preview(state: dict) -> str | None:
+    story = (state.get("params") or {}).get("story")
+    return story.strip()[:120] if story else None
+
+
 @app.get("/v1/jobs")
-def list_jobs(user: User = Depends(current_user)):
+def list_jobs(user: User = Depends(current_user), scope: Literal["mine", "all"] = "mine"):
+    if scope == "all" and not user.staff:
+        raise HTTPException(403, "teacher or admin only")
+    every = scope == "all" or user.role == "admin"
     out = []
     for st in store.all_jobs():
-        if not (user.role == "admin" or st.get("owner") == user.name):
+        if not (every or st.get("owner") == user.name):
             continue
         res = store.read_json(pipeline.result_path(st["job_id"])) if st["status"] == "done" else None
         out.append({"job_id": st["job_id"], "status": st["status"], "title": st.get("title", ""),
                     "owner": st.get("owner"), "created": store.iso(st["created"]),
-                    "elapsed_s": _elapsed(st), "summary": res["summary"] if res else None})
+                    "elapsed_s": _elapsed(st), "summary": res["summary"] if res else None,
+                    "story_preview": _story_preview(st)})
     return {"jobs": out}
 
 
 @app.get("/v1/jobs/{job_id}")
 def job_status(job_id: str, user: User = Depends(current_user)):
     return status_of(_job(job_id, user))
+
+
+@app.get("/v1/jobs/{job_id}/input")
+def job_input(job_id: str, user: User = Depends(current_user)):
+    p = _job(job_id, user).get("params") or {}
+    return {"company": p.get("company"), "story": p.get("story"), "difficulty": p.get("difficulty"),
+            "seed": p.get("seed"), "n_customers": p.get("n_customers"), "dirt": p.get("dirt"),
+            "spec_given": bool(p.get("spec_yaml"))}
 
 
 @app.get("/v1/jobs/{job_id}/result")
@@ -198,9 +316,19 @@ def job_result(job_id: str, user: User = Depends(current_user)):
     return res
 
 
-def _analyst(job_id: str, user: User):
+_twin_lock = threading.Lock()
+
+
+def _analyst(job_id: str, user: User, world: World = "story"):
     _done(job_id, user)
-    db = store.job_dir(job_id) / "analyst.duckdb"
+    jd = store.job_dir(job_id)
+    db = jd / ANALYST_DB[world]
+    if world == "twin" and not db.exists():
+        # jobs finished before the twin was queryable: build it on the first request
+        src = jd / "run" / "twin" / "story.duckdb"
+        with _twin_lock:
+            if not db.exists() and src.exists():
+                sandbox.build_analyst(src, db)
     if not db.exists():
         raise HTTPException(404, "data not found")
     return db
@@ -208,14 +336,26 @@ def _analyst(job_id: str, user: User):
 
 @app.get("/v1/jobs/{job_id}/tables")
 def job_tables(job_id: str, user: User = Depends(current_user)):
-    return {"tables": sandbox.tables(_analyst(job_id, user))}
+    tables = sandbox.tables(_analyst(job_id, user))
+    fks = pg.foreign_keys(t["name"] for t in tables)
+    for t in tables:
+        t["primary_key"] = pg.primary_key(t["name"])
+        t["foreign_keys"] = [{"column": col, "references": {"table": parent, "column": pcol}}
+                             for child, col, parent, pcol in fks if child == t["name"]]
+    return {"tables": tables}
+
+
+@app.get("/v1/jobs/{job_id}/ddl", response_class=PlainTextResponse)
+def job_ddl(job_id: str, user: User = Depends(current_user)):
+    tables = sandbox.tables(_analyst(job_id, user))
+    return pg.ddl({t["name"]: [(c["name"], c["type"]) for c in t["columns"]] for t in tables})
 
 
 @app.get("/v1/jobs/{job_id}/tables/{name}")
 def job_table(job_id: str, name: str, user: User = Depends(current_user),
               limit: Annotated[int, Query(ge=1, le=sandbox.MAX_ROWS)] = 100,
-              offset: Annotated[int, Query(ge=0)] = 0):
-    res = sandbox.page(_analyst(job_id, user), name, limit, offset)
+              offset: Annotated[int, Query(ge=0)] = 0, world: World = "story"):
+    res = sandbox.page(_analyst(job_id, user, world), name, limit, offset)
     if res is None:
         raise HTTPException(404, "table not found")
     return res
@@ -223,7 +363,7 @@ def job_table(job_id: str, name: str, user: User = Depends(current_user),
 
 @app.post("/v1/jobs/{job_id}/query")
 def job_query(job_id: str, body: QueryIn, user: User = Depends(current_user)):
-    db = _analyst(job_id, user)
+    db = _analyst(job_id, user, body.world)
     try:
         return sandbox.query(db, body.sql)
     except sandbox.QueryTimeout as e:

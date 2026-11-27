@@ -319,3 +319,242 @@ def test_detective(api):
     t = c.get(f"/v1/jobs/{jid}/detect", headers=h["teacher"]).json()
     assert {"precision", "recall", "f1"} <= set(t["score"])
     assert c.post(f"/v1/jobs/{jid}/detect", headers=h["student"]).json()["status"] == "done"  # no second run
+
+
+# ---------------------------------------------------------------- the twin ("world": "twin")
+
+
+def _twin_db(api) -> Path:
+    return Path(api["dir"]) / "api" / "jobs" / api["id"] / "run" / "twin" / "story.duckdb"
+
+
+def test_twin_world_reads_the_twin(api):
+    import duckdb
+    c, h, jid = api["c"], api["h"]["student"], api["id"]
+    with duckdb.connect(str(_twin_db(api)), read_only=True) as con:
+        n_twin = con.execute("SELECT count(*) FROM main.orders").fetchone()[0]
+    p = c.get(f"/v1/jobs/{jid}/tables/orders?limit=3&world=twin", headers=h).json()
+    assert p["total"] == n_twin and len(p["rows"]) == 3
+    r = c.post(f"/v1/jobs/{jid}/query", json={"sql": "SELECT count(*) FROM orders", "world": "twin"}, headers=h)
+    assert r.status_code == 200 and r.json()["rows"] == [[n_twin]]
+    story = c.get(f"/v1/jobs/{jid}/tables/orders?limit=1", headers=h).json()  # default stays the story
+    assert story["total"] == c.get(f"/v1/jobs/{jid}/tables/orders?limit=1&world=story", headers=h).json()["total"]
+    assert c.get(f"/v1/jobs/{jid}/tables/orders?world=mars", headers=h).status_code == 422
+    assert c.post(f"/v1/jobs/{jid}/query", json={"sql": "SELECT 1", "world": "mars"}, headers=h).status_code == 422
+    assert c.get(f"/v1/jobs/{jid}/tables/orders?world=twin", headers=api["h"]["other"]).status_code == 404
+
+
+def test_twin_is_built_lazily_for_older_jobs(api):
+    c, h, jid = api["c"], api["h"]["student"], api["id"]
+    db = Path(api["dir"]) / "api" / "jobs" / jid / "analyst_twin.duckdb"
+    assert db.exists()  # the pipeline builds it
+    db.unlink()
+    r = c.post(f"/v1/jobs/{jid}/query", json={"sql": "SELECT count(*) FROM customers", "world": "twin"}, headers=h)
+    assert r.status_code == 200 and r.json()["rows"][0][0] > 0
+    assert db.exists()
+
+
+def test_twin_without_twin_files_is_404(api):
+    from s2d.api import store
+    st = store.new_job("student", "student", {"spec_yaml": SPEC}, "no twin")
+    st.update(status="done", started=time.time(), finished=time.time())
+    store.save_job(st)
+    try:
+        r = api["c"].get(f"/v1/jobs/{st['job_id']}/tables/orders?world=twin", headers=api["h"]["student"])
+        assert r.status_code == 404 and r.json() == {"detail": "data not found"}
+    finally:
+        st.update(status="error", error="test")
+        store.save_job(st)
+
+
+def test_twin_query_cannot_reach_the_answer_key_or_files(api):
+    c, h, jid = api["c"], api["h"]["student"], api["id"]
+    twin_db = _twin_db(api)
+    parquets = sorted((twin_db.parent / "_truth").glob("*.parquet"))
+    attempts = [
+        "SELECT * FROM _truth.answer_key",
+        "SELECT * FROM information_schema.tables WHERE table_schema = '_truth'",
+        f"ATTACH '{twin_db}' AS s (READ_ONLY)",
+        f"SELECT * FROM read_parquet('{twin_db.parent / '_truth' / '*.parquet'}')",
+        "SELECT * FROM glob('*')",
+        "SET enable_external_access = true",
+        "COPY orders TO 'out_twin.csv'",
+    ] + [f"SELECT * FROM '{p}'" for p in parquets]
+    for q in attempts:
+        r = c.post(f"/v1/jobs/{jid}/query", json={"sql": q, "world": "twin"}, headers=h)
+        if r.status_code == 200:
+            assert r.json()["rows"] == [], q
+        else:
+            assert r.status_code == 400, (q, r.text)
+    assert not (Path.cwd() / "out_twin.csv").exists()
+    tables = c.post(f"/v1/jobs/{jid}/query", headers=h, json={
+        "sql": "SELECT DISTINCT table_schema FROM information_schema.tables", "world": "twin"}).json()["rows"]
+    assert tables == [["main"]]
+
+
+# ---------------------------------------------------------------- keys and Postgres DDL
+
+
+def test_tables_have_keys(api):
+    c, h, jid = api["c"], api["h"]["student"], api["id"]
+    tables = {t["name"]: t for t in c.get(f"/v1/jobs/{jid}/tables", headers=h).json()["tables"]}
+    assert tables["orders"]["primary_key"] == ["order_id"]
+    assert {"column": "customer_id", "references": {"table": "customers", "column": "customer_id"}} \
+        in tables["orders"]["foreign_keys"]
+    assert tables["inventory_daily"]["primary_key"] == ["product_id", "date"]
+    assert tables["customers"]["foreign_keys"] == []
+    from s2d.sim.pg import FOREIGN_KEYS
+    n = sum(len(t["foreign_keys"]) for t in tables.values())
+    assert n == sum(1 for ch, _, pa in FOREIGN_KEYS if ch in tables and pa in tables) and n > 0
+
+
+def test_ddl_is_postgres_with_keys_and_runs(api):
+    import duckdb
+    c, h, jid = api["c"], api["h"]["student"], api["id"]
+    r = c.get(f"/v1/jobs/{jid}/ddl", headers=h)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
+    ddl = r.text
+    assert 'CREATE TABLE "public"."orders" (' in ddl and '"order_date" DATE' in ddl
+    assert 'PRIMARY KEY ("order_id")' in ddl and 'PRIMARY KEY ("product_id", "date")' in ddl
+    assert ('CONSTRAINT "orders_customer_id_fkey" FOREIGN KEY ("customer_id") '
+            'REFERENCES "public"."customers" ("customer_id")') in ddl
+    assert "DOUBLE PRECISION" in ddl and "TEXT" in ddl and "VARCHAR" not in ddl and " DOUBLE," not in ddl
+    # parents come before children: the script runs as is (DuckDB checks REFERENCES too)
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA public")
+    con.execute(ddl)
+    made = {r[0] for r in con.execute("SELECT table_name FROM information_schema.tables").fetchall()}
+    listed = {t["name"] for t in c.get(f"/v1/jobs/{jid}/tables", headers=h).json()["tables"]}
+    assert made == listed
+    assert c.get(f"/v1/jobs/{jid}/ddl", headers=api["h"]["other"]).status_code == 404
+
+
+def test_pg_types():
+    from s2d.sim.pg import pg_type
+    assert [pg_type(t) for t in ("BIGINT", "INTEGER", "DOUBLE", "DECIMAL(10,2)", "VARCHAR", "DATE",
+                                 "TIMESTAMP", "BOOLEAN", "BLOB")] == \
+        ["BIGINT", "INTEGER", "DOUBLE PRECISION", "NUMERIC(10,2)", "TEXT", "DATE", "TIMESTAMP", "BOOLEAN", "TEXT"]
+
+
+# ---------------------------------------------------------------- history
+
+
+STORY = "V březnu 2026 jsme zdražili o 15 % a studenti začali odcházet. " * 5
+
+
+def _story_job(owner="student"):
+    from s2d.api import store
+    params = {"company": "Pražírna Zrnko", "story": STORY, "spec_yaml": None, "difficulty": "hard",
+              "seed": 7, "n_customers": 5000, "dirt": "low"}
+    st = store.new_job(owner, "student", params, "Pražírna Zrnko")
+    st.update(status="error", error="test")  # never runs
+    store.save_job(st)
+    return st["job_id"]
+
+
+def test_jobs_scope_all(api):
+    c, h, jid = api["c"], api["h"], api["id"]
+    assert c.get("/v1/jobs?scope=all", headers=h["student"]).json() == {"detail": "teacher or admin only"}
+    assert c.get("/v1/jobs?scope=all", headers=h["student"]).status_code == 403
+    assert jid not in {j["job_id"] for j in c.get("/v1/jobs", headers=h["teacher"]).json()["jobs"]}
+    assert jid not in {j["job_id"] for j in c.get("/v1/jobs?scope=mine", headers=h["teacher"]).json()["jobs"]}
+    for role in ("teacher", "admin"):
+        every = c.get("/v1/jobs?scope=all", headers=h[role]).json()["jobs"]
+        assert jid in {j["job_id"] for j in every}
+        assert [j["created"] for j in every] == sorted((j["created"] for j in every), reverse=True)
+    assert jid in {j["job_id"] for j in c.get("/v1/jobs", headers=h["admin"]).json()["jobs"]}  # as before
+    assert c.get("/v1/jobs?scope=everything", headers=h["teacher"]).status_code == 422
+
+
+def test_jobs_scope_all_in_public_mode(api, monkeypatch):
+    monkeypatch.setenv("API_PUBLIC_ROLE", "teacher")
+    every = api["c"].get("/v1/jobs?scope=all").json()["jobs"]
+    assert api["id"] in {j["job_id"] for j in every}  # a job made with a token
+
+
+def test_story_preview_and_input(api):
+    c, h = api["c"], api["h"]
+    sid = _story_job()
+    rows = {j["job_id"]: j for j in c.get("/v1/jobs", headers=h["student"]).json()["jobs"]}
+    assert rows[sid]["story_preview"] == STORY.strip()[:120] and len(rows[sid]["story_preview"]) == 120
+    assert rows[api["id"]]["story_preview"] is None  # a spec job
+    assert c.get(f"/v1/jobs/{sid}/input", headers=h["student"]).json() == {
+        "company": "Pražírna Zrnko", "story": STORY, "difficulty": "hard", "seed": 7, "n_customers": 5000,
+        "dirt": "low", "spec_given": False}
+    spec = c.get(f"/v1/jobs/{api['id']}/input", headers=h["student"]).json()
+    assert spec == {"company": None, "story": None, "difficulty": None, "seed": 3, "n_customers": 1500,
+                    "dirt": None, "spec_given": True}
+    assert c.get(f"/v1/jobs/{sid}/input", headers=h["other"]).status_code == 404
+    assert c.get(f"/v1/jobs/{sid}/input", headers=h["teacher"]).status_code == 200
+
+
+# ---------------------------------------------------------------- stats
+
+
+STATS_KEYS = {"jobs_total", "jobs_done", "jobs_today", "running", "waiting", "median_run_s",
+              "events_confirmed_pct", "twin_false_pct", "customers_simulated", "rows_generated",
+              "recent", "timeline"}
+
+
+def test_stats_needs_no_token_and_has_no_owners_or_stories(api, monkeypatch):
+    from s2d.api import main
+    monkeypatch.setattr(main, "STATS_TTL_S", 0.0)
+    _story_job()
+    r = api["c"].get("/v1/stats")
+    assert r.status_code == 200
+    j = r.json()
+    assert set(j) == STATS_KEYS
+    assert j["jobs_total"] >= j["jobs_done"] >= 1 and j["jobs_today"] >= 1 and j["waiting"] >= 0
+    assert j["median_run_s"] > 0
+    assert 0 <= j["events_confirmed_pct"] <= 100 and 0 <= j["twin_false_pct"] <= 100
+    assert j["customers_simulated"] >= 1500 and j["rows_generated"] > j["customers_simulated"]
+    row = next(x for x in j["recent"] if x["job_id"] == api["id"])
+    assert set(row) == {"job_id", "title", "finished", "elapsed_s", "summary"}
+    assert row["summary"]["story"].count("/") == 1 and row["title"]
+    assert len(j["recent"]) <= 20
+    assert len(j["timeline"]) == 24 and set(j["timeline"][0]) == {"hour", "jobs", "median_run_s"}
+    assert j["timeline"] == sorted(j["timeline"], key=lambda b: b["hour"])
+    assert sum(b["jobs"] for b in j["timeline"]) >= 1
+    assert all(b["median_run_s"] is None for b in j["timeline"] if b["jobs"] == 0)
+    text = r.text
+    assert "student" not in text and "owner" not in text and "studenti" not in text  # no owners, no stories
+
+
+def test_stats_are_the_verification_rows(api, monkeypatch):
+    from s2d.api import main
+    monkeypatch.setattr(main, "STATS_TTL_S", 0.0)
+    res = api["c"].get(f"/v1/jobs/{api['id']}/result", headers=api["h"]["student"]).json()
+    f = main._facts(api["id"])
+    tested = [r for r in res["verification"] if r["status"] != "not_testable"]
+    assert f["tested"] == len(tested) and f["confirmed"] == sum(r["confirmed"] for r in tested)
+    assert f["twin_false"] == sum(bool(r["twin_confirmed"]) for r in tested)
+    assert f["customers"] == res["rows"]["customers"] and f["rows"] == sum(res["rows"].values())
+
+
+def test_stats_are_cached(api, monkeypatch):
+    from s2d.api import main
+    monkeypatch.setattr(main, "STATS_TTL_S", 0.0)
+    first = api["c"].get("/v1/stats").json()
+    monkeypatch.setattr(main, "STATS_TTL_S", 60.0)
+    _story_job()
+    assert api["c"].get("/v1/stats").json()["jobs_total"] == first["jobs_total"]  # cached
+    monkeypatch.setattr(main, "STATS_TTL_S", 0.0)
+    assert api["c"].get("/v1/stats").json()["jobs_total"] == first["jobs_total"] + 1
+
+
+def test_stats_running_job(api, monkeypatch):
+    from s2d.api import main, store
+    st = store.new_job("student", "student", {"spec_yaml": SPEC}, "running")
+    st.update(status="running", started=time.time() - 10)
+    st["steps"][1]["started"] = time.time() - 5
+    store.save_job(st)
+    monkeypatch.setattr(main.worker, "running", ("generate", st["job_id"]))
+    try:
+        r = main.compute_stats()["running"]
+        assert r["job_id"] == st["job_id"] and r["step"] == "kalibrace a simulace" and r["step_index"] == 2
+        assert 0 < r["progress"] < 1 and r["eta_s"] > 0
+        monkeypatch.setattr(main.worker, "running", None)
+        assert main.compute_stats()["running"] is None
+    finally:
+        st.update(status="error", error="test")
+        store.save_job(st)

@@ -5,6 +5,7 @@
     $DATA_DIR/api/jobs/<id>/run/          the simulated world (story.duckdb, twin/, verify.json)
     $DATA_DIR/api/jobs/<id>/result.json   what GET /result returns
     $DATA_DIR/api/jobs/<id>/analyst.duckdb  main schema only, for /query, /tables and the ZIP
+    $DATA_DIR/api/jobs/<id>/analyst_twin.duckdb  the same of run/twin/, for "world": "twin"
     $DATA_DIR/api/timings.json            seconds of earlier runs per step, for the ETA
 
 Everything is a file, so a restart loses nothing but the running job.

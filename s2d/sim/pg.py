@@ -52,6 +52,68 @@ def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def primary_key(table: str) -> list[str]:
+    """The primary key columns of a table ([] when it has none)."""
+    pk = PRIMARY_KEYS.get(table)
+    return [] if not pk else [pk] if isinstance(pk, str) else list(pk)
+
+
+def foreign_keys(names) -> list[tuple[str, str, str, str]]:
+    """(child, column, parent, parent column) of the keys whose two tables are both in `names`.
+    The constraint is named f"{child}_{column}_fkey" (export and ddl)."""
+    names = set(names)
+    return [(child, col, parent, PRIMARY_KEYS[parent]) for child, col, parent in FOREIGN_KEYS
+            if child in names and parent in names]
+
+
+# DuckDB type -> Postgres type (DECIMAL keeps its precision); anything else is TEXT
+PG_TYPES = {
+    "BIGINT": "BIGINT", "INTEGER": "INTEGER", "SMALLINT": "INTEGER", "TINYINT": "INTEGER",
+    "UTINYINT": "INTEGER", "USMALLINT": "INTEGER", "UINTEGER": "BIGINT", "UBIGINT": "NUMERIC",
+    "HUGEINT": "NUMERIC", "UHUGEINT": "NUMERIC", "DOUBLE": "DOUBLE PRECISION", "FLOAT": "DOUBLE PRECISION",
+    "VARCHAR": "TEXT", "DATE": "DATE", "TIMESTAMP": "TIMESTAMP", "TIMESTAMP_NS": "TIMESTAMP",
+    "TIMESTAMP_MS": "TIMESTAMP", "TIMESTAMP_S": "TIMESTAMP", "TIMESTAMP WITH TIME ZONE": "TIMESTAMP WITH TIME ZONE",
+    "BOOLEAN": "BOOLEAN",
+}
+
+
+def pg_type(duck_type: str) -> str:
+    t = duck_type.upper()
+    if t.startswith("DECIMAL"):
+        return "NUMERIC" + t.removeprefix("DECIMAL")
+    return PG_TYPES.get(t, "TEXT")
+
+
+def ddl(tables: dict[str, list[tuple[str, str]]], schema: str = "public") -> str:
+    """CREATE TABLE statements for {table: [(column, DuckDB type)]} with the keys `export` adds,
+    parents before children, so the script runs as is on an empty Postgres schema."""
+    fks = foreign_keys(tables)
+    order, seen = [], set()
+
+    def visit(t):
+        if t in seen:
+            return
+        seen.add(t)
+        for child, _, parent, _ in fks:
+            if child == t and parent != t:
+                visit(parent)
+        order.append(t)
+
+    for t in sorted(tables):
+        visit(t)
+    out = []
+    for t in order:
+        lines = [f"    {_q(c)} {pg_type(typ)}" for c, typ in tables[t]]
+        if pk := primary_key(t):
+            lines.append(f"    PRIMARY KEY ({', '.join(_q(c) for c in pk)})")
+        for child, col, parent, pcol in fks:
+            if child == t:
+                lines.append(f"    CONSTRAINT {_q(f'{child}_{col}_fkey')} FOREIGN KEY ({_q(col)}) "
+                             f"REFERENCES {_q(schema)}.{_q(parent)} ({_q(pcol)})")
+        out.append(f"CREATE TABLE {_q(schema)}.{_q(t)} (\n" + ",\n".join(lines) + "\n);\n")
+    return "\n".join(out)
+
+
 def export(db_path: str | Path, url: str, schema: str = "public", truth: bool = True) -> dict[str, int]:
     """Copy every table of a run's DuckDB file to Postgres and add the keys. Returns rows per table."""
     con = duckdb.connect()
@@ -79,13 +141,10 @@ def export(db_path: str | Path, url: str, schema: str = "public", truth: bool = 
         if src != "main":
             continue
         for name in names:
-            pk = PRIMARY_KEYS.get(name)
-            if pk:
-                cols = ", ".join(_q(c) for c in ((pk,) if isinstance(pk, str) else pk))
-                pg(f"ALTER TABLE {_q(dst)}.{_q(name)} ADD PRIMARY KEY ({cols})")
-        for child, col, parent in FOREIGN_KEYS:
-            if child in names and parent in names:
-                pg(f"ALTER TABLE {_q(dst)}.{_q(child)} ADD CONSTRAINT {_q(f'{child}_{col}_fkey')} "
-                   f"FOREIGN KEY ({_q(col)}) REFERENCES {_q(dst)}.{_q(parent)} ({_q(PRIMARY_KEYS[parent])})")
+            if pk := primary_key(name):
+                pg(f"ALTER TABLE {_q(dst)}.{_q(name)} ADD PRIMARY KEY ({', '.join(_q(c) for c in pk)})")
+        for child, col, parent, pcol in foreign_keys(names):
+            pg(f"ALTER TABLE {_q(dst)}.{_q(child)} ADD CONSTRAINT {_q(f'{child}_{col}_fkey')} "
+               f"FOREIGN KEY ({_q(col)}) REFERENCES {_q(dst)}.{_q(parent)} ({_q(pcol)})")
     con.close()
     return rows
