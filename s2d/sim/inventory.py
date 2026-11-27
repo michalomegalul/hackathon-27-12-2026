@@ -123,7 +123,10 @@ class Inventory:
     # -- supply
 
     def _lead_time(self, p: int, ordered: int) -> tuple[int, int]:
-        expected = ordered + int(self.lead[p])
+        # at least the next day: orders go out at the end of a day, after that day's
+        # arrivals were unpacked, so a lead time of 0 (digital goods) never refilled the
+        # shelf and sales stopped after the starting stock (DECISIONS 132)
+        expected = ordered + max(int(self.lead[p]), 1)
         late = self.rng.random() > self.reliability[p]
         received = expected + (int(np.ceil(self.lead[p] * self.rng.uniform(0.3, 1.0))) if late else 0)
         return expected, received

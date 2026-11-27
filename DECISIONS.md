@@ -1213,3 +1213,11 @@ the top of `s2d/detective/scan.py`.
      149 s. The same prompt without thinking takes 6.3 s and gives the Czech narrative. A
      one-sentence prompt took 7.8 s with 378 tokens thinking on, 1.4 s with 29 tokens off.
      This also explains the empty narrations of decision 87.
+132. **A lead time of 0 refills the shelf the next day** (`s2d/sim/inventory.py
+     _lead_time`). Orders go out in `end_day(t)`, after `start_day(t)` has unpacked day t's
+     arrivals. A shipment due on day t (lead 0) therefore stayed in `arrivals` forever: it
+     was not on the shelf and, because `on_order` counts only days after t, not on its way
+     either. Gemma gives digital goods lead 0 (Nahá pravda: both suppliers). That world
+     sold for 12 of 932 days, then nothing, and its −20 % event was "not testable: the KPI
+     has no days". Now a shipment arrives at least one day after it is ordered. A lead
+     time of 1 or more is unchanged, so no existing world changes.
