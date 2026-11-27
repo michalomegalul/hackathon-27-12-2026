@@ -1050,9 +1050,9 @@ the top of `s2d/detective/scan.py`.
     `dirt`), and `verify.narrate` (template when the LLM fails or replay has no cache).
     `fit_windows` runs after the overrides, as in the app.
 95. **ETA = prior shape × median ratio.** Each step has a prior `fixed + per_customer · n`
-    (measured on the notebook, example A: calibration + simulation 17.6 s at 3k, 57 s at 20k,
+    (measured on the notebook, 18 cores, example A: calibration + simulation 17.6 s at 3k, 57 s at 20k,
     92 s at 40k → 12 s + 2 ms/customer; twin 0.7 / 3.3 / 6.2 s → 0.15 ms/customer; AI steps
-    fixed 35 s and 15 s). Every finished step stores `{s, n}` in `timings.json` (last 30);
+    fixed 35 s and 15 s; kola calibrates faster, 8 / 33 / 46 s, so the history matters). Every finished step stores `{s, n}` in `timings.json` (last 30);
     the estimate is `prior(n) · median(s_i / prior(n_i))`, so one 40k run corrects the
     estimate for 10k too, and the calibration's fixed part is not scaled away. A step answered
     from the LLM cache, or the narrator's template, records nothing: 0 s says nothing about
@@ -1072,4 +1072,5 @@ the top of `s2d/detective/scan.py`.
     tables `answer_key`, `decoys`, `calibration`, and the detective's `score` is staff-only.
 98. **Not done in the API**: the ZIP has no Postgres SQL dump and no ERD (PLAN mentions them;
     `s2d/sim/pg.py` exports to a live Postgres, not to a file); no rate limit per token; no
-    job deletion or cleanup (a 40k job is ~60 MB on disk, the ZIP ~25 MB more).
+    job deletion or cleanup (example A at 3k customers is 58 MB on disk with its
+    10 MB ZIP, roughly linear in customers, so a 40k job is several hundred MB: watch the disk).
