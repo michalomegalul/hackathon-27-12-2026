@@ -1,16 +1,19 @@
 // Story "/" and "/run/:id": a chat. Sending runs everything automatically (useRun); the URL
 // becomes /run/:id, so a reload or a shared link reopens the run.
-import { useParams } from 'react-router'
+import { useLocation, useParams } from 'react-router'
 import { Composer } from '../run/Composer'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { useRun } from '../run/useRun'
-import { recallSent, useResend, useSend } from '../run/useSend'
+import { recallSent, useResend, useSend, type Draft } from '../run/useSend'
 
 export function Story() {
   const { id } = useParams()
   const send = useSend()
   const run = useRun(id, useResend(id, send))
+  // History "Upravit" navigates here with the prompt (or spec) as a draft
+  const location = useLocation()
+  const draft = (location.state as { draft?: Draft } | null)?.draft
 
   return (
     <RunView
@@ -26,7 +29,15 @@ export function Story() {
           </div>
         )
       }
-      bottom={<Composer onSubmit={(s) => send.mutateAsync(s)} busy={send.isPending} error={send.error?.message} />}
+      bottom={
+        <Composer
+          key={location.key}
+          initial={draft}
+          onSubmit={(s) => send.mutateAsync(s)}
+          busy={send.isPending}
+          error={send.error?.message}
+        />
+      }
     >
       <Sections run={run} specName={recallSent(id)?.specName} />
     </RunView>

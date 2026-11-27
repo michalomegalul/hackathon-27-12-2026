@@ -2,16 +2,30 @@
 // example and the no-AI test, and a paperclip that attaches a .yaml spec.
 import { useRef, useState } from 'react'
 import { splitPrompt, type Submit } from './prompt'
+import type { Draft } from './useSend'
 import { BRIEF_EXAMPLE, FAST_TEST_SPEC } from '../examples'
 import { Spinner } from '../components/ui'
 
 
 const chip = 'rounded-full border border-line px-3 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
 
-/** `onSubmit` resolves once the run exists: then the input clears, as in a chat. */
-export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => Promise<unknown>; busy: boolean; error?: string | null }) {
-  const [text, setText] = useState('')
-  const [spec, setSpec] = useState<{ name: string; yaml: string } | null>(null)
+/**
+ * `onSubmit` resolves once the run exists: then the input clears, as in a chat. `initial` is what
+ * History's "Upravit" puts in (the page keys this component by navigation, so a new draft resets it).
+ */
+export function Composer({
+  onSubmit,
+  busy,
+  error,
+  initial,
+}: {
+  onSubmit: (s: Submit) => Promise<unknown>
+  busy: boolean
+  error?: string | null
+  initial?: Draft
+}) {
+  const [text, setText] = useState(initial && 'text' in initial ? initial.text : '')
+  const [spec, setSpec] = useState<{ name: string; yaml: string } | null>(initial && 'spec' in initial ? initial.spec : null)
   const [fileErr, setFileErr] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
   const area = useRef<HTMLTextAreaElement>(null)
@@ -103,6 +117,7 @@ export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => P
               send()
             }
           }}
+          autoFocus={Boolean(initial)}
           rows={Math.min(8, Math.max(1, text.split('\n').length))}
           placeholder={spec ? 'Pošle se přiložená specifikace (text se nepoužije).' : 'První odstavec: firma. Pak příběh.'}
           aria-label="Firma a příběh"
