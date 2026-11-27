@@ -1140,3 +1140,13 @@ the top of `s2d/detective/scan.py`.
     `timeline` is always 24 hourly buckets ending with the current hour; rows and customers
     are the story world only (`result.json` `rows`); a running detective shows as step
     `"detektiv"`.
+128. **The React site is the root, Streamlit is gone** (`nginx.conf`, `compose.yaml`). nginx
+    serves `clients/web` at `/` (Vite `base: '/'`, so no router basename) and answers
+    `/web/...` with a 301 to the same path without `/web`, so QR codes and shared run links
+    keep working (the `#token=` fragment stays in the browser). The `app` service, `app/`
+    and the `site/` placeholder pages are deleted; nothing imported them. The Python image's
+    Dockerfile moved to the repo root and runs uvicorn (the `api` service). nginx resolves
+    `api` through Docker's DNS per request (`resolver 127.0.0.11`, `proxy_pass $api_up`):
+    with a fixed host it kept the old IP after a deploy recreated the container and gave
+    502 until nginx restarted. The server's old `app` container stays as an orphan until
+    `docker compose up -d --remove-orphans` (or `docker rm -f`) removes it.

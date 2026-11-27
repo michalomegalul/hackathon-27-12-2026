@@ -55,20 +55,17 @@ sudo journalctl -u deploy -n 20      # did the last auto-deploy work?
 
 `docker compose up -d --build` runs two services:
 
-- `app`: Streamlit on port 8501 (Python 3.12, uv). Built from `app/Dockerfile`.
-- `web`: nginx on host port 3000. It proxies everything to `app`, with websocket
-  headers and a 1 hour read timeout. `/test` is still the static page from `site/`.
+- `api`: the HTTP API on port 8000 (Python 3.12, uv, one uvicorn process). Built from `Dockerfile`.
+- `web`: nginx on host port 3000. It serves the React site (`clients/web/`, built into the image
+  by `clients/web/Dockerfile`) at `/`, sends `/v1/`, `/docs` and `/openapi.json` to `api`, and
+  redirects old `/web/...` links (301) to the same path without `/web`.
 
 `./data` on the host is mounted at `/data` in the container. It holds the LLM cache,
 the text pools, the job files and the simulated runs. Back it up before the demo:
 the cached demo stories live there.
 
-Run it locally without Docker:
-
-```
-uv sync
-uv run streamlit run app/main.py
-```
+Run it locally without Docker: the API as in [HTTP API](#http-api) below, the site with
+`npm run dev` in `clients/web/` (see `clients/web/README.md`).
 
 ### Environment variables
 

@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react'
 const KEY = 's2d_token'
 const devToken = import.meta.env.DEV ? (import.meta.env.VITE_API_TOKEN ?? '') : ''
 
-/** A link like https://…/web/#token=abc logs in (the hash never reaches the server) and is then removed. */
+/** A link like https://…/#token=abc logs in (the hash never reaches the server) and is then removed. */
 function fromHash(): string | null {
   const m = /(?:^#|&)token=([^&]+)/.exec(location.hash)
   if (!m) return null
