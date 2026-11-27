@@ -996,3 +996,44 @@ the top of `s2d/detective/scan.py`.
       holds on story and twin. Calibration uses the same `resolve` and series, so it
       measures d with this test. The narrator says "oproti stejnému období před rokem"
       (template and the LLM's `kontrola` field), the app labels the line "před rokem".
+92. **The brief story, checked without the LLM (2026-11-27).** `examples/brief/sport.yaml`,
+    written by hand: SportMax, sporting goods, e-shop 0.6 + stores in Praha and Brno,
+    20 000 customers, data 2025-01-01 .. 2026-12-31, retail_cz season, one event for
+    everyone from 2026-04-01: purchase_rate −0.05, ramp 7, permanent, `size_stated: true`,
+    medium. Calibration keeps −5 % (d 2.9 on seed 1 + 7919, `below_target`, warning).
+    Sim → twin → verify, seeds 1–5, orders, year-over-year control:
+
+    | seed | story | 95 % CI | z | ok | twin | 95 % CI | z | ok |
+    |---|---|---|---|---|---|---|---|---|
+    | 1 | −5.43 % | [−10.6, −2.4] | 1.62 | no | +0.01 % | [−4.9, +4.0] | 0.13 | no |
+    | 2 | −5.00 % | [−8.2, −0.4] | 3.70 | yes | +0.08 % | [−2.2, +4.4] | 0.04 | no |
+    | 3 | −7.42 % | [−9.4, −4.3] | 2.44 | no | −2.66 % | [−4.2, +0.5] | 1.14 | no |
+    | 4 | −2.80 % | [−6.5, +1.3] | 1.06 | no | +0.90 % | [−2.8, +5.8] | 0.55 | no |
+    | 5 | −6.78 % | [−10.1, −5.0] | 4.42 | yes | −2.07 % | [−5.8, +0.9] | 0.82 | no |
+
+    Mean −5.49 % (twin −0.75 %). Before (main, plain before/after, same seeds): −10.1 to
+    −13.9 % (mean −11.7 %), twin −5.3 to −9.2 % (mean −7.1 %), 0/5 confirmed.
+    **At 20k customers −5 % for everyone is measured right but not confirmable**: the
+    year-over-year statistic has a placebo SD of about 3 % (two noisy years instead of
+    one), so −5 % is z ≈ 1.6–2 on average. By customer count (seeds 1–5, story / twin
+    confirmed, mean measured): 40k 3/5 / 0/5 (−5.2 %); 60k 3/5 / 0/5 (−5.0 %); 80k 4/5 / 0/5
+    (−5.1 %, z 2.95–6.2); 120k 4/5 / 0/5 (−4.8 %, seed 1 z 2.92); **160k 5/5 / 0/5** (−4.6 %,
+    z 4.6–7.2; largest twin z 3.07, CI includes 0). So about 80k for "usually", 160k for
+    "every seed". The size is not inflated to get there. The twin sits slightly below 0
+    (mean −0.1 to −1.1 % by count; the placebo null's median is −0.2 %), not explained.
+    The test suite runs the 80k seed 2 case (confirmed −5.33 %, twin −1.04 %).
+    Gemma (gemma4:26b, one compile of the brief, no cache) now writes `size_stated: true`
+    and −0.05; it picked difficulty easy, and the size stays −5 % (before: −30 %).
+93. **Regression (2026-11-27)**, `python -m s2d.sim run … --seed 42` (calibrated) + twin +
+    `python -m s2d.verify`, main vs this branch: Example A and B at 40k, and the three gemma
+    fixture specs (`tests/fixtures/spec_{pekarna,kosmetika,kola}.yaml`, the hand-free path,
+    own customer counts). **Every verify table is identical**: A 5/6, twin 0/6; B 5/6, twin
+    0/6; kola 3/4, 0/4; kosmetika 4/5, 0/5; pekárna 1/2, 0/2; every SQL matches. None of
+    them has an event for everyone, and A's E5 (now stated, −20 %) was already calibrated
+    to −20 % on seed 42. The fixtures have no `size_stated`, so kola's "čtvrtinu tržeb" is
+    still scaled −25 → −30 % there. `scripts/e2e.py` (Ollama reachable) on fitness, kola,
+    lékárna, seed 7: fitness 3/3 / 0/3 (its E1 for everyone starts 2026-01-01, a year of
+    data is missing, so plain before/after with the reason in the note); kola 3/4 / 0/4 with
+    E3 now stated by gemma at −25 % (confirmed, z 6.3); lékárna 2/3 / 1/3 (the known twin
+    false positive of decision 87). New LLM outputs, so not a like-for-like comparison with
+    decision 88.
