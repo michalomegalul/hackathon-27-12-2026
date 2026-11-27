@@ -138,7 +138,9 @@ export function SpecSection({ run, spec }: { run: Run; spec: Spec | null }) {
       ) : run.stages.data.state === 'error' ? (
         <p className="text-sm text-muted">The spec is ready; its parameters appear with the result.</p>
       ) : (
-        <Waiting>The spec is ready. Parameters and events appear once the simulator has generated and verified the data.</Waiting>
+        <p className="text-sm text-muted">
+          The spec is generated. The API returns its parameters and events together with the result, so they appear when the data is generated and verified.
+        </p>
       )}
     </Section>
   )
