@@ -1,6 +1,6 @@
 # Story2Data web (`clients/web/`)
 
-The web page for the Story2Data API (`docs/API.md`). It has a story form, a progress bar while the job runs, the verification table and a ZIP download.
+The web page for the Story2Data API (`docs/API.md`). Story is a chat: one message runs the whole pipeline (spec, data, detective, score) by itself, shown as a process in a sidebar. Design: `docs/prompts/06-web-v2.md`.
 It is built with Vite 8, React 19, React Router 8 (data mode), TanStack Query 5 and Tailwind v4, with the pins from `docs/research/web-stack.md`.
 It uses no MSW.
 
@@ -54,10 +54,13 @@ npx oxlint
 
 | route | what |
 |---|---|
-| `/web/` | Form with company, story, difficulty, customers, dirt and seed. **Načíst příklad** fills in `examples/stories/brief.yaml`. **Rychlý test (bez AI)** posts `examples/a.yaml` as `spec_yaml`. The side panel lists finished jobs to reuse. |
-| `/web/jobs/:id` | Polls every 2 s and stops on done or error. Shows the 5 steps, the running one highlighted, `zbývá ~N s`, and the queue position. When the job is done it shows the summary, the verification table (each row expands to its SQL), untested events, warnings, the narrative and the ZIP download. |
-| `/web/jobs/:id/data` | The job's tables (`GET /tables`: name, rows, columns) and a virtualized, sortable grid (TanStack Table 9 + Virtual) that loads 1000 rows at a time by offset as you scroll (`?t=<table>` picks one). Sorting covers only the loaded rows; **Seřadit celou tabulku v SQL** runs an `ORDER BY` instead. Dates are shown as dates, nulls greyed. The SQL box (`POST /query`, Ctrl+Enter) shows results in the same grid, a "truncated" notice past 1000 rows, and SQL errors (400) and timeouts (408) inline. **▶ Spustit SQL** on each verification row opens this page with that row's SQL, runs it, and marks each value ✓/≠ against `sql_result`. |
-| `/web/jobs` | My jobs (`GET /v1/jobs`) with status and summary. |
+| `/web/` | **Story.** A chat input (Enter sends, Shift+Enter is a new line). The first paragraph is the company, the rest the story; one paragraph is sent as both. **Ukázka** fills in `examples/stories/brief.yaml`, **Rychlý test bez AI** posts `examples/a.yaml` as `spec_yaml`, the paperclip attaches a `.yaml` spec. Sending goes to `/run/:id`. |
+| `/web/run/:id` | **The run view** (also used by History and Rev story). Left sidebar: **Prompt → Spec → Data → Detektiv → Skóre → Shrnutí** (grey until reached, the running one pulses, finished ones get ✓ and scroll to their section) under a sticky status block (step, progress bar, `zbývá ~N s`, queue position). On the phone it is a top bar with the status and a **Průběh** drawer. Pipeline (`src/run/useRun.ts`): poll the job every 2 s (API step 1 = Spec, steps 2–5 = Data) → `/result` → `POST /detect` automatically → poll `/detect` → Skóre → Shrnutí. Errors show in the section they happened in, with **Zkusit znovu** (a failed job is sent again as a new run; a failed detective is restarted). `#s-<stage>` in the URL scrolls to that section. |
+| `/web/run/:id/data` | The job's tables and a virtualized, sortable grid (TanStack Table 9 + Virtual) that loads 1000 rows at a time by offset as you scroll (`?t=<table>` picks one). The SQL box (`POST /query`, Ctrl+Enter) shows results in the same grid, a "truncated" notice past 1000 rows, and SQL errors (400) and timeouts (408) inline. **▶ Spustit SQL** on each verification row opens this page with that row's SQL, runs it, and marks each value ✓/≠ against `sql_result`. |
+| `/web/history`, `/web/history/:id` | Every run (`GET /v1/jobs?scope=all`); opening one shows it in the run view. |
+| `/web/rev` | Rev story (data → story): the run view, picker still to come (Prompt 3). |
+| `/web/about` | The technical part (Prompt 3 fills it in). |
+| `/web/jobs/...` | The v1 links redirect: `/jobs/:id` → `/run/:id`, `/jobs/:id/data` → `/run/:id/data`, `/jobs/:id/story` → `/run/:id#s-summary`, `/jobs` → `/history`. |
 
 Errors on every page: 401 → the token form says **Neplatný token**; 404 → **Úloha nenalezena**; network down (or nginx 502/503/504) → a banner with **Zkusit znovu** that also retries when the browser comes back online. 4xx are not retried.
 
