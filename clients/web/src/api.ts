@@ -44,6 +44,18 @@ export type JobListItem = {
   created: string
   elapsed_s: number
   summary: Summary | null
+  story_preview?: string | null
+}
+
+/** GET /v1/jobs/{id}/input: the POST body as given (null when left out). */
+export type JobInput = {
+  company: string | null
+  story: string | null
+  difficulty: Difficulty | null
+  seed: number | null
+  n_customers: number | null
+  dirt: Dirt | null
+  spec_given: boolean
 }
 
 export type VerificationStatus = 'confirmed' | 'not_confirmed' | 'not_testable'
@@ -92,7 +104,15 @@ export type JobResult = {
 }
 
 export type Column = { name: string; type: string }
-export type TableInfo = { name: string; rows: number; columns: Column[] }
+export type ForeignKey = { column: string; references: { table: string; column: string } }
+export type TableInfo = {
+  name: string
+  rows: number
+  columns: Column[]
+  primary_key?: string[]
+  foreign_keys?: ForeignKey[]
+}
+export type World = 'story' | 'twin'
 export type Cell = string | number | boolean | null
 export type TablePage = {
   name: string
@@ -108,6 +128,38 @@ export type Health = {
   ok: boolean
   llm: { backend: string; model: string; reachable: boolean }
   queue: { running: string | null; waiting: number }
+}
+
+export type DetectEvent = {
+  id: string
+  metric: string
+  segment: string | null
+  start_date: string
+  end_date: string | null
+  direction: 'up' | 'down' | string
+  magnitude_pct: number | null
+  lag_days: number | null
+  caused_by: string | null
+  kind: string
+  confidence: number
+  evidence: string
+}
+export type DetectScore = {
+  precision: number
+  recall: number
+  f1: number
+  twin_false_events_per_year: number | null
+  placebo_p: number | null
+}
+export type Detect = {
+  job_id: string
+  status: JobStatus
+  position: number
+  elapsed_s: number
+  error: string | null
+  events: DetectEvent[] | null
+  narrative: { text: string; source: string } | null
+  score: DetectScore | null
 }
 
 // ---- errors ----------------------------------------------------------------------------
@@ -221,17 +273,21 @@ export const getHealth = () => api<Health>('/v1/health')
 export const createJob = (body: NewJob) =>
   api<JobCreated>('/v1/jobs', { method: 'POST', body: JSON.stringify(body) })
 
-export const listJobs = () => api<{ jobs: JobListItem[] }>('/v1/jobs')
+export const listJobs = (scope: 'mine' | 'all' = 'mine') => api<{ jobs: JobListItem[] }>(`/v1/jobs?scope=${scope}`)
 export const getJob = (id: string) => api<Job>(`/v1/jobs/${encodeURIComponent(id)}`)
+export const getInput = (id: string) => api<JobInput>(`/v1/jobs/${encodeURIComponent(id)}/input`)
+export const startDetect = (id: string) =>
+  api<{ job_id: string; status: JobStatus; position: number }>(`/v1/jobs/${encodeURIComponent(id)}/detect`, { method: 'POST' })
+export const getDetect = (id: string) => api<Detect>(`/v1/jobs/${encodeURIComponent(id)}/detect`)
 export const getResult = (id: string) => api<JobResult>(`/v1/jobs/${encodeURIComponent(id)}/result`)
 export const getTables = (id: string) => api<{ tables: TableInfo[] }>(`/v1/jobs/${encodeURIComponent(id)}/tables`)
-export const getTable = (id: string, name: string, limit = 100, offset = 0, signal?: AbortSignal) =>
+export const getTable = (id: string, name: string, limit = 100, offset = 0, signal?: AbortSignal, world: World = 'story') =>
   api<TablePage>(
-    `/v1/jobs/${encodeURIComponent(id)}/tables/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}`,
+    `/v1/jobs/${encodeURIComponent(id)}/tables/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}&world=${world}`,
     { signal },
   )
-export const runQuery = (id: string, sql: string) =>
-  api<QueryResult>(`/v1/jobs/${encodeURIComponent(id)}/query`, { method: 'POST', body: JSON.stringify({ sql }) })
+export const runQuery = (id: string, sql: string, world: World = 'story') =>
+  api<QueryResult>(`/v1/jobs/${encodeURIComponent(id)}/query`, { method: 'POST', body: JSON.stringify({ sql, world }) })
 
 /** The ZIP needs the Bearer header, so a plain <a href> cannot download it: fetch a blob and save it. */
 export async function downloadZip(id: string): Promise<void> {
@@ -272,13 +328,27 @@ export const resultOptions = (id: string, enabled: boolean) =>
     retry: retryTransient,
   })
 
-export const jobsOptions = () =>
+export const jobsOptions = (scope: 'mine' | 'all' = 'mine') =>
   queryOptions({
-    queryKey: ['jobs'],
-    queryFn: listJobs,
+    queryKey: ['jobs', scope],
+    queryFn: () => listJobs(scope),
     retry: retryTransient,
     // keep the list fresh while something is still queued/running
     refetchInterval: (query) => (query.state.data?.jobs.some((j) => !finished(j.status)) ? 3000 : false),
+  })
+
+/** The prompt as sent: any status, and it never changes. */
+export const inputOptions = (id: string) =>
+  queryOptions({ queryKey: ['input', id], queryFn: () => getInput(id), staleTime: Infinity, retry: retryTransient })
+
+/** The detective (404 before a POST): poll every 2 s while it is queued or running. */
+export const detectOptions = (id: string, enabled: boolean) =>
+  queryOptions({
+    queryKey: ['detect', id],
+    queryFn: () => getDetect(id),
+    enabled,
+    refetchInterval: (query) => (finished(query.state.data?.status) ? false : 2000),
+    retry: retryTransient,
   })
 
 /** /tables and /query answer 409 until the job is done: enable them only then. */
