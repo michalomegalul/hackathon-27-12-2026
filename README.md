@@ -116,7 +116,7 @@ S2D_TOKEN=<teacher|admin> S2D_STUDENT_TOKEN=<student> \
 S2D_TOKEN=$(uv run python -m s2d.api token check admin) scripts/demo_check.sh   # local, 8000 + 8501
 ```
 
-Every run leaves one job in the job list (titled after `examples/a.yaml`).
+Every run leaves one job in the job list ("Pražírna Zrnko", the company of `examples/a.yaml`).
 
 ### Command line
 
