@@ -1,28 +1,19 @@
-// Pure helpers for /jobs/:id/story: FK edges and layout from /tables, the KPI column an event
+// Pure helpers for the ERD and the Shrnutí: FK edges and layout from /tables' keys, the KPI column an event
 // moved, and the daily series SQL derived from a verification row.
 import type { TableInfo, VerificationRow } from '../api'
 
 // ---- schema ----------------------------------------------------------------------------
 
-/** A table's primary key: its first column when that is `<something>_id`. */
-export const pkOf = (t: TableInfo) => (t.columns[0]?.name.endsWith('_id') ? t.columns[0].name : undefined)
+export type Fk = { child: string; column: string; parent: string; parentColumn: string }
 
-export type Fk = { child: string; parent: string; column: string }
-
-/** FKs by name: a `*_id` column of one table that is the primary key of another. */
-export function inferFks(tables: TableInfo[]): Fk[] {
-  const owner = new Map<string, string>()
-  for (const t of tables) {
-    const pk = pkOf(t)
-    if (pk && !owner.has(pk)) owner.set(pk, t.name)
-  }
-  const fks: Fk[] = []
-  for (const t of tables)
-    for (const c of t.columns) {
-      const parent = owner.get(c.name)
-      if (c.name.endsWith('_id') && parent && parent !== t.name) fks.push({ child: t.name, parent, column: c.name })
-    }
-  return fks
+/** FK edges from the keys /tables reports (the Postgres export's constraints), no name guessing. */
+export function keyFks(tables: TableInfo[]): Fk[] {
+  const names = new Set(tables.map((t) => t.name))
+  return tables.flatMap((t) =>
+    (t.foreign_keys ?? [])
+      .filter((f) => names.has(f.references.table) && f.references.table !== t.name)
+      .map((f) => ({ child: t.name, column: f.column, parent: f.references.table, parentColumn: f.references.column })),
+  )
 }
 
 /** Left to right by FK depth: parents in column 0, their children after them. */
