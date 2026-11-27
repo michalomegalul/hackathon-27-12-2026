@@ -25,12 +25,14 @@ function read(): string {
 }
 
 let token = read()
+let invalid = false // the last token got a 401
 const listeners = new Set<() => void>()
 
 export const getToken = () => token
 
 export function setToken(t: string) {
   token = t.trim()
+  invalid = false
   try {
     if (token) localStorage.setItem(KEY, token)
     else localStorage.removeItem(KEY)
@@ -48,3 +50,13 @@ const subscribe = (l: () => void) => {
 }
 
 export const useToken = () => useSyncExternalStore(subscribe, getToken)
+
+/** The API answered 401: forget the token and let the login form say it was wrong. */
+export function markTokenInvalid() {
+  if (!token && invalid) return
+  setToken('')
+  invalid = true
+  listeners.forEach((l) => l())
+}
+
+export const useTokenInvalid = () => useSyncExternalStore(subscribe, () => invalid)

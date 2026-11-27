@@ -24,6 +24,9 @@ export const num = (n: number | null | undefined, digits: 1 | 2 = 1) =>
 
 export const intCs = (n: number) => new Intl.NumberFormat('cs-CZ').format(n)
 
+/** 1 řádek · 3 řádky · 5 řádků */
+export const rowsCs = (n: number) => `${intCs(n)} ${n === 1 ? 'řádek' : n >= 2 && n <= 4 ? 'řádky' : 'řádků'}`
+
 export function dateCs(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric' })
