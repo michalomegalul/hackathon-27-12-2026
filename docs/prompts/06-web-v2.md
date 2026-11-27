@@ -7,25 +7,42 @@ These prompts turn it into the site we actually want:
 2. **Prompt Space**: a chat-like window with two ways: text → data (a story becomes a database), and data → story (reverse: the blind detective finds the story in the data).
 3. **My DB**: a searchable list of databases; each opens as a DB scheme with arrows from the words of the prompt to the columns they changed. This works for the demo (test) prompt and for any new one.
 4. **How it works** (the self-glaze): the whole pipeline with a cool example and our numbers.
+5. **What changed**: the same database with the story and without it (the twin), side by side:
+   what the story said, how it should look, what was measured, and what the twin shows (nothing).
+6. **Postgres tables, not YAML**: everywhere a visitor sees "the data", show Postgres tables
+   (`CREATE TABLE` with types, primary and foreign keys, sample rows like `psql`), never the spec YAML.
+   The YAML stays only behind a small "pro vývojáře" toggle.
 
 Most building blocks exist on `main`: the ERD with word → column arrows (`src/story/`), the uPlot charts, anime.js, the virtualized grid, the API client.
 Reuse them; restructure, don't rewrite.
 
-Order: prompt 0 (Michal, API, small) and prompt 1 can run at the same time; then 2, then 3.
+Order: prompt 0 (Michal, API, small) and prompt 1 can run at the same time; then 2, then 3, then 4.
 Each stops and reports; Michal merges (`main` auto-deploys).
 
-## Prompt 0 (Michal's session): `GET /v1/stats` for the homepage
+## Prompt 0 (Michal's session): API for the homepage, the twin and the Postgres view
 
 ```text
-Story2Data, branch feat/api-stats from main. Read docs/API.md and s2d/api/ (main.py, store.py).
-Add GET /v1/stats, no auth (like /v1/health), cheap (read the job files, cache 5 s):
+Story2Data, branch feat/api-stats from main. Read docs/API.md, s2d/api/ (main.py, store.py,
+pipeline.py, sandbox.py) and s2d/sim/pg.py (PRIMARY_KEYS, FOREIGN_KEYS). Three additions:
+A. The twin is queryable: when a job finishes, build analyst_twin.duckdb from run/twin/story.duckdb
+   the same way as analyst.duckdb (sandbox.build_analyst, main schema only). POST /v1/jobs/{id}/query
+   and GET /v1/jobs/{id}/tables/{name} take "world": "story" | "twin" (default story; body field
+   for /query, query parameter for the table). Same sandbox, same limits. Jobs finished before this
+   change: build it lazily on the first twin request.
+B. Keys and Postgres DDL: GET /v1/jobs/{id}/tables adds per table "primary_key": [cols] and
+   "foreign_keys": [{column, references: {table, column}}] from s2d/sim/pg.py (one source of truth).
+   New GET /v1/jobs/{id}/ddl -> text/plain: the Postgres CREATE TABLE statements of the analyst
+   tables with Postgres types (BIGINT, INTEGER, DOUBLE PRECISION, NUMERIC, TEXT, DATE, TIMESTAMP,
+   BOOLEAN), PRIMARY KEY and REFERENCES, the same keys the Postgres export creates.
+C. GET /v1/stats, no auth (like /v1/health), cheap (read the job files, cache 5 s):
 { "jobs_total", "jobs_done", "jobs_today", "running": {job_id, step, step_index, progress, eta_s} | null,
   "waiting", "median_run_s", "events_confirmed_pct" (story rows confirmed / tested, over done jobs),
   "twin_false_pct", "customers_simulated", "rows_generated",
   "recent": [last 20 finished jobs: {job_id, title, finished, elapsed_s, summary}],
   "timeline": [per hour of the last 24 h: {hour, jobs, median_run_s}] }
-No owner names or story texts in it except job titles. Document it in docs/API.md (exact JSON),
-test it in tests/test_api.py, DECISIONS entry. uv run pytest -q -m "not integration" green.
+No owner names or story texts in it except job titles.
+Document A, B and C in docs/API.md (exact JSON), test them in tests/test_api.py (the twin query
+must not see _truth either), DECISIONS entry. uv run pytest -q -m "not integration" green.
 No Co-Authored-By. Don't merge; stop and report.
 ```
 
@@ -53,8 +70,8 @@ small commits, never merge to main.
    tiles you can't fill), refetch every 5 s. Numbers count up with anime.js on first load.
 3. "Jak to funguje" "/how": the pipeline as 6 steps (příběh → spec → simulace → dvojče → ověření →
    vyprávění), each a panel with one sentence and a tiny real example from the demo story
-   (the Czech story sentence, the spec YAML snippet, a table sample, the twin, the z-score row,
-   the narrative). Line drawing (svg.createDrawable) connects the steps on scroll (onScroll).
+   (the Czech story sentence, the events it found as plain Czech chips, a Postgres table as
+   `CREATE TABLE` + 5 sample rows, the twin next to it, the z-score row, the narrative). No YAML. Line drawing (svg.createDrawable) connects the steps on scroll (onScroll).
    Then "Proč tomu věřit" with our measured numbers, each with its source (DECISIONS.md / PLAN.md:
    e.g. 87 % of story events confirmed on 11 stories, 3 % false alarms on the twin); no invented
    numbers.
@@ -97,9 +114,34 @@ the DataPage grid.
    (the existing SpanArrow overlay); hovering a highlight lights its arrow, the column and the
    verification row (size, z, ✅); clicking it shows the daily KPI chart (KpiChart) and the SQL.
    Tables as modern ERD cards (React Flow 13), FK edges, the KPI columns marked. Tabs: Schéma |
-   Data (grid + SQL) | Ověření | Detektiv (the reverse result if it was run). Old /jobs/:id/story
+   Data (grid + SQL) | Postgres (GET /ddl as highlighted SQL with a copy button, and each table as a
+   psql-style card: columns, types, PK/FK, first rows) | Ověření | Co se změnilo | Detektiv (the
+   reverse result if it was run). Use primary_key/foreign_keys from /tables for the ERD edges,
+   not *_id guessing. The spec YAML only behind a "pro vývojáře" toggle. Old /jobs/:id/story
    redirects here.
 3. Make the arrows draw in one by one with anime.js when the page opens (svg.createDrawable), and
    respect prefers-reduced-motion.
 Build + oxlint green. Stop and report with screenshots of the demo database's scheme.
+```
+
+## Prompt 4: What changed (story vs twin, how it should look)
+
+```text
+Continue on feat/c-web-v2 (git pull main, rebase; needs prompt 0 merged: "world": "twin"). Read
+docs/API.md (verification rows: story_size, expected_size, measured, ci, twin_measured, twin_z,
+control_mode, control, sql) and src/story/KpiChart.tsx + model.ts (dailySql).
+Tab "Co se změnilo" on /db/:id, and a short version in the Prompt Space result card:
+1. One card per event, four numbers side by side with one Czech line each:
+   "Příběh říká" (story_size + unit) | "Mělo by být" (expected_size, what the calibrated simulation
+   aims for) | "Naměřeno" (measured with the CI as a range bar) | "Bez příběhu" (twin_measured,
+   should be ~0). A small horizontal chart with the four on one axis, zero marked, and a verdict
+   badge (✅ potvrzeno / ❌ / nelze ověřit + reason). The twin value close to zero is the point:
+   say it ("ve světě bez příběhu se nic nestalo").
+2. Under it the daily KPI chart with THREE lines: target with the story, the same target in the
+   twin (run the row's daily SQL with "world": "twin"), and the control; the event start marked,
+   the gap between story and twin shaded after it. Reuse KpiChart, add the twin series.
+3. A "Před / po" mini table per event: the KPI before vs after the start, story vs twin, as the SQL
+   computes it (show that SQL with a copy button: a judge can run it in the Data tab).
+4. Summary bar at the top: "Příběh 4/4 potvrzeno, dvojče 0/4 falešných poplachů".
+Build + oxlint green, stop and report with a screenshot of the demo database's "Co se změnilo".
 ```
