@@ -124,12 +124,6 @@ export type TablePage = {
 }
 export type QueryResult = { columns: Column[]; rows: Cell[][]; truncated: boolean; seconds: number }
 
-export type Health = {
-  ok: boolean
-  llm: { backend: string; model: string; reachable: boolean }
-  queue: { running: string | null; waiting: number }
-}
-
 export type DetectEvent = {
   id: string
   metric: string
@@ -301,8 +295,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ---- endpoints -------------------------------------------------------------------------
 
-export const getHealth = () => api<Health>('/v1/health')
-
 export const createJob = (body: NewJob) =>
   api<JobCreated>('/v1/jobs', { method: 'POST', body: JSON.stringify(body) })
 
@@ -321,8 +313,6 @@ export const getTable = (id: string, name: string, limit = 100, offset = 0, sign
     `/v1/jobs/${encodeURIComponent(id)}/tables/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}&world=${world}`,
     { signal },
   )
-/** GET /ddl: the analyst tables as Postgres CREATE TABLE statements (text/plain). */
-export const getDdl = async (id: string) => (await request(`/v1/jobs/${encodeURIComponent(id)}/ddl`)).text()
 export const runQuery = (id: string, sql: string, world: World = 'story') =>
   api<QueryResult>(`/v1/jobs/${encodeURIComponent(id)}/query`, { method: 'POST', body: JSON.stringify({ sql, world }) })
 
@@ -411,9 +401,6 @@ export const tablesOptions = (id: string, enabled: boolean) =>
     staleTime: Infinity,
     retry: retryTransient,
   })
-
-export const ddlOptions = (id: string) =>
-  queryOptions({ queryKey: ['ddl', id], queryFn: () => getDdl(id), staleTime: Infinity, retry: retryTransient })
 
 /** The first `n` rows of a table, like `SELECT * FROM t LIMIT n` in psql. */
 export const tableHeadOptions = (id: string, name: string, n = 5, world: World = 'story') =>

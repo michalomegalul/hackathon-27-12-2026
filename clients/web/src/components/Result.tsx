@@ -5,29 +5,6 @@ import { CONTROL_CS, KPI_CS, dateCs, num, withUnit } from '../format'
 import { Badge, VerificationBadge } from './ui'
 import type { SqlCheck } from '../pages/DataPage'
 
-/** "4/4" → [4, 4] */
-const frac = (s: string) => s.split('/').map(Number) as [number, number]
-
-export function SummaryTiles({ r }: { r: JobResult }) {
-  const [sOk, sAll] = frac(r.summary.story)
-  const [tHit] = frac(r.summary.twin)
-  const storyGood = sAll > 0 && sOk === sAll
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      <div className={`border-l-2 py-1 pl-4 ${storyGood ? 'border-emerald-500/70' : 'border-amber-500/70'}`}>
-        <div className="text-xs uppercase tracking-wide text-muted">story</div>
-        <div className="text-3xl font-semibold tabular-nums">{r.summary.story}</div>
-        <div className="text-xs text-muted">events confirmed in the data</div>
-      </div>
-      <div className={`border-l-2 py-1 pl-4 ${tHit === 0 ? 'border-emerald-500/70' : 'border-rose-500/70'}`}>
-        <div className="text-xs uppercase tracking-wide text-muted">twin</div>
-        <div className="text-3xl font-semibold tabular-nums">{r.summary.twin}</div>
-        <div className="text-xs text-muted">“findings” in the data without the story (should be 0)</div>
-      </div>
-    </div>
-  )
-}
-
 const ci = (v: VerificationRow) =>
   v.ci ? `${withUnit(v.ci[0], v.measured_unit)} … ${withUnit(v.ci[1], v.measured_unit)}` : '–'
 

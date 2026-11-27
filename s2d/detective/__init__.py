@@ -59,15 +59,3 @@ def save(result: dict, path: str | Path) -> None:
 
 def load(path: str | Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def series_frame(run_dir: str | Path, series: list[str]) -> pd.DataFrame:
-    """Daily values of the named series ("kpi|segment") for the UI charts."""
-    ks = kpis_mod.build(open_analyst(run_dir))
-    out = {}
-    for name in series:
-        kpi, seg = name.split("|", 1)
-        s = scan_mod._union_series(ks, kpi, seg)
-        if s is not None:
-            out[name] = s
-    return pd.DataFrame(out)

@@ -1,50 +1,6 @@
-// Pure helpers for the ERD and the Summary: FK edges and layout from /tables' keys, the KPI column an event
-// moved, and the daily series SQL derived from a verification row.
+// Pure helpers for the Summary: the KPI column an event moved and the daily series SQL derived from a
+// verification row.
 import type { TableInfo, VerificationRow } from '../api'
-
-// ---- schema ----------------------------------------------------------------------------
-
-export type Fk = { child: string; column: string; parent: string; parentColumn: string }
-
-/** FK edges from the keys /tables reports (the Postgres export's constraints), no name guessing. */
-export function keyFks(tables: TableInfo[]): Fk[] {
-  const names = new Set(tables.map((t) => t.name))
-  return tables.flatMap((t) =>
-    (t.foreign_keys ?? [])
-      .filter((f) => names.has(f.references.table) && f.references.table !== t.name)
-      .map((f) => ({ child: t.name, column: f.column, parent: f.references.table, parentColumn: f.references.column })),
-  )
-}
-
-/** Left to right by FK depth: parents in column 0, their children after them. */
-export function layout(tables: TableInfo[], fks: Fk[]): Map<string, { x: number; y: number }> {
-  const parents = new Map<string, string[]>()
-  for (const f of fks) parents.set(f.child, [...(parents.get(f.child) ?? []), f.parent])
-  const depth = new Map<string, number>()
-  const visit = (name: string, seen: Set<string>): number => {
-    if (depth.has(name)) return depth.get(name)!
-    if (seen.has(name)) return 0 // a cycle: stop here
-    seen.add(name)
-    const d = Math.max(-1, ...(parents.get(name) ?? []).map((p) => visit(p, seen))) + 1
-    depth.set(name, d)
-    return d
-  }
-  tables.forEach((t) => visit(t.name, new Set()))
-
-  const ROW = 21, HEAD = 34, GAP = 28, COL = 300
-  const colY: number[] = []
-  const pos = new Map<string, { x: number; y: number }>()
-  for (const t of [...tables].sort((a, b) => b.columns.length - a.columns.length)) {
-    const d = depth.get(t.name) ?? 0
-    const y = colY[d] ?? 0
-    pos.set(t.name, { x: d * COL, y })
-    colY[d] = y + HEAD + t.columns.length * ROW + GAP
-  }
-  // centre each column vertically on the tallest one
-  const tallest = Math.max(...colY.filter((v) => v !== undefined))
-  for (const [name, p] of pos) p.y += (tallest - (colY[depth.get(name) ?? 0] ?? 0)) / 2
-  return pos
-}
 
 // ---- KPI → the column it moved ---------------------------------------------------------
 
