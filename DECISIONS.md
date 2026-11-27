@@ -1108,3 +1108,12 @@ the top of `s2d/detective/scan.py`.
     the real Gemma is not done**: the homelab Ollama (192.168.4.19) is not reachable from the
     notebook on the venue Wi-Fi and there is no Claude key; run it on the server:
     `uv run python scripts/e2e.py examples/stories/brief.yaml --n-customers 160000`.
+125. **Pre-demo check** (`scripts/demo_check.sh`): bash + curl + jq rather than Python, so it
+    runs on any box that can reach the API, the server included, without the venv; only the
+    Postgres check needs `uv`. It goes through the public API, the way the app and students
+    do, so a PASS means the demo path works. An LLM that is not `reachable` is a FAIL (story
+    jobs need it), but the test job uses `spec_yaml`, so the data path is checked even then.
+    The Postgres export uses the job's `run/story.duckdb` when the API runs on the same machine
+    (`DATA_DIR`), else `analyst.duckdb` from the ZIP (no `_truth`). `APP_URL` defaults to
+    `BASE_URL` for a remote API, since nginx serves both on the server. Each run adds one
+    2000-customer job (~20 s) to the queue: do not run it while a demo job is waiting.

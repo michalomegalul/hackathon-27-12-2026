@@ -103,6 +103,21 @@ uv run uvicorn s2d.api.main:app --port 8000          # one process: it holds the
 curl -s localhost:8000/v1/health
 ```
 
+### Before the demo
+
+`scripts/demo_check.sh` runs one small job end to end and prints PASS / FAIL / SKIP per
+check (exit 1 on any FAIL): health and the LLM, a job on `examples/a.yaml` with 2000
+customers (result, tables, query, ZIP), the student 403 on `/answer-key`, the Streamlit app,
+and, with `S2D_TEST_PG`, the Postgres export. About 30 s locally; it needs `curl`, `jq`, `unzip`.
+
+```
+S2D_TOKEN=<teacher|admin> S2D_STUDENT_TOKEN=<student> \
+  BASE_URL=https://hack.dobsinsky.dev scripts/demo_check.sh     # APP_URL defaults to BASE_URL
+S2D_TOKEN=$(uv run python -m s2d.api token check admin) scripts/demo_check.sh   # local, 8000 + 8501
+```
+
+Every run leaves one job in the job list (titled after `examples/a.yaml`).
+
 ### Command line
 
 ```
