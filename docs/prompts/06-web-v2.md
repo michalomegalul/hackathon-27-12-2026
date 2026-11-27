@@ -23,7 +23,7 @@ Each stops and reports; Michal merges (`main` auto-deploys).
 
 ```text
 Story2Data, branch feat/api-stats from main. Read docs/API.md, s2d/api/ (main.py, store.py,
-pipeline.py, sandbox.py) and s2d/sim/pg.py (PRIMARY_KEYS, FOREIGN_KEYS). Three additions:
+pipeline.py, sandbox.py) and s2d/sim/pg.py (PRIMARY_KEYS, FOREIGN_KEYS). Four additions:
 A. The twin is queryable: when a job finishes, build analyst_twin.duckdb from run/twin/story.duckdb
    the same way as analyst.duckdb (sandbox.build_analyst, main schema only). POST /v1/jobs/{id}/query
    and GET /v1/jobs/{id}/tables/{name} take "world": "story" | "twin" (default story; body field
@@ -34,6 +34,12 @@ B. Keys and Postgres DDL: GET /v1/jobs/{id}/tables adds per table "primary_key":
    New GET /v1/jobs/{id}/ddl -> text/plain: the Postgres CREATE TABLE statements of the analyst
    tables with Postgres types (BIGINT, INTEGER, DOUBLE PRECISION, NUMERIC, TEXT, DATE, TIMESTAMP,
    BOOLEAN), PRIMARY KEY and REFERENCES, the same keys the Postgres export creates.
+D. History: GET /v1/jobs?scope=all lists every job for teacher and admin (scope=mine, the default,
+   keeps today's behaviour), so the public site (public mode = teacher) shows the whole history,
+   including the demo jobs made with team tokens. New GET /v1/jobs/{id}/input -> the prompt as sent:
+   {company, story, difficulty, seed, n_customers, dirt, spec_given: bool} (spec_yaml itself not
+   repeated), same visibility as the job. Also add "story_preview" (first 120 chars of the story,
+   null for spec jobs) to each item of GET /v1/jobs.
 C. GET /v1/stats, no auth (like /v1/health), cheap (read the job files, cache 5 s):
 { "jobs_total", "jobs_done", "jobs_today", "running": {job_id, step, step_index, progress, eta_s} | null,
   "waiting", "median_run_s", "events_confirmed_pct" (story rows confirmed / tested, over done jobs),
@@ -41,7 +47,7 @@ C. GET /v1/stats, no auth (like /v1/health), cheap (read the job files, cache 5 
   "recent": [last 20 finished jobs: {job_id, title, finished, elapsed_s, summary}],
   "timeline": [per hour of the last 24 h: {hour, jobs, median_run_s}] }
 No owner names or story texts in it except job titles.
-Document A, B and C in docs/API.md (exact JSON), test them in tests/test_api.py (the twin query
+Document A, B, C and D in docs/API.md (exact JSON), test them in tests/test_api.py (the twin query
 must not see _truth either), DECISIONS entry. uv run pytest -q -m "not integration" green.
 No Co-Authored-By. Don't merge; stop and report.
 ```
@@ -97,7 +103,12 @@ Continue on feat/c-web-v2 (git pull main, rebase). Read docs/API.md (POST /v1/jo
   If the score is there (teacher role / public mode), show precision/recall/F1 and a side-by-side
   "příběh říkal ↔ detektiv našel" table, matched rows highlighted. This is the proof the story
   can be found back in the data; make it look like it.
-- Keep the conversation in sessionStorage so a reload keeps it.
+- History sidebar (left on desktop, a drawer on the phone), like a chat app: every earlier prompt
+  from GET /v1/jobs?scope=all (title, story_preview, date, status, summary "4/4"), newest first,
+  with a search box and a filter (moje / všechny / ukázky). Clicking one reopens it as a
+  conversation: the user bubble rebuilt from GET /v1/jobs/{id}/input, then the result card and,
+  if the detective ran, its reply. A "Znovu" button sends the same prompt again (new seed), and
+  "Upravit" puts it into the input. The current conversation also stays in sessionStorage.
 Build + oxlint green, stop and report with screenshots.
 ```
 
