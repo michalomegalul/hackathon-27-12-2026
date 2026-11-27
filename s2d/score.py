@@ -50,6 +50,8 @@ def load_truth(run_dir: str | Path) -> dict:
         decoys = con.execute("SELECT * FROM _truth.decoys").df()
         lo, hi = con.execute("SELECT min(order_date), max(order_date) FROM main.orders").fetchone()
     key["start_date"] = pd.to_datetime(key["start_date"])
+    # an empty key reads `simulated` as object, and key[~col] is then a column selection
+    key["simulated"] = key["simulated"].astype(bool)
     decoys["date"] = pd.to_datetime(decoys["date"])
     return {"key": key, "scored": key[key["simulated"]].reset_index(drop=True), "decoys": decoys,
             "start": pd.Timestamp(lo), "end": pd.Timestamp(hi)}

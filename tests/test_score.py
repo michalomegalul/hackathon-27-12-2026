@@ -99,3 +99,22 @@ def test_consequences_are_neither_tp_nor_fp():
     assert {f["pred_id"] for f in s["false_positives"]} == {"C4", "C5", "C6"}
     assert s["precision"] == pytest.approx(1 / 6, abs=1e-3)       # strict
     assert s["precision_cons"] == pytest.approx(1 / 4, abs=1e-3)  # TP / (TP + FP)
+
+
+def test_a_story_without_events_scores_without_error(tmp_path):
+    """An empty answer key reads `simulated` as object; key[~col] then selected columns and
+    the detective step failed with KeyError 'event_id' (job 20261127-211757-c65c8c)."""
+    import duckdb
+
+    from s2d import score
+    with duckdb.connect(str(tmp_path / "story.duckdb")) as con:
+        con.execute("CREATE SCHEMA _truth")
+        con.execute("CREATE TABLE _truth.answer_key (event_id TEXT, type TEXT, metric TEXT, segment TEXT, "
+                    "start_date DATE, lag_days BIGINT, direction TEXT, magnitude_pct DOUBLE, caused_by TEXT, "
+                    "simulated BOOLEAN, mechanism TEXT, narrative_cs TEXT)")
+        con.execute("CREATE TABLE _truth.decoys (type TEXT, date DATE, segment TEXT, size DOUBLE, simulated BOOLEAN)")
+        con.execute("CREATE TABLE orders AS SELECT DATE '2026-01-01' AS order_date")
+    truth = score.load_truth(tmp_path)
+    assert truth["scored"].empty and truth["key"]["simulated"].dtype == bool
+    out = score.score([], truth)
+    assert out["excluded"] == [] and out["n_true"] == 0
