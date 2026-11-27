@@ -162,6 +162,39 @@ export type Detect = {
   score: DetectScore | null
 }
 
+/** GET /answer-key row: an event the story planted (the hidden truth; teacher and admin). */
+export type PlantedEvent = {
+  event_id: string
+  type: string
+  metric: string
+  segment: string | null
+  start_date: string
+  lag_days: number | null
+  magnitude_pct: number | null
+  direction: 'up' | 'down' | string
+  caused_by: string | null
+  simulated: boolean
+  narrative_cs: string
+}
+export type Decoy = { type: string; date: string; [k: string]: unknown }
+export type AnswerKey = { job_id: string; answer_key: PlantedEvent[]; decoys: Decoy[] }
+
+/** GET /v1/stats: the live dashboard (no auth, cached 5 s on the server). */
+export type Stats = {
+  jobs_total: number
+  jobs_done: number
+  jobs_today: number
+  running: { job_id: string; step: string | null; step_index: number; progress: number; eta_s: number } | null
+  waiting: number
+  median_run_s: number | null
+  events_confirmed_pct: number | null
+  twin_false_pct: number | null
+  customers_simulated: number
+  rows_generated: number
+  recent: { job_id: string; title: string; finished: string; elapsed_s: number; summary: Summary | null }[]
+  timeline: { hour: string; jobs: number; median_run_s: number | null }[]
+}
+
 // ---- errors ----------------------------------------------------------------------------
 
 /** FastAPI 422 item: `detail` is a list of these. */
@@ -280,6 +313,8 @@ export const startDetect = (id: string) =>
   api<{ job_id: string; status: JobStatus; position: number }>(`/v1/jobs/${encodeURIComponent(id)}/detect`, { method: 'POST' })
 export const getDetect = (id: string) => api<Detect>(`/v1/jobs/${encodeURIComponent(id)}/detect`)
 export const getResult = (id: string) => api<JobResult>(`/v1/jobs/${encodeURIComponent(id)}/result`)
+export const getAnswerKey = (id: string) => api<AnswerKey>(`/v1/jobs/${encodeURIComponent(id)}/answer-key`)
+export const getStats = () => api<Stats>('/v1/stats')
 export const getTables = (id: string) => api<{ tables: TableInfo[] }>(`/v1/jobs/${encodeURIComponent(id)}/tables`)
 export const getTable = (id: string, name: string, limit = 100, offset = 0, signal?: AbortSignal, world: World = 'story') =>
   api<TablePage>(
@@ -338,6 +373,20 @@ export const jobsOptions = (scope: 'mine' | 'all' = 'mine') =>
     // keep the list fresh while something is still queued/running
     refetchInterval: (query) => (query.state.data?.jobs.some((j) => !finished(j.status)) ? 3000 : false),
   })
+
+/** The planted events (403 for a student: the caller falls back to the verification rows). */
+export const answerKeyOptions = (id: string, enabled: boolean) =>
+  queryOptions({
+    queryKey: ['answer-key', id],
+    queryFn: () => getAnswerKey(id),
+    enabled,
+    staleTime: Infinity,
+    retry: retryTransient,
+  })
+
+/** Live stats: the server recomputes them at most every 5 s, so poll at that pace. */
+export const statsOptions = () =>
+  queryOptions({ queryKey: ['stats'], queryFn: getStats, refetchInterval: 5000, retry: retryTransient })
 
 /** The prompt as sent: any status, and it never changes. */
 export const inputOptions = (id: string) =>
