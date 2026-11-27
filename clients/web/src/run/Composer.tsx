@@ -30,7 +30,7 @@ export function Composer({ onSubmit, busy, error }: { onSubmit: (s: Submit) => P
   }
 
   return (
-    <div className="sticky bottom-0 z-10 -mx-3 bg-bg/95 px-3 pb-3 pt-2 backdrop-blur sm:mx-0 sm:px-0">
+    <div data-chrome="bottom" className="sticky bottom-0 z-10 -mx-3 bg-bg/95 px-3 pb-3 pt-2 backdrop-blur sm:mx-0 sm:px-0">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <button
           type="button"

@@ -1,15 +1,17 @@
 // The six sections of the run view, in order. Each is a grey placeholder (RunView.Section) until
-// its stage is done. Prompt 2 of docs/prompts/06-web-v2.md makes Spec, Data and Shrnutí rich.
-import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router'
-import { tablesOptions, type DetectEvent, type DetectScore, type JobResult, type Step } from '../api'
-import { DownloadButton } from '../components/Download'
+// its stage is done. Data and Shrnutí are lazy chunks (React Flow, TanStack Table, uPlot, anime.js).
+import { Suspense, lazy, type ReactNode } from 'react'
+import { type DetectEvent, type DetectScore, type JobResult, type Step } from '../api'
 import { Notes, VerificationTable } from '../components/Result'
-import { Alert, Spinner } from '../components/ui'
+import { Spinner } from '../components/ui'
 import { KIND_CS, KPI_CS, METRIC_CS, dateCs, duration, intCs, num, withUnit } from '../format'
+import { useSpec, type Spec } from '../spec'
 import { Section } from './RunView'
+import { SpecView } from './SpecView'
 import type { Run } from './useRun'
+
+const DataView = lazy(async () => ({ default: (await import('./DataView')).DataView }))
+const Summary = lazy(() => import('./Summary'))
 
 const frac = (s: string) => s.split('/').map(Number) as [number, number]
 const kpi = (k: string) => KPI_CS[k] ?? k
@@ -100,7 +102,7 @@ function EventsTable({ r }: { r: JobResult }) {
   )
 }
 
-export function SpecSection({ run }: { run: Run }) {
+export function SpecSection({ run, spec }: { run: Run; spec: Spec | null }) {
   const step = run.job?.steps[0]
   const note = step?.done ? step.note : ''
   return (
@@ -113,13 +115,17 @@ export function SpecSection({ run }: { run: Run }) {
     >
       {run.result ? (
         <div className="grid gap-4">
-          <EventsTable r={run.result} />
+          <SpecView
+            r={run.result}
+            spec={spec}
+            fallback={<EventsTable r={run.result} />}
+          />
           <Notes r={run.result} />
         </div>
       ) : run.stages.data.state === 'error' ? (
-        <p className="text-sm text-muted">Specifikace je hotová; tabulka událostí se ukáže s výsledkem.</p>
+        <p className="text-sm text-muted">Specifikace je hotová; parametry se ukážou s výsledkem.</p>
       ) : (
-        <Waiting>Specifikace je hotová. Události se ukážou, až simulátor data vyrobí a ověří.</Waiting>
+        <Waiting>Specifikace je hotová. Parametry a události se ukážou, až simulátor data vyrobí a ověří.</Waiting>
       )}
     </Section>
   )
@@ -148,28 +154,6 @@ function SubSteps({ steps, current }: { steps: Step[]; current: number }) {
   )
 }
 
-function TableList({ id }: { id: string }) {
-  const q = useQuery(tablesOptions(id, true))
-  if (q.error) return <Alert>{q.error.message}</Alert>
-  if (!q.data) return <Waiting>Načítám tabulky…</Waiting>
-  return (
-    <ul className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
-      {q.data.tables.map((t) => (
-        <li key={t.name}>
-          <Link
-            to={`/run/${id}/data?t=${encodeURIComponent(t.name)}`}
-            className="flex items-baseline gap-2 rounded-lg border border-line bg-bg/40 px-3 py-2 hover:border-slate-500"
-          >
-            <span className="truncate font-mono text-sm">{t.name}</span>
-            <span className="text-xs text-slate-500">{t.columns.length} sl.</span>
-            <span className="ml-auto text-sm tabular-nums text-slate-300">{intCs(t.rows)}</span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 export function DataSection({ run }: { run: Run }) {
   const steps = run.job?.steps.slice(1) ?? []
   const total = run.result ? Object.values(run.result.rows).reduce((a, b) => a + b, 0) : 0
@@ -182,15 +166,9 @@ export function DataSection({ run }: { run: Run }) {
       waiting={<SubSteps steps={steps} current={run.job?.step_index ?? 0} />}
     >
       {run.id && (
-        <div className="grid gap-3">
-          <TableList id={run.id} />
-          <div className="flex flex-wrap items-center gap-2">
-            <Link to={`/run/${run.id}/data`} className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-slate-500">
-              Prohlížet data a SQL
-            </Link>
-            <DownloadButton id={run.id} />
-          </div>
-        </div>
+        <Suspense fallback={<Waiting>Načítám tabulky…</Waiting>}>
+          <DataView id={run.id} />
+        </Suspense>
       )}
     </Section>
   )
@@ -321,32 +299,28 @@ export function ScoreSection({ run }: { run: Run }) {
 
 // ---- 6. Shrnutí ------------------------------------------------------------------------
 
-export function SummarySection({ run }: { run: Run }) {
-  const r = run.result
+export function SummarySection({ run, spec }: { run: Run; spec: Spec | null }) {
   return (
     <Section run={run} id="summary" title="Shrnutí">
-      {r && (
-        <div className="grid gap-3 text-sm">
-          <p className="font-medium">
-            Příběh {r.summary.story} potvrzeno, dvojče {r.summary.twin} falešných poplachů.
-          </p>
-          {r.narrative?.text && <p className="leading-relaxed whitespace-pre-line text-slate-300">{r.narrative.text}</p>}
-          <p className="text-xs text-slate-500">Zvýrazněný prompt se šipkami ke grafům a tabulkám přibude v další verzi.</p>
-        </div>
+      {run.result && run.id && (
+        <Suspense fallback={<Waiting>Připravuji shrnutí…</Waiting>}>
+          <Summary run={run} spec={spec} />
+        </Suspense>
       )}
     </Section>
   )
 }
 
 export function Sections({ run, specName }: { run: Run; specName?: string }) {
+  const spec = useSpec(run.result?.spec_yaml)
   return (
     <>
       <PromptSection run={run} specName={specName} />
-      <SpecSection run={run} />
+      <SpecSection run={run} spec={spec} />
       <DataSection run={run} />
       <DetectSection run={run} />
       <ScoreSection run={run} />
-      <SummarySection run={run} />
+      <SummarySection run={run} spec={spec} />
     </>
   )
 }

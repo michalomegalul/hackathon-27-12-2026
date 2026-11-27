@@ -65,7 +65,7 @@ function Shell({ children }: { children: ReactNode }) {
   const inRun = pathname.startsWith('/run/')
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
+      <header data-chrome="top" className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
           <Link to="/" className="flex shrink-0 items-center gap-1.5 font-semibold tracking-tight">
             <Spiral />
