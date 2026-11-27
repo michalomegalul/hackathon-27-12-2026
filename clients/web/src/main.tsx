@@ -8,6 +8,7 @@ import { Layout, RouteError } from './pages/Layout'
 import { Home } from './pages/Home'
 import { JobPage } from './pages/JobPage'
 import { Jobs } from './pages/Jobs'
+import { retryTransient } from './api'
 
 // module level: a data router must not live in React state
 const router = createBrowserRouter([
@@ -18,10 +19,12 @@ const router = createBrowserRouter([
       { index: true, Component: Home },
       { path: 'jobs', Component: Jobs },
       { path: 'jobs/:id', Component: JobPage },
+      // lazy: TanStack Table + Virtual load only with the data page
+      { path: 'jobs/:id/data', lazy: async () => ({ Component: (await import('./pages/DataPage')).DataPage }) },
     ],
   },
 ], { basename: import.meta.env.BASE_URL.replace(/\/$/, '') }) // served at /web/
-const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } })
+const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, retry: retryTransient } } })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

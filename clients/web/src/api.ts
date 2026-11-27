@@ -1,7 +1,7 @@
 // Typed client for docs/API.md. All URLs are relative (/v1/...): the Vite dev proxy and
 // nginx in production both route them to the API.
-import { queryOptions } from '@tanstack/react-query'
-import { getToken, setToken } from './token'
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query'
+import { getToken, markTokenInvalid } from './token'
 
 // ---- shapes ----------------------------------------------------------------------------
 
@@ -118,11 +118,12 @@ export type ValidationIssue = { type: string; loc: (string | number)[]; msg: str
 export class ApiError extends Error {
   status: number
   detail: string | ValidationIssue[]
-  constructor(status: number, detail: string | ValidationIssue[]) {
+  constructor(status: number, detail: string | ValidationIssue[], message?: string) {
     super(
-      typeof detail === 'string'
-        ? detail
-        : detail.map((d) => `${d.loc.filter((l) => l !== 'body').join('.') || 'požadavek'}: ${d.msg}`).join('; '),
+      message ??
+        (typeof detail === 'string'
+          ? detail
+          : detail.map((d) => `${d.loc.filter((l) => l !== 'body').join('.') || 'požadavek'}: ${d.msg}`).join('; ')),
     )
     this.name = 'ApiError'
     this.status = status
@@ -130,22 +131,76 @@ export class ApiError extends Error {
   }
 }
 
+/** The request never got an answer from the API (offline, DNS, or nginx 502/503/504 while the API restarts). */
+export class NetworkError extends Error {
+  constructor(message = 'Server je nedostupný. Zkontrolujte připojení.') {
+    super(message)
+    this.name = 'NetworkError'
+  }
+}
+
+/** Czech text for the errors every page can meet; other details (e.g. DuckDB's 400) pass through as-is. */
+function czech(status: number, detail: string | ValidationIssue[]): string | undefined {
+  const d = typeof detail === 'string' ? detail : ''
+  if (status === 401) return 'Neplatný token.'
+  if (status === 404 && d === 'job not found') return 'Úloha nenalezena (nebo není vaše).'
+  if (status === 404 && d === 'table not found') return 'Tabulka nenalezena.'
+  if (status === 408) return 'Dotaz běžel déle než 20 s a byl přerušen. Zkuste ho zúžit (WHERE, LIMIT).'
+  if (status === 409) return 'Úloha ještě neskončila, data zatím nejsou k dispozici.'
+  return undefined
+}
+
+export const isStatus = (err: unknown, status: number) => err instanceof ApiError && err.status === status
+
+/** Don't retry answers that won't change (4xx); retry network trouble and 5xx a few times. */
+export const retryTransient = (n: number, err: Error) => !(err instanceof ApiError && err.status < 500) && n < 3
+
+// ---- network state (drives the retry banner) ------------------------------------------
+
+let netDown = false
+const netListeners = new Set<() => void>()
+function setNetDown(v: boolean) {
+  if (v === netDown) return
+  netDown = v
+  netListeners.forEach((l) => l())
+}
+export const subscribeNet = (l: () => void) => {
+  netListeners.add(l)
+  return () => {
+    netListeners.delete(l)
+  }
+}
+export const getNetDown = () => netDown
+
 // ---- transport -------------------------------------------------------------------------
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const token = getToken()
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  })
-  if (res.status === 401 && token) setToken('') // unknown token: ask for a new one
+  let res: Response
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    setNetDown(true)
+    throw new NetworkError()
+  }
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    setNetDown(true)
+    throw new NetworkError('Server je dočasně nedostupný.')
+  }
+  setNetDown(false)
+  if (res.status === 401) markTokenInvalid() // unknown token: ask for a new one, say why
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: string | ValidationIssue[] } | null
-    throw new ApiError(res.status, body?.detail ?? res.statusText ?? `HTTP ${res.status}`)
+    const detail = body?.detail ?? res.statusText ?? `HTTP ${res.status}`
+    throw new ApiError(res.status, detail, czech(res.status, detail))
   }
   return res
 }
@@ -165,9 +220,10 @@ export const listJobs = () => api<{ jobs: JobListItem[] }>('/v1/jobs')
 export const getJob = (id: string) => api<Job>(`/v1/jobs/${encodeURIComponent(id)}`)
 export const getResult = (id: string) => api<JobResult>(`/v1/jobs/${encodeURIComponent(id)}/result`)
 export const getTables = (id: string) => api<{ tables: TableInfo[] }>(`/v1/jobs/${encodeURIComponent(id)}/tables`)
-export const getTable = (id: string, name: string, limit = 100, offset = 0) =>
+export const getTable = (id: string, name: string, limit = 100, offset = 0, signal?: AbortSignal) =>
   api<TablePage>(
     `/v1/jobs/${encodeURIComponent(id)}/tables/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}`,
+    { signal },
   )
 export const runQuery = (id: string, sql: string) =>
   api<QueryResult>(`/v1/jobs/${encodeURIComponent(id)}/query`, { method: 'POST', body: JSON.stringify({ sql }) })
@@ -198,7 +254,7 @@ export const jobOptions = (id: string) =>
     queryKey: ['job', id],
     queryFn: () => getJob(id),
     refetchInterval: (query) => (finished(query.state.data?.status) ? false : 2000),
-    retry: (n, err) => !(err instanceof ApiError && err.status < 500) && n < 3,
+    retry: retryTransient,
   })
 
 /** /result is 409 until the job is done: only enable it then. */
@@ -208,13 +264,39 @@ export const resultOptions = (id: string, enabled: boolean) =>
     queryFn: () => getResult(id),
     enabled,
     staleTime: Infinity, // a finished job's result never changes
-    retry: (n, err) => !(err instanceof ApiError && err.status < 500) && n < 3,
+    retry: retryTransient,
   })
 
 export const jobsOptions = () =>
   queryOptions({
     queryKey: ['jobs'],
     queryFn: listJobs,
+    retry: retryTransient,
     // keep the list fresh while something is still queued/running
     refetchInterval: (query) => (query.state.data?.jobs.some((j) => !finished(j.status)) ? 3000 : false),
+  })
+
+/** /tables and /query answer 409 until the job is done: enable them only then. */
+export const tablesOptions = (id: string, enabled: boolean) =>
+  queryOptions({
+    queryKey: ['tables', id],
+    queryFn: () => getTables(id),
+    enabled,
+    staleTime: Infinity,
+    retry: retryTransient,
+  })
+
+/** The API caps `limit` at 1000 (more is a 422). */
+export const PAGE = 1000
+
+/** Rows of one table, a page of 1000 at a time, by offset; `total` comes from the first page. */
+export const tableRowsOptions = (id: string, name: string, enabled: boolean) =>
+  infiniteQueryOptions({
+    queryKey: ['table', id, name],
+    queryFn: ({ pageParam, signal }) => getTable(id, name, PAGE, pageParam, signal),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.offset + last.rows.length < last.total && last.rows.length > 0 ? last.offset + last.rows.length : undefined),
+    enabled,
+    staleTime: Infinity, // a finished job's data never changes
+    retry: retryTransient,
   })

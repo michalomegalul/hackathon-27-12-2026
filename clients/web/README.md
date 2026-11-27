@@ -56,7 +56,10 @@ npx oxlint
 |---|---|
 | `/web/` | Form with company, story, difficulty, customers, dirt and seed. **Načíst příklad** fills in `examples/stories/brief.yaml`. **Rychlý test (bez AI)** posts `examples/a.yaml` as `spec_yaml`. The side panel lists finished jobs to reuse. |
 | `/web/jobs/:id` | Polls every 2 s and stops on done or error. Shows the 5 steps, the running one highlighted, `zbývá ~N s`, and the queue position. When the job is done it shows the summary, the verification table (each row expands to its SQL), untested events, warnings, the narrative and the ZIP download. |
+| `/web/jobs/:id/data` | The job's tables (`GET /tables`: name, rows, columns) and a virtualized, sortable grid (TanStack Table 9 + Virtual) that loads 1000 rows at a time by offset as you scroll (`?t=<table>` picks one). Sorting covers only the loaded rows; **Seřadit celou tabulku v SQL** runs an `ORDER BY` instead. Dates are shown as dates, nulls greyed. The SQL box (`POST /query`, Ctrl+Enter) shows results in the same grid, a "truncated" notice past 1000 rows, and SQL errors (400) and timeouts (408) inline. **▶ Spustit SQL** on each verification row opens this page with that row's SQL, runs it, and marks each value ✓/≠ against `sql_result`. |
 | `/web/jobs` | My jobs (`GET /v1/jobs`) with status and summary. |
+
+Errors on every page: 401 → the token form says **Neplatný token**; 404 → **Úloha nenalezena**; network down (or nginx 502/503/504) → a banner with **Zkusit znovu** that also retries when the browser comes back online. 4xx are not retried.
 
 Use **Rychlý test** for testing.
 Real stories run on one GPU in one shared queue.

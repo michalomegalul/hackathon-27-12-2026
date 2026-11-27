@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
-import { ApiError, downloadZip, jobOptions, resultOptions, type Job, type Step } from '../api'
+import { downloadZip, jobOptions, resultOptions, type Job, type Step } from '../api'
 import { Alert, Card, JobStatusBadge, Spinner } from '../components/ui'
 import { duration } from '../format'
 import { Result } from '../components/Result'
@@ -106,10 +106,9 @@ export function JobPage() {
   const [copied, setCopied] = useState(false)
 
   if (job.error) {
-    const notFound = job.error instanceof ApiError && job.error.status === 404
     return (
       <div className="grid gap-4">
-        <Alert>{notFound ? 'Úloha nenalezena (nebo není vaše).' : job.error.message}</Alert>
+        <Alert>{job.error.message}</Alert>
         <Link to="/jobs" className="text-accent hover:underline">
           ← Moje úlohy
         </Link>
@@ -146,6 +145,14 @@ export function JobPage() {
             </button>
           </h1>
         </div>
+        {done && (
+          <Link
+            to={`/jobs/${id}/data`}
+            className="inline-flex items-center justify-center gap-2 self-start rounded-lg border border-line px-4 py-2.5 font-medium hover:border-accent/60"
+          >
+            ▦ Prohlížet data a SQL
+          </Link>
+        )}
         {done && <DownloadButton id={id} />}
       </div>
 

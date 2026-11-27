@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Outlet, isRouteErrorResponse, useRouteError } from 'react-router'
-import { getHealth } from '../api'
+import { getHealth, getNetDown, subscribeNet } from '../api'
 import { Alert, Card } from '../components/ui'
-import { setToken, useToken } from '../token'
+import { setToken, useToken, useTokenInvalid } from '../token'
 
 function QueueInfo() {
   const { data } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 10_000 })
@@ -14,6 +14,37 @@ function QueueInfo() {
       <span className={`size-2 rounded-full ${data.ok && data.llm.reachable ? 'bg-emerald-400' : 'bg-rose-400'}`} />
       {busy === 0 ? 'fronta volná' : `ve frontě ${busy}`}
     </span>
+  )
+}
+
+/** Shown while the API can't be reached; retries every active query (and by itself when the browser comes back online). */
+function NetBanner() {
+  const down = useSyncExternalStore(subscribeNet, getNetDown)
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const retry = () => void qc.refetchQueries({ type: 'active' })
+    window.addEventListener('online', retry)
+    return () => window.removeEventListener('online', retry)
+  }, [qc])
+  if (!down) return null
+  return (
+    <div
+      role="alert"
+      className="sticky top-0 z-30 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-rose-500/40 bg-rose-950/90 px-3 py-2 text-sm text-rose-100 backdrop-blur"
+    >
+      <span className="mr-auto">Server je nedostupný (výpadek sítě nebo restart API). Zkoušíme to znovu.</span>
+      <button
+        disabled={busy}
+        className="rounded-md bg-white/10 px-3 py-1 font-medium hover:bg-white/20 disabled:opacity-60"
+        onClick={() => {
+          setBusy(true)
+          void qc.refetchQueries({ type: 'active' }).finally(() => setBusy(false))
+        }}
+      >
+        {busy ? 'Zkouším…' : 'Zkusit znovu'}
+      </button>
+    </div>
   )
 }
 
@@ -39,6 +70,7 @@ function Shell({ children }: { children: ReactNode }) {
         </nav>
         <Logout />
       </header>
+      <NetBanner />
       <main className="flex-1 pb-12">{children}</main>
     </div>
   )
@@ -65,9 +97,15 @@ function Logout() {
 function TokenForm() {
   const [value, setValue] = useState('')
   const qc = useQueryClient()
+  const invalid = useTokenInvalid()
   return (
     <Card className="mx-auto mt-6 max-w-md">
       <h1 className="text-lg font-semibold">Přihlášení</h1>
+      {invalid && (
+        <div className="mt-3">
+          <Alert>Neplatný token. Zadejte platný token (nebo požádejte tým o nový).</Alert>
+        </div>
+      )}
       <p className="mt-1 text-sm text-muted">
         Zadejte přístupový token k API (dostanete ho od týmu). Uloží se jen v tomto prohlížeči.
       </p>

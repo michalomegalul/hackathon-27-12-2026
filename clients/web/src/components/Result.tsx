@@ -1,7 +1,9 @@
 import { Fragment, useState } from 'react'
+import { Link } from 'react-router'
 import type { JobResult, VerificationRow } from '../api'
 import { CONTROL_CS, KPI_CS, dateCs, intCs, num, withUnit } from '../format'
 import { Badge, Card, VerificationBadge } from './ui'
+import type { SqlCheck } from '../pages/DataPage'
 
 /** "4/4" → [4, 4] */
 const frac = (s: string) => s.split('/').map(Number) as [number, number]
@@ -106,11 +108,28 @@ function Detail({ v }: { v: VerificationRow }) {
   )
 }
 
+/** Opens /jobs/:id/data with this row's SQL pre-filled and run, and its sql_result to compare against. */
+function RunSql({ jobId, v, className = '' }: { jobId: string; v: VerificationRow; className?: string }) {
+  if (!v.sql) return null
+  const state: SqlCheck = { sql: v.sql, label: `${v.event_id} · ${KPI_CS[v.kpi] ?? v.kpi}`, expect: v.sql_result }
+  return (
+    <Link
+      to={`/jobs/${jobId}/data`}
+      state={state}
+      onClick={(e) => e.stopPropagation()}
+      title="Spustí SQL tohoto řádku nad daty úlohy a porovná výsledek"
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-accent/15 px-2 py-1 text-xs font-medium text-accent ring-1 ring-inset ring-accent/30 hover:bg-accent/25 ${className}`}
+    >
+      ▶ Spustit SQL
+    </Link>
+  )
+}
+
 const Chevron = ({ open }: { open: boolean }) => (
   <span className={`inline-block text-muted transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
 )
 
-function VerificationTable({ rows }: { rows: VerificationRow[] }) {
+function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jobId: string }) {
   // one event can give several rows (e.g. tickets and stockouts), so rows are keyed by index
   const [open, setOpen] = useState<Set<number>>(new Set())
   const toggle = (id: number) =>
@@ -158,6 +177,11 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
                 <Chevron open={open.has(i)} /> {open.has(i) ? 'skrýt SQL' : 'zobrazit SQL a detail'}
               </span>
             </button>
+            {v.sql && (
+              <div className="px-3 pb-3">
+                <RunSql jobId={jobId} v={v} />
+              </div>
+            )}
             {open.has(i) && (
               <div className="border-t border-line p-3">
                 <Detail v={v} />
@@ -181,7 +205,10 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
               <th className="py-2 pr-3 text-right font-medium">95% CI</th>
               <th className="py-2 pr-3 text-right font-medium">z</th>
               <th className="py-2 pr-3 font-medium">Stav</th>
-              <th className="py-2 font-medium">Dvojče</th>
+              <th className="py-2 pr-3 font-medium">Dvojče</th>
+              <th className="py-2 font-medium">
+                <span className="sr-only">SQL</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -213,14 +240,17 @@ function VerificationTable({ rows }: { rows: VerificationRow[] }) {
                     <td className="py-2.5 pr-3">
                       <VerificationBadge s={v.status} />
                     </td>
-                    <td className="py-2.5 text-xs">
+                    <td className="py-2.5 pr-3 text-xs">
                       <Twin v={v} />
+                    </td>
+                    <td className="py-2 text-right">
+                      <RunSql jobId={jobId} v={v} />
                     </td>
                   </tr>
                   {isOpen && (
                     <tr className="border-b border-line/60 bg-bg/40">
                       <td />
-                      <td colSpan={9} className="py-3 pr-3">
+                      <td colSpan={10} className="py-3 pr-3">
                         <Detail v={v} />
                       </td>
                     </tr>
@@ -248,7 +278,7 @@ export function Result({ r }: { r: JobResult }) {
           dá stejné číslo.
         </p>
         {r.verification.length ? (
-          <VerificationTable rows={r.verification} />
+          <VerificationTable rows={r.verification} jobId={r.job_id} />
         ) : (
           <p className="text-sm text-muted">Příběh neobsahuje žádné ověřitelné události.</p>
         )}
