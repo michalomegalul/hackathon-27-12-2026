@@ -1037,3 +1037,38 @@ the top of `s2d/detective/scan.py`.
     E3 now stated by gemma at −25 % (confirmed, z 6.3); lékárna 2/3 / 1/3 (the known twin
     false positive of decision 87). New LLM outputs, so not a like-for-like comparison with
     decision 88.
+
+## The brief and a year back (feat/brief, 2026-11-27)
+
+99. **`fit_windows` extends the data a year back for an event with no group to compare with**
+    (closes the open item of decision 93). For a hypothesis with `vary` None (an event for
+    everyone, or keys the KPI cannot split by; not the JOIN + lag test) the data must start
+    by `T − 28 − 364` (leavers: `− 90` warm-up more), the day `yoy_reason` asks for, so
+    `resolve` picks `control_mode = "yoy"`. Example: the brief's E1 (2026-04-01) in data
+    from 2025-09-01 → start 2025-03-04. If the year back would make the data longer than
+    `meta.days`' maximum (1095), it is not added: the end of the data is never cut for it,
+    the test stays plain before/after and a warning says so. The warning for an extension
+    says "for a year-over-year control". Regression: A, B, the brief spec and the four test
+    fixtures get exactly the same windows as before (none of them has such an event less
+    than a year in); fitness (E1 for everyone from 2026-01-01, data from 2025-01-01) now
+    starts 2024-12-04 and gets the YoY control instead of the plain before/after of 93.
+100. **Customers up to 200 000** (`entities.customers.n`, `schema/story.schema.json`
+    regenerated). Measured on the notebook (18 cores), the brief spec, seed 1, no LLM:
+
+    | customers | simulate | twin | calibrate | verify | story | twin |
+    |---|---|---|---|---|---|---|
+    | 80 000 | 9.3 s | 8.7 s | 34.6 s | 3.9 s | −3.49 %, z 3.98 ✅ | z 0.63 |
+    | 160 000 | **19.3 s** | 17.5 s | 67.7 s | 7.2 s | −2.93 %, z 4.57 ✅ | z 3.07, CI includes 0 ❌ |
+
+    Simulation at 160k stays under 30 s, the condition for the raise. A whole 160k job is
+    about 2 min without the AI steps (plus writing 2 M orders), so the API's own cap stays
+    100 000 (`s2d/api/pipeline.py MAX_CUSTOMERS`); raise it there only if waiting 3–4 min in
+    the demo is fine. **Consequence**: the schema is part of the LLM cache key, so every
+    spec compiled before this change misses the cache (replay too): the demo stories must be
+    compiled again after the merge (priority 3 does that anyway).
+101. **The brief as input** (`examples/stories/brief.yaml`): SportMax as in decision 92,
+    written as company + story text; it says "asi 160 000 zákazníků" so the compiler can
+    take the count from the text (decision 92: 160k confirms on every seed). **The run with
+    the real Gemma is not done**: the homelab Ollama (192.168.4.19) is not reachable from the
+    notebook on the venue Wi-Fi and there is no Claude key; run it on the server:
+    `uv run python scripts/e2e.py examples/stories/brief.yaml --n-customers 160000`.
