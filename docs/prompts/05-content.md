@@ -1,7 +1,7 @@
 # Prompts: content and the pitch (role B, Pepa)
 
 Three prompts, one Claude Code session each, in this order (each needs the previous one's stories).
-The demo has three stories: a short one (run live), a big one (a chain takes over a rival, pre-generated) and an optional random one for Q&A.
+The demo has three stories: a short one (run live), a big one (a chain takes over a rival, pre-generated) and an optional unhinged one (an adult site losing users to AI content) for Q&A.
 Each one stops and reports; Michal merges.
 They don't touch any code, so they run in parallel with the web page (`04-web.md`).
 
@@ -49,8 +49,18 @@ reliably by the verifier. Use invented company names only (no real chains or bra
    migration breaks the e-shop for two weeks (service_outage), a new courier (courier_change).
    At least one effect only shows after a JOIN (a segment or a city), and one with a lag.
    Pre-generate it before midnight; on stage we open the finished job, we don't wait for it.
-3. RANDOM (optional, only if 1 and 2 are done): a wild card in a different industry, 2–3 events,
-   for Q&A ("give us any story": it shows nothing is hand-tuned).
+3. RANDOM, the unhinged one (examples/stories/demo-random.yaml; optional, only if 1 and 2 are
+   done): an invented adult video subscription site (e.g. "Pikantní.tv", Czech + Slovak,
+   ~50k customers: free visitors, monthly and yearly premium) hit by AI-generated and animated
+   content. Events: from March 2026 a free AI generator app spreads and new sign-ups drop
+   (competitor_entry, acquisition_rate); six weeks later yearly premium subscribers cancel in a
+   wave (churn_shock); in June a panic discount of 40 % on premium (price_change); in September a
+   short viral comeback when a news story says "AI content gets banned in the EU" (viral_spike).
+   Keep everything about the BUSINESS: subscriptions, visits, payments, prices, support tickets.
+   No explicit words anywhere, not in the story, not in product names. Review and ticket texts
+   must be about streaming quality, payments, cancelling and prices only. If the AI refuses or
+   writes something explicit, run that story with texts off (try.sh does: --texts none) and
+   tell me.
 
 Process per story:
 1. Send it ONCE to the live API (POST /v1/jobs, company + story, difficulty medium), poll
@@ -75,7 +85,7 @@ docs/research/notes/hackathon_judging.md (the jury are FIS teachers: databases, 
 mining). Use the local data from scripts/try.sh in data/try/<name>/story/story.duckdb, schema main
 only (never _truth: students won't have it). Don't change code.
 
-For each demo story (short, big, and random if it exists) write docs/teaching/<name>.md in Czech:
+For each demo story (short, big, and random if it exists; for the random one only questions 1–4 and nothing explicit) write docs/teaching/<name>.md in Czech:
 - "Zadání pro studenty": the company text, the table list with one line per table, and 5 questions
   from easy to hard: 1 a plain SELECT/GROUP BY, 2 a JOIN of 2–3 tables, 3 a time series by week,
   4 a comparison segment vs the rest (before/after the event date), 5 an open question
