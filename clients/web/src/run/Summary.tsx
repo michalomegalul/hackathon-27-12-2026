@@ -1,4 +1,4 @@
-// Shrnutí, the end of the run page and the demo's money shot: the prompt as sent on top with
+// Summary, the end of the run page and the demo's money shot: the prompt as sent on top with
 // each event's phrase highlighted (dim until hovered); clicking a phrase pins that event, and
 // under the prompt come its chart (the story against the twin without it, as big as it gets)
 // and its Postgres card, the table and column it changed with the before/after numbers and the
@@ -27,11 +27,11 @@ function Verdict({ r, run, spec }: { r: JobResult; run: Run; spec: Spec | null }
   const twinHit = Number(r.summary.twin.split('/')[0])
   return (
     <p className="text-base font-medium sm:text-lg">
-      Příběh <b className="text-accent tabular-nums">{r.summary.story}</b> potvrzeno, neidentifikované události{' '}
+      Story <b className="text-accent tabular-nums">{r.summary.story}</b> confirmed, unidentified events{' '}
       <b className={`tabular-nums ${twinHit === 0 ? 'text-emerald-300' : twinHit === 1 ? 'text-amber-300' : 'text-rose-300'}`}>{twinHit}</b>
       {found !== null && (
         <>
-          , detektiv našel{' '}
+          , the detective found{' '}
           <b className="tabular-nums">
             {found}/{n}
           </b>
@@ -108,7 +108,7 @@ function HighlightedPrompt({
       {text ? (
         <p className="max-w-4xl text-base leading-8 whitespace-pre-line text-slate-500">{parts}</p>
       ) : (
-        <p className="text-sm text-muted">Běh vznikl z hotové specifikace, bez textového zadání. Události:</p>
+        <p className="text-sm text-muted">This run was made from a ready-made spec, with no prompt text. Events:</p>
       )}
       {(h.unmatched.length > 0 || !text) && (
         <ul className="flex flex-wrap gap-1.5">
@@ -128,7 +128,7 @@ function HighlightedPrompt({
         </ul>
       )}
       {text && h.unmatched.length > 0 && (
-        <p className="text-[11px] text-slate-500">Tyto události AI v textu odvodila, ale žádná věta jim přesně neodpovídá.</p>
+        <p className="text-[11px] text-slate-500">The LLM derived these events from the text, but no sentence matches them exactly.</p>
       )}
     </div>
   )
@@ -139,7 +139,7 @@ function HighlightedPrompt({
 /** "-- before 2026-03-04 .. 2026-03-31, after 2026-04-01 .. 2026-04-28" in the row's SQL. */
 function windows(sql: string | null): string | null {
   const m = /--\s*before (\S+) \.\. (\S+), after (\S+) \.\. (\S+)/.exec(sql ?? '')
-  return m ? `před ${dateCs(m[1])} – ${dateCs(m[2])}, po ${dateCs(m[3])} – ${dateCs(m[4])}` : null
+  return m ? `before ${dateCs(m[1])} – ${dateCs(m[2])}, after ${dateCs(m[3])} – ${dateCs(m[4])}` : null
 }
 
 const at = (cols: { name: string }[], row: Cell[] | undefined, k: string): number | null => {
@@ -154,9 +154,9 @@ function BeforeAfter({ jobId, v }: { jobId: string; v: VerificationRow }) {
   const n = (x: unknown) => (typeof x === 'number' ? x : null)
   const tw = twin.data
   const rows: [string, number | null, number | null, number | null, number | null][] = [
-    ['příběh', n(s.treated_before), n(s.treated_after), n(s.treated_change_pct), v.measured],
+    ['story', n(s.treated_before), n(s.treated_after), n(s.treated_change_pct), v.measured],
     [
-      'dvojče',
+      'twin',
       tw ? at(tw.columns, tw.rows[0], 'treated_before') : null,
       tw ? at(tw.columns, tw.rows[0], 'treated_after') : null,
       tw ? at(tw.columns, tw.rows[0], 'treated_change_pct') : null,
@@ -169,10 +169,10 @@ function BeforeAfter({ jobId, v }: { jobId: string; v: VerificationRow }) {
       <table className="font-mono text-[11px] leading-[18px] whitespace-nowrap">
         <thead>
           <tr className="border-b border-line text-muted">
-            <th className="px-2 text-left font-normal">svět</th>
-            <th className={`${td} font-normal`}>před</th>
+            <th className="px-2 text-left font-normal">world</th>
+            <th className={`${td} font-normal`}>before</th>
             <th className={`${td} font-normal`}>po</th>
-            <th className={`${td} font-normal`}>změna</th>
+            <th className={`${td} font-normal`}>change</th>
             <th className={`${td} font-normal`}>proti kontrole</th>
           </tr>
         </thead>
@@ -188,7 +188,7 @@ function BeforeAfter({ jobId, v }: { jobId: string; v: VerificationRow }) {
           ))}
         </tbody>
       </table>
-      {twin.isPending && <p className="px-2 text-[11px] text-muted">dvojče se počítá…</p>}
+      {twin.isPending && <p className="px-2 text-[11px] text-muted">computing the twin…</p>}
     </div>
   )
 }
@@ -221,14 +221,14 @@ function PgCard({ jobId, v, tables, lit }: { jobId: string; v: VerificationRow; 
             {col[0]}.<span className={lit ? 'text-accent' : 'text-slate-100'}>{col[1]}</span>
           </span>
         ) : (
-          <span className="text-muted">tabulka se nedá určit</span>
+          <span className="text-muted">table cannot be determined</span>
         )}
         {win && <span className="ml-auto text-[11px] text-slate-500">{win}</span>}
       </header>
       {t && col && <PsqlTable id={jobId} t={t} lit={lit ? col[1] : undefined} rows={3} only={cardColumns(t, col[1])} />}
       <div className="grid gap-1">
         <span className="text-[11px] text-muted">
-          {KPI_CS[v.kpi] ?? v.kpi} za den, průměr 4 týdnů před a po události; {v.target ? <span className="font-mono">{v.target}</span> : 'všichni'}
+          {KPI_CS[v.kpi] ?? v.kpi} per day, 4-week mean before and after the event; {v.target ? <span className="font-mono">{v.target}</span> : 'everyone'}
         </span>
         <BeforeAfter jobId={jobId} v={v} />
       </div>
@@ -236,15 +236,15 @@ function PgCard({ jobId, v, tables, lit }: { jobId: string; v: VerificationRow; 
         <div className="grid gap-1.5">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <button onClick={() => setSqlOpen((o) => !o)} aria-expanded={sqlOpen} className="text-muted hover:text-white">
-              {sqlOpen ? '▾' : '▸'} SQL, které to dokazuje
+              {sqlOpen ? '▾' : '▸'} the SQL that proves it
             </button>
-            <CopyButton text={v.sql} label="Kopírovat SQL" />
+            <CopyButton text={v.sql} label="Copy SQL" />
             <Link
               to={`/run/${jobId}/data`}
               state={{ sql: v.sql, label: `${v.event_id} · ${KPI_CS[v.kpi] ?? v.kpi}`, expect: v.sql_result }}
               className="text-accent hover:underline"
             >
-              Spustit ↗
+              Run ↗
             </Link>
           </div>
           {sqlOpen && <SqlBlock sql={v.sql} maxH="max-h-80" title={`${v.event_id}: did_pct = ${num(v.measured, 2)}`} />}
@@ -275,10 +275,10 @@ function Block({
       <figure data-target={`${rowKey(v)}:chart`} className="grid gap-1.5 py-1">
         <figcaption className="flex flex-wrap items-baseline gap-x-3 text-xs">
           <span className="font-medium text-slate-200">{KPI_CS[v.kpi] ?? v.kpi}</span>
-          <span className="font-mono text-muted">{v.target || 'všichni'}</span>
+          <span className="font-mono text-muted">{v.target || 'everyone'}</span>
           <span className="ml-auto text-muted">
-            <span className="mr-1 inline-block h-0.5 w-3 bg-[#73bf69] align-middle" /> příběh
-            <span className="mr-1 ml-3 inline-block h-0 w-3 border-t-2 border-dashed border-[#b8c0cc] align-middle" /> dvojče
+            <span className="mr-1 inline-block h-0.5 w-3 bg-[#73bf69] align-middle" /> story
+            <span className="mr-1 ml-3 inline-block h-0 w-3 border-t-2 border-dashed border-[#b8c0cc] align-middle" /> twin
             {v.control_mode !== 'none' && (
               <>
                 <span className="mr-1 ml-3 inline-block h-0.5 w-3 bg-[#8ab8ff]/60 align-middle" /> kontrola
@@ -310,25 +310,25 @@ export default function Summary({ run, spec }: { run: Run; spec: Spec | null }) 
     <div className="grid gap-5">
       <Verdict r={r} run={run} spec={spec} />
       <div className="grid gap-2">
-        <h3 className="text-xs text-muted">Zadání, jak přišlo · klikněte na zvýrazněnou část a ukážou se její grafy</h3>
+        <h3 className="text-xs text-muted">Prompt as sent · click a highlighted phrase to see its charts</h3>
         {run.input ? (
           <HighlightedPrompt input={run.input} rows={rows} hover={hover} setHover={setHover} pinned={pinned} pin={pin} />
         ) : (
-          <p className="text-sm text-muted">Načítám zadání…</p>
+          <p className="text-sm text-muted">Loading the prompt…</p>
         )}
         {r.narrative?.text && (
           <details className="mt-2 text-sm">
-            <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">Příběh, jak ho napsala data</summary>
+            <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">Story as written in the data</summary>
             <p className="mt-2 max-w-4xl leading-relaxed whitespace-pre-line text-slate-300">{r.narrative.text}</p>
           </details>
         )}
       </div>
       <div className="grid min-w-0 content-start gap-4">
-        {rows.length === 0 && <p className="text-sm text-muted">Příběh nemá žádnou ověřitelnou událost.</p>}
+        {rows.length === 0 && <p className="text-sm text-muted">The story has no verifiable event.</p>}
         {tables.data && shown.map((v) => <Block key={rowKey(v)} jobId={id} v={v} tables={tables.data.tables} />)}
         {r.untested.length > 0 && (
           <p className="text-xs text-muted">
-            Neověřeno: {r.untested.map((u) => `${u.event_id} (${u.reason})`).join('; ')}.
+            Not verified: {r.untested.map((u) => `${u.event_id} (${u.reason})`).join('; ')}.
           </p>
         )}
       </div>

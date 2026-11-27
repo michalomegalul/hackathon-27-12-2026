@@ -1,10 +1,15 @@
 // About "/about": the technical part. Every measured number names its source (DECISIONS.md or
 // docs/PLAN.md); nothing here is estimated. The live panels read GET /v1/stats every 5 s.
-import { useEffect, useRef, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { animate, createScope, onScroll } from 'animejs'
 import { statsOptions, type Stats } from '../api'
-import { dateTimeCs, duration, intCs, num } from '../format'
+import { duration } from '../format'
+
+// About is the one Czech page, so its numbers and dates are formatted for cs-CZ.
+const nfCs = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 1 })
+const intCs = (n: number) => new Intl.NumberFormat('cs-CZ').format(n)
+const num = (n: number) => nfCs.format(n)
+const dateTimeCs = (iso: string) => new Date(iso).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const REPO = 'https://github.com/michalomegalul/hackathon-27-12-2026'
 const BLOB = `${REPO}/blob/main`
@@ -34,83 +39,59 @@ type Step = { n: string; what: string; how: string; ex: ReactNode; src: [string,
 const STEPS: Step[] = [
   {
     n: 'Prompt',
-    what: 'Firma a příběh česky, jedna zpráva.',
-    how: 'Nikde v datech se pak neobjeví slovo „pokles“ – příběh je vidět jen v číslech.',
-    ex: <q className="text-slate-200">Od dubna 2026 klesly tržby o 5 %, u všech zákazníků, ve všech kanálech i městech.</q>,
+    what: 'Volný text: firma a příběh, česky, jedna zpráva.',
+    how: 'Text se do dat nikdy nekopíruje. Příběh je v nich vidět jen jako změna rozdělení.',
+    ex: <span>„Od dubna 2026 klesly tržby o 5 %, u všech zákazníků, ve všech kanálech i městech.“</span>,
     src: ['examples/stories/brief.yaml', 'brief.yaml'],
   },
   {
     n: 'Spec',
-    what: 'Gemma 4 z textu vyplní JSON schéma; Pydantic ho zkontroluje, chyby jdou zpět modelu.',
-    how: 'Číslo, které příběh řekne, je fakt: kalibrace ani obtížnost ho nemění (size_stated).',
+    what: 'Gemma 4 vyplní JSON schéma (Pydantic); validační chyby se vracejí modelu jako zpětná vazba.',
+    how: 'Velikost efektu, kterou text výslovně uvádí, je fixní (size_stated). Kalibrace se jí nedotkne.',
     ex: <code className="text-[12px] text-slate-200">purchase_rate −0,05 · size_stated: true · od 2026-04-01 · všichni</code>,
     src: ['DECISIONS.md#L999', 'DECISIONS 90, 92'],
   },
   {
     n: 'Data',
-    what: 'Numpy simulace den po dni vyrobí propojené tabulky; dvojče má stejný seed a žádný příběh.',
-    how: 'Událost násobí nákupní frekvenci nebo riziko odchodu jen u zákazníků, kterých se týká.',
+    what: 'Numpy simulace po dnech nad poli zákazníků, výstup jsou tabulky s cizími klíči. Dvojče: stejný seed, žádné události.',
+    how: 'Událost násobí intenzitu nákupů nebo hazard odchodu jen v cílovém segmentu, městě a kanálu.',
     ex: <span>80 000 zákazníků: simulace 9,3 s, dvojče 8,7 s, kalibrace 34,6 s</span>,
     src: ['DECISIONS.md#L1091', 'DECISIONS 100'],
   },
   {
     n: 'Detektiv',
-    what: 'Statistický sken (STL, PELT + Binseg, rozdíl v rozdílech) hledá změny, aniž by příběh znal.',
-    how: 'Čte jen analytické tabulky; skrytý klíč s odpověďmi je pro něj fyzicky nedostupný.',
+    what: 'Sken bez znalosti příběhu: STL dekompozice, změnové body (PELT, Binseg), difference-in-differences.',
+    how: 'Čte jen analytické tabulky. Skrytý klíč s odpověďmi je pro něj fyzicky nedostupný.',
     ex: <span>Příklad A, obtížnost easy: zdražení kávy našel v 5 z 5 seedů</span>,
     src: ['DECISIONS.md#L492', 'DECISIONS 61'],
   },
   {
     n: 'Skóre',
-    what: 'Ověřovač pro každou událost jeden test: cíl proti kontrolní skupině, 28 dní před a po, placebo z.',
-    how: 'Potvrzeno = správný směr, 95% interval bez nuly a z ≥ 3. Totéž na dvojčeti nesmí nic najít.',
+    what: 'Jeden test na událost: cílová skupina proti kontrolní, okno 28 dní před a po, placebo z.',
+    how: 'Potvrzeno = správný směr, 95% CI bez nuly, z ≥ 3. Stejný test na dvojčeti musí vyjít negativně.',
     ex: <span>seed 2: −5,00 % [−8,2; −0,4], z 3,70 ✓ · dvojče +0,08 %, z 0,04</span>,
     src: ['DECISIONS.md#L999', 'DECISIONS 92'],
   },
   {
     n: 'Shrnutí',
-    what: 'Věty z promptu napojené na graf a sloupec tabulky, kde se změnily, i se SQL, které to dokazuje.',
-    how: 'Český příběh píše AI jen z potvrzených řádků; číslo, které v tabulce není, text zamítne.',
+    what: 'Fráze z promptu mapované na KPI (graf příběh vs. dvojče) a na tabulku a sloupec, které událost změnila, plus SQL.',
+    how: 'Český text generuje LLM jen z potvrzených řádků. Číslo, které v nich není, text zamítne.',
     ex: <span>„klesly tržby o 5 %“ → objednávky za den, příběh proti dvojčeti → orders.order_date</span>,
     src: ['DECISIONS.md#L851', 'DECISIONS 81'],
   },
 ]
 
 function Pipeline() {
-  const root = useRef<HTMLOListElement>(null)
-  useEffect(() => {
-    const scope = createScope({ root, mediaQueries: { reduce: '(prefers-reduced-motion: reduce)' } }).add((self) => {
-      if (self?.matches.reduce) return
-      // the line between the steps draws with the scroll; each node lights up as the line reaches it
-      animate('.rail', {
-        scaleY: [0, 1],
-        ease: 'linear',
-        autoplay: onScroll({ target: root.current!, enter: 'bottom-=25% top', leave: 'bottom-=25% bottom', sync: true }),
-      })
-      root.current!.querySelectorAll<HTMLElement>('.node').forEach((n) =>
-        animate(n, {
-          backgroundColor: ['oklch(0.21 0.012 260)', 'oklch(0.74 0.15 160)'],
-          color: ['oklch(0.68 0.015 260)', 'oklch(0.16 0.01 260)'],
-          duration: 250,
-          autoplay: onScroll({ target: n, enter: 'bottom-=25% center', leave: 'top center', sync: 'play reverse' }),
-        }),
-      )
-    })
-    return () => scope.revert()
-  }, [])
-
   return (
-    <ol ref={root} className="relative grid gap-5">
-      <span aria-hidden className="absolute top-3 bottom-3 left-[13px] w-px bg-line" />
-      <span aria-hidden className="rail absolute top-3 bottom-3 left-[13px] w-px origin-top bg-accent" />
+    <ol className="grid gap-4">
       {STEPS.map((s, i) => (
-        <li key={s.n} className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-x-4">
-          <span className="node z-10 grid size-7 place-items-center border border-line bg-bg font-mono text-xs text-muted">{i + 1}</span>
-          <div className="grid gap-1.5">
-            <h3 className="font-medium leading-7">{s.n}</h3>
+        <li key={s.n} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3">
+          <span className="font-mono text-xs leading-6 text-slate-500">{i + 1}</span>
+          <div className="grid gap-1">
+            <h3 className="font-mono text-sm leading-6 font-medium">{s.n}</h3>
             <p className="text-sm text-slate-300">{s.what}</p>
             <p className="text-sm text-muted">{s.how}</p>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-l-2 border-line pl-3 py-1 text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-l border-line py-0.5 pl-3 font-mono text-xs text-slate-300">
               {s.ex}
               <Src file={s.src[0]} label={s.src[1]} />
             </div>
@@ -233,20 +214,20 @@ const TESTS_TOTAL = TESTS.reduce((a, [, n]) => a + n, 0)
 
 export function About() {
   return (
-    <div className="grid max-w-4xl gap-5">
+    <div className="mx-auto grid max-w-4xl gap-6">
       <div className="px-1">
-        <h1 className="text-xl font-semibold tracking-tight">Jak to funguje</h1>
+        <h1 className="text-xl font-semibold tracking-tight">O projektu</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
-          Příběh firmy jde dovnitř, ven vyjde relační databáze, ve které se ten příběh opravdu stal, a důkaz: pro každou událost test a SQL. Stejný svět bez
-          příběhu nesmí ukázat nic.
+          Story2Data převádí textový popis firmy na relační databázi (seedovaná simulace) a každou popsanou událost ověří statistickým testem. Totéž umí
+          obráceně: z dat zrekonstruuje, co se v nich stalo. LLM se používá jen na vstupu (spec) a na výstupu (český komentář), všechno mezi tím je deterministické.
         </p>
       </div>
 
-      <Panel title="Pipeline v šesti krocích">
+      <Panel title="Pipeline">
         <Pipeline />
       </Panel>
 
-      <Panel title="Živě ze serveru">
+      <Panel title="Server, živě">
         <LiveStats />
       </Panel>
 
@@ -254,7 +235,7 @@ export function About() {
         <Panel title="Stack">
           <ul className="grid gap-2 text-sm">
             <li>
-              <b>Gemma 4 26b</b> přes Ollamu na GPU v homelabu – <span className="text-muted">jen pro spec a český příběh, nic mezi tím.</span>
+              <b>Gemma 4 26b</b> přes Ollamu – <span className="text-muted">jen spec a český komentář.</span>
             </li>
             <li>
               <b>numpy</b> – <span className="text-muted">simulace den po dni nad poli zákazníků, ne objekty.</span>
@@ -269,19 +250,19 @@ export function About() {
               <b>FastAPI</b> – <span className="text-muted">úlohy ve frontě, stav s odhadem času, dotazy, ZIP.</span>
             </li>
             <li>
-              <b>React</b> – <span className="text-muted">Vite, TanStack Query, uPlot, React Flow, anime.js.</span>
+              <b>React</b> – <span className="text-muted">Vite, TanStack Query, uPlot, React Flow.</span>
             </li>
           </ul>
         </Panel>
         <Panel title="Proč je statistika deterministická">
           <div className="grid gap-2 text-sm text-slate-300">
-            <p>AI je jen na okrajích: napíše specifikaci a na konci převypráví výsledek. Všechno mezi tím jsou seedovaná čísla a pevné testy.</p>
+            <p>LLM je jen na okrajích: napíše spec a převypráví výsledek. Mezi tím jsou seedovaná čísla a pevné testy.</p>
             <p className="text-muted">
-              Stejný seed dá stejná data. Každý podsystém (nákupy, odchody, košík…) má vlastní proud náhodných čísel, takže změna jednoho neposune ostatní.
-              Prahy jsou globální, stejné pro každý příběh i pro dvojče.
+              Stejný seed dá stejná data. Každý podsystém (nákupy, odchody, košík…) má vlastní RNG proud, takže změna jednoho neposune ostatní.
+              Prahy testů jsou globální, stejné pro každý příběh i pro dvojče.
             </p>
             <p className="text-muted">
-              Model nesmí vymyslet číslo: český text se zahodí, když obsahuje hodnotu, která není v tabulce potvrzených výsledků.
+              Text se zahodí, pokud obsahuje číslo, které není v tabulce potvrzených výsledků.
             </p>
           </div>
         </Panel>
@@ -292,7 +273,7 @@ export function About() {
           </p>
         </Panel>
         <Panel title="Kalibrace">
-          <p className="text-sm text-slate-300">Událost musí být v datech dohledatelná, jinak příběh nemá smysl.</p>
+          <p className="text-sm text-slate-300">Efekt musí být nad šumem, jinak ho nejde ověřit.</p>
           <p className="mt-2 text-sm text-muted">
             Před simulací se každý efekt změří v jednotkách šumu ověřovacího testu na dvojčeti (jiný seed) a zvětší se, dokud nedosáhne cíle obtížnosti: z 5 /
             3,5 / 2,5. Pokles má realistický strop (−30 %). Velikost, kterou příběh výslovně řekne, se nemění.

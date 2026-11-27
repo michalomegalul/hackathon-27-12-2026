@@ -1,5 +1,5 @@
 // /run/:id/data: browse the analyst tables (GET /tables, /tables/{name}) and run SQL (POST /query).
-// A verification row's "Spustit SQL" lands here with its SQL and expected result in the router state.
+// A verification row's "Run SQL" lands here with its SQL and expected result in the router state.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router'
@@ -41,7 +41,7 @@ function TableList({ tables, active, onPick }: { tables: TableInfo[]; active?: s
             <span className="truncate font-mono text-sm">{t.name}</span>
             <span className="text-xs tabular-nums text-muted">{intCs(t.rows)}</span>
             <span className="col-span-2 text-[11px] text-muted">
-              {t.columns.length} {t.columns.length < 5 ? 'sloupce' : 'sloupců'}
+              {t.columns.length} {t.columns.length === 1 ? 'column' : 'columns'}
             </span>
           </button>
         </li>
@@ -87,7 +87,7 @@ function TableView({
   if (q.isPending)
     return (
       <p className="py-10 text-center text-sm text-muted">
-        <Spinner /> Načítám {name}…
+        <Spinner /> Loading {name}…
       </p>
     )
   if (q.isError && !pages) return <Alert>{q.error.message}</Alert>
@@ -100,17 +100,17 @@ function TableView({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={`Hledat v ${name}…`}
+          placeholder={`Search in ${name}…`}
           className="w-full max-w-xs border border-line bg-bg px-3 py-1.5 text-[16px] focus:border-accent focus:outline-none sm:text-sm"
         />
         {needle && (
           <>
             <span className="text-xs tabular-nums text-muted">
-              {rowsCs(rows.length)} z {intCs(loaded.length)} načtených
+              {rowsCs(rows.length)} of {intCs(loaded.length)} loaded
             </span>
             {loaded.length < total && (
               <button onClick={() => onSql(searchSql(name, columns, search.trim()))} className="text-xs text-accent hover:underline">
-                Hledat v celé tabulce ({intCs(total)}) přes SQL
+                Search the whole table ({intCs(total)}) with SQL
               </button>
             )}
           </>
@@ -128,9 +128,9 @@ function TableView({
       footer={
         isFetchNextPageError && (
           <span className="text-rose-300">
-            Další řádky se nenačetly ({q.error?.message}).{' '}
+            More rows did not load ({q.error?.message}).{' '}
             <button className="underline" onClick={() => void fetchNextPage()}>
-              Zkusit znovu
+              Retry
             </button>
           </span>
         )
@@ -160,7 +160,7 @@ function CheckResult({ expect, res }: { expect: Record<string, unknown>; res: Qu
         return (
           <li
             key={k}
-            title={`ověření: ${show(want)} · dotaz: ${show(got)}`}
+            title={`verification: ${show(want)} · query: ${show(got)}`}
             className={`px-2 py-0.5 font-mono ring-1 ring-inset ${
               ok ? 'bg-emerald-500/10 text-emerald-200 ring-emerald-500/30' : 'bg-rose-500/10 text-rose-200 ring-rose-500/30'
             } ${k === 'did_pct' ? 'font-semibold' : ''}`}
@@ -211,7 +211,7 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
     [mutate],
   )
 
-  // "Spustit SQL" from a verification row: pre-fill and run once per navigation (StrictMode runs effects twice)
+  // "Run SQL" from a verification row: pre-fill and run once per navigation (StrictMode runs effects twice)
   const handled = useRef<string | null>(null)
   const incoming = (location.state as SqlCheck | null) ?? null
   useEffect(() => {
@@ -247,7 +247,7 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
           </div>
         ) : (
           <p className="px-3 py-2 text-sm text-muted">
-            <Spinner /> Načítám…
+            <Spinner /> Loading…
           </p>
         )}
       </Card>
@@ -264,11 +264,11 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
           >
             <label htmlFor="sql" className="flex items-baseline justify-between gap-2">
               <span className="font-semibold">SQL</span>
-              <span className="text-xs text-muted">DuckDB · nejvýš 1000 řádků · limit 20 s · Ctrl+Enter spustí</span>
+              <span className="text-xs text-muted">DuckDB · at most 1000 rows · 20 s limit · Ctrl+Enter runs</span>
             </label>
             {check?.label && (
               <p className="text-xs text-muted">
-                Ověřujete <b className="text-slate-200">{check.label}</b>: dotaz má dát stejná čísla, jaká naměřilo ověření.
+                Checking <b className="text-slate-200">{check.label}</b>: the query should give the same numbers the verification measured.
               </p>
             )}
             <textarea
@@ -294,11 +294,11 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
                 disabled={query.isPending || !sql.trim()}
                 className="inline-flex items-center gap-2 bg-accent px-4 py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-60"
               >
-                {query.isPending ? <Spinner /> : '▶'} Spustit
+                {query.isPending ? <Spinner /> : '▶'} Run
               </button>
               {query.data && !query.isPending && (
                 <span className="text-xs tabular-nums text-muted">
-                  {rowsCs(query.data.rows.length)} za {num(query.data.seconds, 2)} s
+                  {rowsCs(query.data.rows.length)} in {num(query.data.seconds, 2)} s
                 </span>
               )}
               {check?.expect && query.data && !query.isPending && <CheckResult expect={check.expect} res={query.data} />}
@@ -326,7 +326,7 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
                 onClick={() => setView('query')}
                 className={`px-2.5 py-1 ${view === 'query' ? 'bg-white/10 text-white' : 'text-muted hover:text-white'}`}
               >
-                Výsledek dotazu
+                Query result
               </button>
             )}
           </div>
@@ -346,20 +346,20 @@ export function DataBrowser({ id, done = true }: { id: string; done?: boolean })
           {view === 'query' &&
             (query.isPending ? (
               <p className="py-10 text-center text-sm text-muted">
-                <Spinner /> Dotaz běží…
+                <Spinner /> Query running…
               </p>
             ) : query.data ? (
               <div className="grid gap-2">
                 {query.data.truncated && (
                   <Alert t="amber">
-                    Výsledek je zkrácený na prvních {intCs(query.data.rows.length)} řádků. Pro celý výsledek přidejte agregaci, WHERE
-                    nebo si stáhněte ZIP s analyst.duckdb.
+                    The result is cut to the first {intCs(query.data.rows.length)} rows. For the whole result add an aggregate, a WHERE
+                    or download the ZIP with analyst.duckdb.
                   </Alert>
                 )}
                 <DataGrid key={query.submittedAt} columns={query.data.columns} rows={query.data.rows} fit />
               </div>
             ) : query.error ? (
-              <p className="py-6 text-center text-sm text-muted">Dotaz skončil chybou, viz výše.</p>
+              <p className="py-6 text-center text-sm text-muted">The query failed, see above.</p>
             ) : null)}
         </Card>
       </div>
@@ -373,7 +373,7 @@ export function DataPage() {
   const done = job.data?.status === 'done'
   const back = (
     <Link to={`/run/${id}#s-data`} className="text-sm text-muted hover:text-white">
-      ← Zpět na běh {id}
+      ← Back to run {id}
     </Link>
   )
 
@@ -389,7 +389,7 @@ export function DataPage() {
   if (!job.data)
     return (
       <p className="text-muted">
-        <Spinner /> Načítám…
+        <Spinner /> Loading…
       </p>
     )
   if (!done)
@@ -400,7 +400,7 @@ export function DataPage() {
           <div className="flex items-center gap-3">
             <JobStatusBadge s={job.data.status} />
             <span className="text-sm">
-              {job.data.status === 'error' ? 'Úloha skončila chybou, data nejsou k dispozici.' : 'Data budou k dispozici, až úloha doběhne.'}
+              {job.data.status === 'error' ? 'The job failed, so there is no data.' : 'The data will be available when the job finishes.'}
             </span>
           </div>
         </Card>

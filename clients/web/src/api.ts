@@ -208,7 +208,7 @@ export class ApiError extends Error {
       message ??
         (typeof detail === 'string'
           ? detail
-          : detail.map((d) => `${d.loc.filter((l) => l !== 'body').join('.') || 'požadavek'}: ${d.msg}`).join('; ')),
+          : detail.map((d) => `${d.loc.filter((l) => l !== 'body').join('.') || 'request'}: ${d.msg}`).join('; ')),
     )
     this.name = 'ApiError'
     this.status = status
@@ -218,7 +218,7 @@ export class ApiError extends Error {
 
 /** The request never got an answer from the API (offline, DNS, or nginx 502/503/504 while the API restarts). */
 export class NetworkError extends Error {
-  constructor(message = 'Server je nedostupný. Zkontrolujte připojení.') {
+  constructor(message = 'The server is unreachable. Check your connection.') {
     super(message)
     this.name = 'NetworkError'
   }
@@ -227,11 +227,11 @@ export class NetworkError extends Error {
 /** Czech text for the errors every page can meet; other details (e.g. DuckDB's 400) pass through as-is. */
 function czech(status: number, detail: string | ValidationIssue[]): string | undefined {
   const d = typeof detail === 'string' ? detail : ''
-  if (status === 401) return 'Neplatný token.'
-  if (status === 404 && d === 'job not found') return 'Úloha nenalezena (nebo není vaše).'
+  if (status === 401) return 'Invalid token.'
+  if (status === 404 && d === 'job not found') return 'Job not found (or not yours).'
   if (status === 404 && d === 'table not found') return 'Tabulka nenalezena.'
-  if (status === 408) return 'Dotaz běžel déle než 20 s a byl přerušen. Zkuste ho zúžit (WHERE, LIMIT).'
-  if (status === 409) return 'Úloha ještě neskončila, data zatím nejsou k dispozici.'
+  if (status === 408) return 'The query ran longer than 20 s and was cancelled. Narrow it down (WHERE, LIMIT).'
+  if (status === 409) return 'The job has not finished yet, so the data is not available.'
   return undefined
 }
 
@@ -278,7 +278,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   }
   if (res.status === 502 || res.status === 503 || res.status === 504) {
     setNetDown(true)
-    throw new NetworkError('Server je dočasně nedostupný.')
+    throw new NetworkError('The server is temporarily unreachable.')
   }
   setNetDown(false)
   if (res.status === 401) {

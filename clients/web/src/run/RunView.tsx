@@ -27,13 +27,13 @@ function StatusBlock({ s, compact = false }: { s: Status; compact?: boolean }) {
       <div className="flex items-baseline gap-2">
         <span className={`size-2 shrink-0 translate-y-[-1px] rounded-full ${dot}`} />
         <span className={`min-w-0 font-medium ${compact ? 'truncate text-sm' : 'text-sm leading-snug'}`}>{s.title}</span>
-        {compact && s.etaS !== null && <span className="ml-auto shrink-0 text-xs tabular-nums text-muted">zbývá ~{duration(s.etaS)}</span>}
+        {compact && s.etaS !== null && <span className="ml-auto shrink-0 text-xs tabular-nums text-muted">~{duration(s.etaS)} left</span>}
       </div>
       {s.progress !== null && <Bar value={s.progress} tone={s.tone} />}
       {!compact && (
         <div className="grid gap-0.5 text-xs text-muted">
-          {s.etaS !== null && <span className="tabular-nums">zbývá ~{duration(s.etaS)}</span>}
-          {s.position !== null && s.position > 0 && <span className="tabular-nums">pořadí ve frontě: {s.position + 1}.</span>}
+          {s.etaS !== null && <span className="tabular-nums">~{duration(s.etaS)} left</span>}
+          {s.position !== null && s.position > 0 && <span className="tabular-nums">queue position: {s.position + 1}</span>}
           {s.detail && <span className={s.tone === 'error' ? 'text-rose-300' : ''}>{s.detail}</span>}
         </div>
       )}
@@ -115,7 +115,7 @@ function MobileBar({ run }: { run: Run }) {
           aria-expanded={open}
           className="shrink-0 border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500"
         >
-          Průběh <span className={`inline-block transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+          Progress <span className={`inline-block transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
         </button>
       </div>
       {open && (
@@ -170,7 +170,7 @@ export function Section({
       <header className="mb-3 flex items-baseline gap-2">
         <span className="font-mono text-xs text-slate-500">{n}</span>
         <h2 className={`font-semibold ${s.state === 'pending' ? 'text-slate-500' : ''}`}>{title}</h2>
-        {s.state === 'running' && <span className="text-xs text-accent">{s.sub ?? 'běží'}…</span>}
+        {s.state === 'running' && <span className="text-xs text-accent">{s.sub ?? 'running'}…</span>}
         {hint && s.state === 'done' && <span className="ml-auto text-xs text-muted">{hint}</span>}
       </header>
       {s.state === 'done' ? (
@@ -180,7 +180,7 @@ export function Section({
           <p className="text-sm text-rose-200">{s.error}</p>
           {s.retry && (
             <button onClick={s.retry} className="border border-rose-400/40 px-3 py-1.5 text-sm text-rose-100 hover:bg-rose-500/10">
-              Zkusit znovu
+              Retry
             </button>
           )}
         </div>
@@ -213,7 +213,7 @@ export function RunView({ run, children, bottom, top }: { run: Run; children: Re
           <div className="border-b border-line pb-4">
             <StatusBlock s={run.status} />
           </div>
-          <nav aria-label="Průběh" className="">
+          <nav aria-label="Progress" className="">
             <ProcessList run={run} />
           </nav>
         </div>

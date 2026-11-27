@@ -39,7 +39,7 @@ function kindOf(type: string): Kind {
 const WIDTH: Record<Kind, number> = { int: 7, float: 8, date: 7, ts: 10.5, bool: 5, text: 11 }
 const NUM_W = 4.5 // the row-number column
 
-const flt = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 4, useGrouping: false })
+const flt = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 4, useGrouping: false })
 
 /** "2025-01-01" → 1. 1. 2025; "2025-01-01T19:05:13" → 1. 1. 2025 19:05:13. Parsed by hand: no time-zone shift. */
 const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2})?))?/
@@ -155,17 +155,17 @@ export function DataGrid({ columns, rows, total, hasMore = false, loadingMore = 
     <div className="grid gap-2">
       {sorted && partial && (
         <div className="flex flex-wrap items-center gap-2 border-l-2 border-amber-500/70 py-1 pl-3 text-xs text-amber-100">
-          Řazeno jen {intCs(rows.length)} načtených řádků z {intCs(total)}; další se během řazení nenačítají.
+          Sorted only the {intCs(rows.length)} loaded rows of {intCs(total)}; no more rows load while sorting.
           {onSortAll && sortName && (
             <button
               className="bg-white/10 px-2 py-0.5 font-medium hover:bg-white/20"
               onClick={() => onSortAll(sortName, sortCol.desc)}
             >
-              Seřadit celou tabulku v SQL
+              Sort the whole table in SQL
             </button>
           )}
           <button className="px-2 py-0.5 hover:bg-white/10" onClick={() => setSorting([])}>
-            Zrušit řazení
+            Clear sort
           </button>
         </div>
       )}
@@ -214,7 +214,7 @@ export function DataGrid({ columns, rows, total, hasMore = false, loadingMore = 
                   >
                     {vi.index === tableRows.length ? (
                       <>
-                        <Spinner /> <span className="ml-2">načítám další řádky…</span>
+                        <Spinner /> <span className="ml-2">loading more rows…</span>
                       </>
                     ) : (
                       <span className="h-2 w-1/3 bg-white/5" />
@@ -242,18 +242,18 @@ export function DataGrid({ columns, rows, total, hasMore = false, loadingMore = 
               )
             })}
           </div>
-          {rows.length === 0 && <div className="px-3 py-6 text-center font-sans text-sm text-muted">Žádné řádky.</div>}
+          {rows.length === 0 && <div className="px-3 py-6 text-center font-sans text-sm text-muted">No rows.</div>}
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted">
         <span className="tabular-nums">
           {total !== undefined && total !== rows.length
-            ? `načteno ${intCs(rows.length)} z ${intCs(total)} řádků`
+            ? `loaded ${intCs(rows.length)} of ${intCs(total)} rows`
             : rowsCs(rows.length)}
         </span>
         {loadingMore && <Spinner />}
-        <span className="hidden sm:inline">· klepnutím na záhlaví seřadíte</span>
+        <span className="hidden sm:inline">· click a header to sort</span>
         {footer}
       </div>
     </div>

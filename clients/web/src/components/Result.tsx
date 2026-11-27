@@ -15,14 +15,14 @@ export function SummaryTiles({ r }: { r: JobResult }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className={`border-l-2 py-1 pl-4 ${storyGood ? 'border-emerald-500/70' : 'border-amber-500/70'}`}>
-        <div className="text-xs uppercase tracking-wide text-muted">příběh</div>
+        <div className="text-xs uppercase tracking-wide text-muted">story</div>
         <div className="text-3xl font-semibold tabular-nums">{r.summary.story}</div>
-        <div className="text-xs text-muted">událostí potvrzeno v datech</div>
+        <div className="text-xs text-muted">events confirmed in the data</div>
       </div>
       <div className={`border-l-2 py-1 pl-4 ${tHit === 0 ? 'border-emerald-500/70' : 'border-rose-500/70'}`}>
-        <div className="text-xs uppercase tracking-wide text-muted">dvojče</div>
+        <div className="text-xs uppercase tracking-wide text-muted">twin</div>
         <div className="text-3xl font-semibold tabular-nums">{r.summary.twin}</div>
-        <div className="text-xs text-muted">„nálezů“ v datech bez příběhu (má být 0)</div>
+        <div className="text-xs text-muted">“findings” in the data without the story (should be 0)</div>
       </div>
     </div>
   )
@@ -36,7 +36,7 @@ function Twin({ v }: { v: VerificationRow }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <span className="tabular-nums">{withUnit(v.twin_measured, v.measured_unit)}</span>
-      {v.twin_confirmed ? <Badge t="red">falešný nález</Badge> : <Badge t="green">nic</Badge>}
+      {v.twin_confirmed ? <Badge t="red">false positive</Badge> : <Badge t="green">none</Badge>}
     </span>
   )
 }
@@ -46,16 +46,16 @@ function Detail({ v }: { v: VerificationRow }) {
   return (
     <div className="grid grid-cols-1 gap-3 text-sm">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-        <dt className="text-muted">Kontrola</dt>
+        <dt className="text-muted">Control</dt>
         <dd>
           {CONTROL_CS[v.control_mode] ?? v.control_mode}
           {v.control && <span className="ml-1 break-all font-mono text-xs text-muted">({v.control})</span>}
         </dd>
-        <dt className="text-muted">Metrika</dt>
+        <dt className="text-muted">Metric</dt>
         <dd className="break-all font-mono text-xs leading-5">{v.metric}</dd>
         {v.expected_size !== null && (
           <>
-            <dt className="text-muted">Očekáváno</dt>
+            <dt className="text-muted">Expected</dt>
             <dd className="tabular-nums">{withUnit(v.expected_size, v.measured_unit)}</dd>
           </>
         )}
@@ -67,20 +67,20 @@ function Detail({ v }: { v: VerificationRow }) {
         )}
         {v.twin_z !== null && (
           <>
-            <dt className="text-muted">z dvojčete</dt>
+            <dt className="text-muted">twin z</dt>
             <dd className="tabular-nums">{num(v.twin_z)}</dd>
           </>
         )}
         {v.reason && (
           <>
-            <dt className="text-muted">Proč</dt>
+            <dt className="text-muted">Reason</dt>
             <dd>{v.reason}</dd>
           </>
         )}
         {v.sql_matches !== null && (
           <>
             <dt className="text-muted">SQL</dt>
-            <dd>{v.sql_matches ? 'dává stejné číslo jako ověření' : <span className="text-amber-300">nedává stejné číslo</span>}</dd>
+            <dd>{v.sql_matches ? 'gives the same number as the verification' : <span className="text-amber-300">does not give the same number</span>}</dd>
           </>
         )}
       </dl>
@@ -95,14 +95,14 @@ function Detail({ v }: { v: VerificationRow }) {
               })
             }}
           >
-            {copied ? 'zkopírováno' : 'kopírovat'}
+            {copied ? 'copied' : 'copy'}
           </button>
           <pre className="max-h-96 overflow-auto bg-bg p-3 pr-20 font-mono text-xs leading-relaxed text-slate-300">
             {v.sql}
           </pre>
         </div>
       ) : (
-        <p className="text-muted">Bez SQL: událost nešla ověřit.</p>
+        <p className="text-muted">No SQL: the event could not be verified.</p>
       )}
     </div>
   )
@@ -117,10 +117,10 @@ function RunSql({ jobId, v, className = '' }: { jobId: string; v: VerificationRo
       to={`/run/${jobId}/data`}
       state={state}
       onClick={(e) => e.stopPropagation()}
-      title="Spustí SQL tohoto řádku nad daty úlohy a porovná výsledek"
+      title="Runs this row's SQL on the job's data and compares the result"
       className={`inline-flex items-center gap-1 whitespace-nowrap bg-accent/15 px-2 py-1 text-xs font-medium text-accent ring-1 ring-inset ring-accent/30 hover:bg-accent/25 ${className}`}
     >
-      ▶ Spustit SQL
+      ▶ Run SQL
     </Link>
   )
 }
@@ -155,11 +155,11 @@ export function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jo
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                 <dt className="text-muted">KPI</dt>
                 <dd>{KPI_CS[v.kpi] ?? v.kpi}</dd>
-                <dt className="text-muted">Cíl · od</dt>
+                <dt className="text-muted">Target · from</dt>
                 <dd>
-                  <span className="break-all font-mono">{v.target || 'všichni'}</span> · {dateCs(v.start)}
+                  <span className="break-all font-mono">{v.target || 'everyone'}</span> · {dateCs(v.start)}
                 </dd>
-                <dt className="text-muted">Příběh → naměřeno</dt>
+                <dt className="text-muted">Story → measured</dt>
                 <dd className="tabular-nums">
                   {withUnit(v.story_size, v.story_unit)} → <b>{withUnit(v.measured, v.measured_unit)}</b>
                 </dd>
@@ -167,14 +167,14 @@ export function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jo
                 <dd className="tabular-nums">
                   {ci(v)} · {num(v.z)}
                 </dd>
-                <dt className="text-muted">Dvojče</dt>
+                <dt className="text-muted">Twin</dt>
                 <dd>
                   <Twin v={v} />
                 </dd>
               </dl>
               {v.status === 'not_testable' && v.reason && <p className="text-xs text-muted">{v.reason}</p>}
               <span className="text-xs text-accent">
-                <Chevron open={open.has(i)} /> {open.has(i) ? 'skrýt SQL' : 'zobrazit SQL a detail'}
+                <Chevron open={open.has(i)} /> {open.has(i) ? 'hide SQL' : 'show SQL and detail'}
               </span>
             </button>
             {v.sql && (
@@ -197,15 +197,15 @@ export function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jo
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="w-6 py-2" />
-              <th className="py-2 pr-3 font-medium">Událost</th>
+              <th className="py-2 pr-3 font-medium">Event</th>
               <th className="py-2 pr-3 font-medium">KPI</th>
-              <th className="py-2 pr-3 font-medium">Cíl</th>
-              <th className="py-2 pr-3 text-right font-medium">Příběh</th>
-              <th className="py-2 pr-3 text-right font-medium">Naměřeno</th>
+              <th className="py-2 pr-3 font-medium">Target</th>
+              <th className="py-2 pr-3 text-right font-medium">Story</th>
+              <th className="py-2 pr-3 text-right font-medium">Measured</th>
               <th className="py-2 pr-3 text-right font-medium">95% CI</th>
               <th className="py-2 pr-3 text-right font-medium">z</th>
               <th className="py-2 pr-3 font-medium">Stav</th>
-              <th className="py-2 pr-3 font-medium">Dvojče</th>
+              <th className="py-2 pr-3 font-medium">Twin</th>
               <th className="py-2 font-medium">
                 <span className="sr-only">SQL</span>
               </th>
@@ -232,7 +232,7 @@ export function VerificationTable({ rows, jobId }: { rows: VerificationRow[]; jo
                       {v.status === 'not_testable' && v.reason && <div className="mt-0.5 text-xs text-muted">{v.reason}</div>}
                     </td>
                     <td className="py-2.5 pr-3">{KPI_CS[v.kpi] ?? v.kpi}</td>
-                    <td className="py-2.5 pr-3 font-mono text-xs leading-5">{v.target || 'všichni'}</td>
+                    <td className="py-2.5 pr-3 font-mono text-xs leading-5">{v.target || 'everyone'}</td>
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-muted">{withUnit(v.story_size, v.story_unit)}</td>
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right font-medium tabular-nums">{withUnit(v.measured, v.measured_unit)}</td>
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right text-xs tabular-nums text-muted">{ci(v)}</td>
@@ -272,7 +272,7 @@ export function Notes({ r }: { r: JobResult }) {
     <div className="grid gap-3">
       {r.untested.length > 0 && (
         <div>
-          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Neověřitelné události</h3>
+          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Events that could not be verified</h3>
           <ul className="grid gap-1.5 text-sm">
             {r.untested.map((u, i) => (
               <li key={i} className="border-l-2 border-line pl-3 py-1">
@@ -286,7 +286,7 @@ export function Notes({ r }: { r: JobResult }) {
       )}
       {r.warnings.length > 0 && (
         <div>
-          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Upozornění</h3>
+          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Warnings</h3>
           <ul className="grid gap-1 text-sm text-amber-100/90">
             {r.warnings.map((w, i) => (
               <li key={i}>⚠ {w}</li>

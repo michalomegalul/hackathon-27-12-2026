@@ -1,6 +1,6 @@
 // Story "/" and "/run/:id". On "/" the prompt is typed into the Prompt section itself; sending
 // runs everything automatically (useRun) and the URL becomes /run/:id, so a reload or a shared
-// link reopens the run. "+ Nový příběh" starts a new one;
+// link reopens the run. "+ New story" starts a new one;
 // the "Story" tab leads back to the last run (run/lastRun.ts).
 import { Link, useLocation, useParams } from 'react-router'
 import { Composer } from '../run/Composer'
@@ -14,7 +14,7 @@ export function Story() {
   const { id } = useParams()
   const send = useSend()
   const run = useRun(id, useResend(id, send))
-  // History "Upravit" navigates here with the prompt (or spec) as a draft
+  // History "Edit" navigates here with the prompt (or spec) as a draft
   const location = useLocation()
   const draft = (location.state as { draft?: Draft } | null)?.draft
   useRememberLast('story', id)
@@ -26,15 +26,15 @@ export function Story() {
         id ? (
           <div className="flex px-1">
             <Link to="/" onClick={() => forgetLast('story')} className="text-sm text-muted hover:text-white">
-              + Nový příběh
+              + New story
             </Link>
           </div>
         ) : (
           <div className="px-1 pb-1">
-            <h1 className="text-xl font-semibold tracking-tight">Z příběhu data</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Story to data</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted">
-              Napište, co je to za firmu a co se jí stalo. AI z toho udělá specifikaci, simulátor vyrobí data i dvojče bez příběhu,
-              statistika ověří každou událost a detektiv ji zkusí najít naslepo. Všechno proběhne samo.
+              Describe the company and what happened to it. An LLM turns the text into a spec, the simulator generates the database and a twin without the
+              story, a statistical test verifies every event, and a blind detective tries to find it again. The whole pipeline runs by itself.
             </p>
           </div>
         )

@@ -12,14 +12,14 @@ import { dateTimeCs, duration } from '../format'
 
 type Filter = 'all' | 'mine' | 'demo'
 const FILTERS: [Filter, string][] = [
-  ['mine', 'moje'],
-  ['all', 'všechny'],
-  ['demo', 'ukázky'],
+  ['mine', 'mine'],
+  ['all', 'all'],
+  ['demo', 'demos'],
 ]
 
 const btn = 'border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
 
-/** "Znovu" (same prompt, new seed: a new run in Story) and "Upravit" (the prompt into the Story input). */
+/** "Run again" (same prompt, new seed: a new run in Story) and "Edit" (the prompt into the Story input). */
 function Actions({ j }: { j: JobListItem }) {
   const send = useSend()
   const navigate = useNavigate()
@@ -31,11 +31,11 @@ function Actions({ j }: { j: JobListItem }) {
   const err = again.error ?? edit.error
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <button className={btn} disabled={again.isPending} onClick={() => again.mutate()} title="Stejné zadání, nový seed: nová data">
-        {again.isPending ? <Spinner /> : 'Znovu'}
+      <button className={btn} disabled={again.isPending} onClick={() => again.mutate()} title="Same prompt, new seed: new data">
+        {again.isPending ? <Spinner /> : 'Run again'}
       </button>
-      <button className={btn} disabled={edit.isPending} onClick={() => edit.mutate()} title="Vloží zadání do pole ve Story">
-        {edit.isPending ? <Spinner /> : 'Upravit'}
+      <button className={btn} disabled={edit.isPending} onClick={() => edit.mutate()} title="Puts the prompt into the Story box">
+        {edit.isPending ? <Spinner /> : 'Edit'}
       </button>
       {err && <span className="text-xs text-rose-300">{err.message}</span>}
     </div>
@@ -47,10 +47,10 @@ function Row({ j }: { j: JobListItem }) {
     <li className="grid gap-x-4 gap-y-2 border-b border-line py-3 hover:bg-white/[0.02] sm:grid-cols-[minmax(0,1fr)_auto]">
       <Link to={`/history/${j.job_id}`} className="grid min-w-0 gap-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate font-medium">{j.title || 'Bez názvu'}</span>
-          {isDemo(j) && <Badge t="blue">ukázka</Badge>}
+          <span className="truncate font-medium">{j.title || 'Untitled'}</span>
+          {isDemo(j) && <Badge t="blue">demo</Badge>}
         </div>
-        <div className="truncate text-sm text-slate-400">{j.story_preview ?? <span className="italic text-slate-500">hotová specifikace, bez textu</span>}</div>
+        <div className="truncate text-sm text-slate-400">{j.story_preview ?? <span className="italic text-slate-500">ready-made spec, no text</span>}</div>
         <div className="truncate font-mono text-xs text-muted">
           {j.job_id} · {dateTimeCs(j.created)}
           {j.status === 'done' && ` · ${duration(j.elapsed_s)}`}
@@ -59,7 +59,7 @@ function Row({ j }: { j: JobListItem }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:justify-end">
         {j.summary && (
           <span className="text-sm text-muted">
-            příběh <b className="text-slate-100 tabular-nums">{j.summary.story}</b>, dvojče <b className="text-slate-100 tabular-nums">{j.summary.twin}</b>
+            story <b className="text-slate-100 tabular-nums">{j.summary.story}</b>, twin <b className="text-slate-100 tabular-nums">{j.summary.twin}</b>
           </span>
         )}
         <JobStatusBadge s={j.status} />
@@ -86,7 +86,7 @@ export function History() {
       <div className="flex items-baseline justify-between">
         <h1 className="text-xl font-semibold tracking-tight">History</h1>
         <Link to="/" className="text-sm text-muted hover:text-white">
-          Nový příběh →
+          New story →
         </Link>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -94,8 +94,8 @@ export function History() {
           type="search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Hledat firmu nebo příběh…"
-          aria-label="Hledat"
+          placeholder="Search company or story…"
+          aria-label="Search"
           className="min-w-0 flex-1 basis-full border border-line bg-panel px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:max-w-sm sm:basis-auto sm:text-sm"
         />
         <div role="radiogroup" aria-label="Filtr" className="flex border border-line bg-panel p-0.5">
@@ -116,17 +116,17 @@ export function History() {
       {error && <Alert>{error.message}</Alert>}
       {isPending && (
         <p className="text-muted">
-          <Spinner /> Načítám…
+          <Spinner /> Loading…
         </p>
       )}
       {data && jobs.length === 0 && (
         <Card>
           <p className="text-muted">
             {data.jobs.length === 0
-              ? 'Zatím žádné běhy.'
+              ? 'No runs yet.'
               : filter === 'mine' && !q
-                ? 'Z tohoto prohlížeče jste zatím nic nespustili.'
-                : 'Nic neodpovídá hledání.'}
+                ? 'Nothing has been run from this browser yet.'
+                : 'Nothing matches the search.'}
           </p>
         </Card>
       )}
@@ -159,11 +159,11 @@ export function HistoryRun() {
             ← History
           </Link>
           {err && <span className="text-xs text-rose-300">{err.message}</span>}
-          <button className={btn} disabled={!run.input || again.isPending} onClick={() => again.mutate()} title="Stejné zadání, nový seed">
-            {again.isPending ? <Spinner /> : 'Znovu'}
+          <button className={btn} disabled={!run.input || again.isPending} onClick={() => again.mutate()} title="Same prompt, new seed">
+            {again.isPending ? <Spinner /> : 'Run again'}
           </button>
-          <button className={btn} disabled={!run.input || edit.isPending} onClick={() => edit.mutate()} title="Vloží zadání do pole ve Story">
-            {edit.isPending ? <Spinner /> : 'Upravit'}
+          <button className={btn} disabled={!run.input || edit.isPending} onClick={() => edit.mutate()} title="Puts the prompt into the Story box">
+            {edit.isPending ? <Spinner /> : 'Edit'}
           </button>
         </div>
       }

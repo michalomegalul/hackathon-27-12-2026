@@ -22,17 +22,17 @@ export function Badge({ t, children }: { t: Tone; children: ReactNode }) {
 }
 
 const JOB_STATUS: Record<JobStatus, [Tone, string]> = {
-  queued: ['gray', 've frontě'],
-  running: ['blue', 'běží'],
-  done: ['green', 'hotovo'],
-  error: ['red', 'chyba'],
+  queued: ['gray', 'queued'],
+  running: ['blue', 'running'],
+  done: ['green', 'done'],
+  error: ['red', 'error'],
 }
 export const JobStatusBadge = ({ s }: { s: JobStatus }) => <Badge t={JOB_STATUS[s][0]}>{JOB_STATUS[s][1]}</Badge>
 
 const VER_STATUS: Record<VerificationStatus, [Tone, string]> = {
-  confirmed: ['green', 'potvrzeno'],
-  not_confirmed: ['amber', 'nepotvrzeno'],
-  not_testable: ['gray', 'nelze ověřit'],
+  confirmed: ['green', 'confirmed'],
+  not_confirmed: ['amber', 'not confirmed'],
+  not_testable: ['gray', 'not testable'],
 }
 export const VerificationBadge = ({ s }: { s: VerificationStatus }) => (
   <Badge t={VER_STATUS[s]?.[0] ?? 'gray'}>{VER_STATUS[s]?.[1] ?? s}</Badge>
@@ -53,8 +53,8 @@ export const Spinner = () => (
   <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-r-transparent align-[-2px]" />
 )
 
-/** "Zobrazit další 4 tabulky" / "Zobrazit méně" under a cut-off list. */
-export function ShowMore({ open, onClick, more, noun }: { open: boolean; onClick: () => void; more: number; noun: [string, string, string] }) {
+/** "Show 4 more tables" / "Show less" under a cut-off list. */
+export function ShowMore({ open, onClick, more, noun }: { open: boolean; onClick: () => void; more: number; noun: [string, string] }) {
   return (
     <button
       type="button"
@@ -62,7 +62,7 @@ export function ShowMore({ open, onClick, more, noun }: { open: boolean; onClick
       aria-expanded={open}
       className="justify-self-start border border-line px-3 py-1.5 text-sm text-slate-300 hover:border-slate-500 hover:text-white"
     >
-      {open ? 'Zobrazit méně ▴' : `Zobrazit další ${more} ${plural(more, noun)} ▾`}
+      {open ? 'Show less ▴' : `Show ${more} more ${plural(more, noun)} ▾`}
     </button>
   )
 }

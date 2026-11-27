@@ -2,7 +2,7 @@
 // identifiers) and a copy button. No library: the SQL here is our own DDL and DuckDB queries.
 import { useState, type ReactNode } from 'react'
 
-export function CopyButton({ text, label = 'Kopírovat', className = '' }: { text: string; label?: string; className?: string }) {
+export function CopyButton({ text, label = 'Copy', className = '' }: { text: string; label?: string; className?: string }) {
   const [done, setDone] = useState(false)
   return (
     <button
@@ -15,7 +15,7 @@ export function CopyButton({ text, label = 'Kopírovat', className = '' }: { tex
       }}
       className={`border border-line px-2 py-0.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white ${className}`}
     >
-      {done ? 'Zkopírováno ✓' : label}
+      {done ? 'Copied ✓' : label}
     </button>
   )
 }

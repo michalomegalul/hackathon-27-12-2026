@@ -1,7 +1,7 @@
 // The whole run in one hook: poll the job, fetch /result when it is done, start the detective
 // automatically, poll it, and derive the six stages the sidebar and the sections show.
-// API steps → stages: step 1 (specifikace) is Spec, steps 2–5 (simulace, dvojče, ověření,
-// český příběh) are Data. The user never clicks "next".
+// API steps → stages: step 1 (spec) is Spec, steps 2–5 (simulation, twin, verification,
+// Czech story) are Data. The user never clicks "next".
 import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -25,9 +25,9 @@ export const STAGES: { id: StageId; label: string }[] = [
   { id: 'prompt', label: 'Prompt' },
   { id: 'spec', label: 'Spec' },
   { id: 'data', label: 'Data' },
-  { id: 'detect', label: 'Detektiv' },
-  { id: 'score', label: 'Skóre' },
-  { id: 'summary', label: 'Shrnutí' },
+  { id: 'detect', label: 'Detective' },
+  { id: 'score', label: 'Score' },
+  { id: 'summary', label: 'Summary' },
 ]
 
 export const sectionId = (s: StageId) => `s-${s}`
@@ -70,7 +70,7 @@ function idleRun(): Run {
   return {
     id: undefined,
     stages,
-    status: { title: 'Připraveno', detail: 'Napište firmu a příběh do pole dole.', progress: null, etaS: null, position: null, tone: 'idle' },
+    status: { title: 'Ready', detail: 'Write the company and the story in the box below.', progress: null, etaS: null, position: null, tone: 'idle' },
   }
 }
 
@@ -106,7 +106,7 @@ export function useRun(id: string | undefined, retryJob?: () => void): Run {
   const steps = j?.steps ?? []
   const specStepDone = Boolean(steps[0]?.done)
   const failedAt = j?.status === 'error' ? Math.max(1, j.step_index || steps.findIndex((s) => !s.done) + 1) : 0
-  const jobErr = j?.error ?? 'Úloha skončila chybou.'
+  const jobErr = j?.error ?? 'The job failed.'
   const retryDetect = () => {
     start.reset()
     startMutate(id)
@@ -136,18 +136,18 @@ export function useRun(id: string | undefined, retryJob?: () => void): Run {
           ? { state: 'error', error: result.error.message, retry: retryResult }
           : r
             ? { state: 'done' }
-            : { state: 'running', sub: j.step ?? (jobDone ? 'načítám výsledek' : undefined) },
+            : { state: 'running', sub: j.step ?? (jobDone ? 'loading the result' : undefined) },
     detect: !r
       ? pending
       : startedHere && start.error
         ? { state: 'error', error: start.error.message, retry: retryDetect }
         : d?.status === 'error'
-          ? { state: 'error', error: d.error ?? 'Detektiv skončil chybou.', retry: retryDetect }
+          ? { state: 'error', error: d.error ?? 'The detective failed.', retry: retryDetect }
           : detect.error && !isStatus(detect.error, 404)
             ? { state: 'error', error: detect.error.message, retry: () => void detect.refetch() }
             : d?.status === 'done'
               ? { state: 'done' }
-              : { state: 'running', sub: d?.status === 'queued' ? 've frontě' : 'hledá v datech' },
+              : { state: 'running', sub: d?.status === 'queued' ? 'queued' : 'searching the data' },
     score: r && d?.status === 'done' ? { state: 'done' } : pending,
     summary: r && d?.status === 'done' ? { state: 'done' } : pending,
   }
@@ -161,7 +161,7 @@ function status(j: Job | undefined, d: Detect | undefined, haveResult: boolean, 
     const label = STAGES.find((s) => s.id === err[0])?.label ?? err[0]
     return { title: `Chyba: ${label}`, detail: err[1].error, progress: null, etaS: null, position: null, tone: 'error' }
   }
-  if (!j) return { title: 'Načítám…', progress: null, etaS: null, position: null, tone: 'busy' }
+  if (!j) return { title: 'Loading…', progress: null, etaS: null, position: null, tone: 'busy' }
 
   // one bar for the whole run: the job's own estimate plus ~40 s of detective
   const detElapsed = d?.elapsed_s ?? 0
@@ -174,8 +174,8 @@ function status(j: Job | undefined, d: Detect | undefined, haveResult: boolean, 
 
   if (j.status === 'queued')
     return {
-      title: 'Ve frontě',
-      detail: j.position > 0 ? `před vámi ${j.position} ${j.position === 1 ? 'úloha' : j.position < 5 ? 'úlohy' : 'úloh'}` : 'jste na řadě',
+      title: 'Queued',
+      detail: j.position > 0 ? `${j.position} ${j.position === 1 ? 'job' : 'jobs'} ahead of you` : 'your turn is next',
       progress: 0,
       etaS,
       position: j.position,
@@ -191,16 +191,16 @@ function status(j: Job | undefined, d: Detect | undefined, haveResult: boolean, 
       tone: 'busy',
     }
   }
-  if (!haveResult) return { title: 'Data: načítám výsledek', progress, etaS, position: null, tone: 'busy' }
+  if (!haveResult) return { title: 'Data: loading the result', progress, etaS, position: null, tone: 'busy' }
   if (!d || d.status === 'queued')
     return {
-      title: 'Detektiv: ve frontě',
-      detail: d && d.position > 0 ? `před ním ${d.position}` : undefined,
+      title: 'Detective: queued',
+      detail: d && d.position > 0 ? `${d.position} ahead` : undefined,
       progress,
       etaS,
       position: d?.position ?? null,
       tone: 'busy',
     }
-  if (d.status === 'running') return { title: 'Detektiv hledá příběh', detail: 'bez znalosti příběhu', progress, etaS, position: null, tone: 'busy' }
+  if (d.status === 'running') return { title: 'Detective is looking for the story', detail: 'without knowing it', progress, etaS, position: null, tone: 'busy' }
   return { title: 'Hotovo', detail: `za ${duration(elapsed)}`, progress: 1, etaS: null, position: null, tone: 'done' }
 }

@@ -12,7 +12,7 @@ const chip = 'border border-line px-3 py-1 text-xs text-slate-300 hover:border-s
 
 /**
  * `onSubmit` resolves once the run exists: then the input clears, as in a chat. `initial` is what
- * History's "Upravit" puts in (the page keys this component by navigation, so a new draft resets it).
+ * History's "Edit" puts in (the page keys this component by navigation, so a new draft resets it).
  */
 export function Composer({
   onSubmit,
@@ -56,16 +56,16 @@ export function Composer({
             area.current?.focus()
           }}
         >
-          Ukázka
+          Example
         </button>
         <button
           type="button"
           className={chip}
           disabled={busy}
-          title="Pošle hotovou specifikaci examples/a.yaml, krok AI se přeskočí"
+          title="Sends the ready-made spec examples/a.yaml; the AI step is skipped"
           onClick={() => void onSubmit({ body: { spec_yaml: FAST_TEST_SPEC }, specName: 'examples/a.yaml' }).catch(() => {})}
         >
-          Rychlý test bez AI
+          Quick test, no AI
         </button>
         {spec && (
           <span className="inline-flex items-center gap-1.5 border border-line py-1 pl-3 pr-1.5 text-xs">
@@ -87,8 +87,8 @@ export function Composer({
           type="button"
           onClick={() => file.current?.click()}
           className="grid size-9 shrink-0 place-items-center text-muted hover:bg-white/[0.06] hover:text-white"
-          title="Přiložit specifikaci (.yaml)"
-          aria-label="Přiložit specifikaci (.yaml)"
+          title="Attach a spec (.yaml)"
+          aria-label="Attach a spec (.yaml)"
         >
           <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 11.5 12.6 19.9a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />
@@ -104,7 +104,7 @@ export function Composer({
             e.target.value = ''
             if (!f) return
             setFileErr(null)
-            if (!/\.ya?ml$/i.test(f.name)) return setFileErr('Přiložte soubor .yaml se specifikací.')
+            if (!/\.ya?ml$/i.test(f.name)) return setFileErr('Attach a .yaml spec file.')
             void f.text().then((yaml) => setSpec({ name: f.name, yaml }))
           }}
         />
@@ -120,16 +120,16 @@ export function Composer({
           }}
           autoFocus
           rows={Math.min(14, Math.max(6, text.split('\n').length + 1))}
-          placeholder={spec ? 'Pošle se přiložená specifikace (text se nepoužije).' : 'První odstavec: firma. Pak příběh.'}
-          aria-label="Firma a příběh"
+          placeholder={spec ? 'The attached spec is sent (the text is ignored).' : 'First paragraph: the company. Then the story.'}
+          aria-label="Company and story"
           className="max-h-[28rem] min-h-9 flex-1 resize-y bg-transparent px-1 py-2 text-[16px] leading-relaxed placeholder:text-slate-500 focus:outline-none sm:text-sm"
         />
         <button
           type="submit"
           disabled={!canSend}
           className="grid size-9 shrink-0 place-items-center bg-accent text-slate-950 hover:brightness-110 disabled:bg-white/10 disabled:text-slate-500"
-          aria-label="Odeslat"
-          title="Odeslat (Enter)"
+          aria-label="Send"
+          title="Send (Enter)"
         >
           {busy ? (
             <Spinner />
@@ -141,7 +141,7 @@ export function Composer({
         </button>
       </form>
       {(error || fileErr) && <p className="mt-1.5 text-xs text-rose-300">{fileErr ?? error}</p>}
-      <p className="mt-1.5 hidden text-[11px] text-slate-500 sm:block">Enter odešle, Shift+Enter nový řádek. Běh trvá 1–2 minuty.</p>
+      <p className="mt-1.5 hidden text-[11px] text-slate-500 sm:block">Enter sends, Shift+Enter adds a line. A run takes 1–2 minutes.</p>
     </div>
   )
 }

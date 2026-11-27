@@ -1,4 +1,4 @@
-// Pure helpers for the ERD and the Shrnutí: FK edges and layout from /tables' keys, the KPI column an event
+// Pure helpers for the ERD and the Summary: FK edges and layout from /tables' keys, the KPI column an event
 // moved, and the daily series SQL derived from a verification row.
 import type { TableInfo, VerificationRow } from '../api'
 

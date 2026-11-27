@@ -1,24 +1,12 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Outlet, isRouteErrorResponse, useLocation, useRouteError } from 'react-router'
-import { getHealth, getNetDown, inputOptions, isStatus, jobOptions, subscribeNet } from '../api'
+import { getNetDown, inputOptions, isStatus, jobOptions, subscribeNet } from '../api'
 import { clearActive, useActive, useLastRun } from '../run/lastRun'
 import { recallSent } from '../run/useSend'
 import { Alert, Card } from '../components/ui'
 import { Spiral } from '../components/Spiral'
 import { setToken, useLoginRequired, useToken, useTokenInvalid } from '../token'
-
-function QueueInfo() {
-  const { data } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 10_000 })
-  if (!data) return null
-  const busy = (data.queue.running ? 1 : 0) + data.queue.waiting
-  return (
-    <span className="hidden items-center gap-1.5 text-sm text-muted sm:inline-flex" title={`${data.llm.backend} ${data.llm.model}`}>
-      <span className={`size-2 rounded-full ${data.ok && data.llm.reachable ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-      {busy === 0 ? 'fronta volná' : `ve frontě ${busy}`}
-    </span>
-  )
-}
 
 /** Shown while the API can't be reached; retries every active query (and by itself when the browser comes back online). */
 function NetBanner() {
@@ -36,7 +24,7 @@ function NetBanner() {
       role="alert"
       className="sticky top-[4.5rem] z-30 mt-3 flex flex-wrap items-center gap-3 border border-rose-500/40 bg-rose-950/90 px-3 py-2 text-sm text-rose-100 backdrop-blur"
     >
-      <span className="mr-auto">Server je nedostupný (výpadek sítě nebo restart API). Zkoušíme to znovu.</span>
+      <span className="mr-auto">The server is unreachable (network outage or API restart). Retrying.</span>
       <button
         disabled={busy}
         className="bg-white/10 px-3 py-1 font-medium hover:bg-white/20 disabled:opacity-60"
@@ -45,7 +33,7 @@ function NetBanner() {
           void qc.refetchQueries({ type: 'active' }).finally(() => setBusy(false))
         }}
       >
-        {busy ? 'Zkouším…' : 'Zkusit znovu'}
+        {busy ? 'Retrying…' : 'Retry'}
       </button>
     </div>
   )
@@ -70,19 +58,19 @@ function ActiveRun() {
   }, [finishedHere, gone])
   if (!a || here || !j) return null
 
-  const name = input.data?.company || recallSent(a.id)?.specName || 'běh'
+  const name = input.data?.company || recallSent(a.id)?.specName || 'run'
   const [dot, text, tone] =
     j.status === 'queued'
-      ? ['bg-slate-400', j.position > 0 ? `ve frontě (${j.position})` : 've frontě', 'border-line text-slate-300']
+      ? ['bg-slate-400', j.position > 0 ? `queued (${j.position})` : 'queued', 'border-line text-slate-300']
       : j.status === 'running'
-        ? ['bg-sky-400 motion-safe:animate-pulse', `${Math.round(Math.min(1, j.progress) * 100)} %`, 'border-sky-500/40 text-sky-200']
+        ? ['bg-sky-400', `${Math.round(Math.min(1, j.progress) * 100)} %`, 'border-sky-500/40 text-sky-200']
         : j.status === 'done'
-          ? ['bg-emerald-400', 'hotovo', 'border-emerald-500/40 text-emerald-200']
-          : ['bg-rose-400', 'chyba', 'border-rose-500/40 text-rose-200']
+          ? ['bg-emerald-400', 'done', 'border-emerald-500/40 text-emerald-200']
+          : ['bg-rose-400', 'error', 'border-rose-500/40 text-rose-200']
   return (
     <Link
       to={a.path}
-      title={`Zpět na ${name}${j.step && j.status === 'running' ? ` · ${j.step}` : ''}`}
+      title={`Back to ${name}${j.step && j.status === 'running' ? ` · ${j.step}` : ''}`}
       className={`inline-flex min-w-0 shrink items-center gap-1.5 rounded-full border bg-white/[0.03] px-2.5 py-1 text-xs hover:bg-white/[0.07] ${tone}`}
     >
       <span className={`size-2 shrink-0 rounded-full ${dot}`} />
@@ -101,12 +89,11 @@ function Shell({ children }: { children: ReactNode }) {
     [lastStory ? `/run/${lastStory}` : '/', 'Story', pathname === '/' || pathname.startsWith('/run/')],
     [lastRev ? `/rev/${lastRev}` : '/rev', 'Rev story', pathname === '/rev' || pathname.startsWith('/rev/')],
     ['/history', 'History', pathname.startsWith('/history')],
-    ['/about', 'About', pathname.startsWith('/about')],
   ]
   return (
     <div className="flex min-h-dvh flex-col">
       <header data-chrome="top" className="sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
-        <div className="flex h-16 items-center gap-3 px-3 sm:gap-6 sm:px-6">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-3 sm:gap-6 sm:px-6">
           <Link to="/" className="flex shrink-0 items-center gap-2 text-xl font-semibold tracking-tight">
             <Spiral />
             <span className="hidden sm:inline">Story2Data</span>
@@ -120,14 +107,16 @@ function Shell({ children }: { children: ReactNode }) {
           </nav>
           <span className="ml-auto" />
           <ActiveRun />
-          <QueueInfo />
+          <Link to="/about" aria-current={pathname.startsWith('/about') ? 'page' : undefined} className={navCls({ isActive: pathname.startsWith('/about') })}>
+            About
+          </Link>
           <Logout />
         </div>
       </header>
-      <div className="w-full max-w-7xl px-3 sm:px-6">
+      <div className="mx-auto w-full max-w-6xl px-3 sm:px-6">
         <NetBanner />
       </div>
-      <main className="w-full max-w-7xl flex-1 px-3 pb-12 pt-4 sm:px-6 sm:pt-6">{children}</main>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-3 pb-12 pt-4 sm:px-6 sm:pt-6">{children}</main>
     </div>
   )
 }
@@ -139,13 +128,13 @@ function Logout() {
   return (
     <button
       className="text-sm text-muted hover:text-white"
-      title="Zapomenout token v tomto prohlížeči"
+      title="Forget the token in this browser"
       onClick={() => {
         setToken('')
         qc.clear()
       }}
     >
-      Odhlásit
+      Log out
     </button>
   )
 }
@@ -156,14 +145,14 @@ function TokenForm() {
   const invalid = useTokenInvalid()
   return (
     <Card className="mt-6 max-w-md">
-      <h1 className="text-lg font-semibold">Přihlášení</h1>
+      <h1 className="text-lg font-semibold">Log in</h1>
       {invalid && (
         <div className="mt-3">
-          <Alert>Neplatný token. Zadejte platný token (nebo požádejte tým o nový).</Alert>
+          <Alert>Invalid token. Enter a valid one (or ask the team for a new one).</Alert>
         </div>
       )}
       <p className="mt-1 text-sm text-muted">
-        Zadejte přístupový token k API (dostanete ho od týmu). Uloží se jen v tomto prohlížeči.
+        Enter the API access token (you get it from the team). It is stored in this browser only.
       </p>
       <form
         className="mt-4 grid gap-3"
@@ -182,7 +171,7 @@ function TokenForm() {
           placeholder="token"
           className="w-full border border-line bg-bg px-3 py-2 text-[16px] focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent sm:text-sm"
         />
-        <button className="bg-accent px-4 py-2.5 font-medium text-slate-950 hover:brightness-110">Pokračovat</button>
+        <button className="bg-accent px-4 py-2.5 font-medium text-slate-950 hover:brightness-110">Continue</button>
       </form>
     </Card>
   )
@@ -198,16 +187,16 @@ export function RouteError() {
   const err = useRouteError()
   const msg = isRouteErrorResponse(err)
     ? err.status === 404
-      ? 'Stránka neexistuje.'
+      ? 'Page not found.'
       : `${err.status} ${err.statusText}`
     : err instanceof Error
       ? err.message
-      : 'Neznámá chyba.'
+      : 'Unknown error.'
   return (
     <Shell>
       <Alert>{msg}</Alert>
       <Link to="/" className="mt-4 inline-block text-accent hover:underline">
-        ← Zpět na úvod
+        ← Back to start
       </Link>
     </Shell>
   )

@@ -14,7 +14,7 @@ const C = { marker: '#f2cc0c', grid: '#2c3235', text: '#9fa7b3' }
 const DAY = 86_400
 
 const controlLabel = (v: VerificationRow) =>
-  v.control_mode === 'yoy' ? 'stejné dny loni' : v.control_mode === 'none' ? '' : v.control || 'kontrola'
+  v.control_mode === 'yoy' ? 'same days last year' : v.control_mode === 'none' ? '' : v.control || 'control'
 
 /** Vertical line + label at `start`, drawn over the series. */
 function markerPlugin(start: number, label: string): uPlot.Plugin {
@@ -107,20 +107,20 @@ function SplitPlot({ data, v, hasControl, height }: { data: uPlot.AlignedData; v
       },
       series: [
         { value: '{D}. {M}. {YYYY}' },
-        { label: 'příběh', stroke: T.story, width: 2.2, points: { show: false } },
-        { label: 'dvojče bez příběhu', stroke: T.twin, width: 1.6, dash: [6, 4], points: { show: false } },
+        { label: 'story', stroke: T.story, width: 2.2, points: { show: false } },
+        { label: 'twin without the story', stroke: T.twin, width: 1.6, dash: [6, 4], points: { show: false } },
         ...(hasControl
           ? [{ label: `kontrola: ${controlLabel(v)}`, stroke: T.control, width: 1, alpha: 0.55, scale: 'c', points: { show: false } }]
           : []),
       ],
       axes: [
         axis,
-        { ...axis, values: czNums, label: `${KPI_CS[v.kpi] ?? v.kpi}, 7 dní`, labelFont: '11px ui-sans-serif, system-ui, sans-serif', labelSize: 16 },
+        { ...axis, values: czNums, label: `${KPI_CS[v.kpi] ?? v.kpi}, 7 days`, labelFont: '11px ui-sans-serif, system-ui, sans-serif', labelSize: 16 },
         ...(hasControl ? [{ ...axis, values: czNums, scale: 'c', side: 1, grid: { show: false }, stroke: T.control }] : []),
       ],
       cursor: { drag: { x: true, y: false } },
       legend: { show: false }, // the caption above the chart is the legend
-      plugins: [gapPlugin(start, 1, 2), markerPlugin(start, `událost ${dateCs(v.start)}`)],
+      plugins: [gapPlugin(start, 1, 2), markerPlugin(start, `event ${dateCs(v.start)}`)],
     }
     const plot = new uPlot(opts, data, box)
     const ro = new ResizeObserver(() => plot.setSize({ width: box.clientWidth, height }))
@@ -133,7 +133,7 @@ function SplitPlot({ data, v, hasControl, height }: { data: uPlot.AlignedData; v
   return <div ref={el} className="uplot-dark w-full" />
 }
 
-const nf = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 2 })
+const nf = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 })
 const czNums = (_u: uPlot, ticks: number[]) => ticks.map((t) => nf.format(t))
 
 const ys = (rows: Cell[][], i: number) => rows.map((r) => (r[i] === null ? null : Number(r[i])))
@@ -161,20 +161,20 @@ export function KpiChart({ jobId, v, height = 200 }: { jobId: string; v: Verific
     return { data, hasControl }
   }, [story.data, twin.data])
 
-  if (!sql) return <p className="text-sm text-muted">Tato událost nemá denní řadu (jiný typ ověření).</p>
+  if (!sql) return <p className="text-sm text-muted">This event has no daily series (a different kind of check).</p>
   if (story.error) return <Alert>{story.error.message}</Alert>
   if (!series || (twin.isPending && !twin.error))
     return (
       <p className="grid place-items-center text-sm text-muted" style={{ height: height + 40 }}>
         <span>
-          <Spinner /> Počítám denní řadu příběhu a dvojčete…
+          <Spinner /> Computing the daily series for the story and the twin…
         </span>
       </p>
     )
   return (
     <>
       <SplitPlot data={series.data} v={v} hasControl={series.hasControl} height={height} />
-      {twin.error && <p className="text-xs text-amber-300">Dvojče se nenačetlo: {twin.error.message}</p>}
+      {twin.error && <p className="text-xs text-amber-300">Twin did not load: {twin.error.message}</p>}
     </>
   )
 }

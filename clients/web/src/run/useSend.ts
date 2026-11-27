@@ -1,4 +1,4 @@
-// Sending a prompt: POST /v1/jobs, remember what was sent (so "Zkusit znovu" can resend it and a
+// Sending a prompt: POST /v1/jobs, remember what was sent (so "Retry" can resend it and a
 // spec job can show its file name after a reload), then go to /run/:id.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
@@ -47,18 +47,18 @@ export function useSend(base = '/run') {
   })
 }
 
-/** "Zkusit znovu" for a failed job: send the same prompt again as a new run (undefined if unknown). */
+/** "Retry" for a failed job: send the same prompt again as a new run (undefined if unknown). */
 export function useResend(id: string | undefined, send: ReturnType<typeof useSend>) {
   const input = useQuery({ ...inputOptions(id ?? ''), enabled: Boolean(id) })
   const body = resendBody(id, input.data)
   return body ? () => send.mutate({ body, specName: recallSent(id)?.specName }) : undefined
 }
 
-/** A fresh seed for "Znovu": same prompt, different data. */
+/** A fresh seed for "Run again": same prompt, different data. */
 const newSeed = () => Math.floor(Math.random() * 1_000_000_000)
 
 /**
- * "Znovu": the same input as a new run with a new seed. The prompt from this browser or GET /input;
+ * "Run again": the same input as a new run with a new seed. The prompt from this browser or GET /input;
  * a spec job's spec from /result (it is not repeated in /input).
  */
 export async function rerunBody(id: string): Promise<Submit> {
@@ -71,10 +71,10 @@ export async function rerunBody(id: string): Promise<Submit> {
     const opt = input.n_customers === null ? {} : { n_customers: input.n_customers }
     return { body: { spec_yaml: r.spec_yaml, ...opt, seed: newSeed() }, specName: `${id}.yaml` }
   }
-  throw new Error('Zadání tohoto běhu není k dispozici.')
+  throw new Error('The input of this run is not available.')
 }
 
-/** What "Upravit" puts into the Story input: the prompt as text, or a spec as the attached file. */
+/** What "Edit" puts into the Story input: the prompt as text, or a spec as the attached file. */
 export type Draft = { text: string } | { spec: { name: string; yaml: string } }
 
 export async function draftOf(id: string): Promise<Draft> {

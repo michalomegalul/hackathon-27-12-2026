@@ -1,6 +1,6 @@
 // Where the Story and Rev story tabs lead back to, and the run the header chip follows.
 // Per browser tab (sessionStorage): leaving a run for History or About and clicking "Story"
-// reopens it instead of an empty composer. "+ Nový příběh" / "Vybrat jinou databázi" forget it.
+// reopens it instead of an empty composer. "+ New story" / "Pick another database" forget it.
 import { useEffect, useSyncExternalStore } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isStatus, jobOptions } from '../api'

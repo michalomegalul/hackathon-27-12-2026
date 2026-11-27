@@ -1,5 +1,5 @@
 // Spec: what the AI understood, as readable Czech parameters (company, segments, cities,
-// channels) and the events as a table. The YAML itself only behind "pro vývojáře".
+// channels) and the events as a table. The YAML itself only behind "for developers".
 import { useState, type ReactNode } from 'react'
 import type { JobResult } from '../api'
 import { CopyButton } from '../components/Code'
@@ -42,11 +42,11 @@ function Company({ s }: { s: Spec }) {
         </p>
         {c.description && <p className="text-sm text-slate-300">{c.description}</p>}
         <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted">
-          {Number.isFinite(n.n) && <span>{intCs(n.n)} zákazníků</span>}
-          {n.growth_per_year ? <span>růst {signed(n.growth_per_year * 100)} % ročně</span> : null}
+          {Number.isFinite(n.n) && <span>{intCs(n.n)} customers</span>}
+          {n.growth_per_year ? <span>growth {signed(n.growth_per_year * 100)} % a year</span> : null}
           {s.meta.start && Number.isFinite(s.meta.days) && (
             <span>
-              data od {dateCs(s.meta.start)}, {intCs(s.meta.days)} dní
+              data from {dateCs(s.meta.start)}, {intCs(s.meta.days)} days
             </span>
           )}
           {s.categories.length > 0 && <span>kategorie: {s.categories.map((x) => x.id).join(', ')}</span>}
@@ -54,14 +54,14 @@ function Company({ s }: { s: Spec }) {
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <Shares
-          title="Segmenty zákazníků"
-          items={n.segments.map((x) => ({ label: x.id, share: x.share, note: x.subscription ? 'předplatné' : undefined }))}
+          title="Customer segments"
+          items={n.segments.map((x) => ({ label: x.id, share: x.share, note: x.subscription ? 'subscription' : undefined }))}
         />
         <Shares
-          title="Města"
+          title="Cities"
           items={c.cities.map((x) => ({ label: x.name, share: x.weight, note: x.has_store ? 'prodejna' : undefined }))}
         />
-        <Shares title="Kanály" items={c.channels.map((x) => ({ label: CHANNEL_CS[x.channel] ?? x.channel, share: x.weight }))} />
+        <Shares title="Channels" items={c.channels.map((x) => ({ label: CHANNEL_CS[x.channel] ?? x.channel, share: x.weight }))} />
       </div>
     </div>
   )
@@ -71,14 +71,14 @@ const metricCs = (m: string) => METRIC_CS[m] ?? SPEC_METRIC_CS[m] ?? m
 
 function Size({ f }: { f: Effect }) {
   // delivery_days is in days (s2d/sim/service.py courier_delay); every other size is relative
-  const v = f.metric === 'delivery_days' ? `${signed(f.size)} ${Math.abs(f.size) === 1 ? 'den' : Math.abs(f.size) < 5 ? 'dny' : 'dní'}` : `${signed(f.size * 100)} %`
+  const v = f.metric === 'delivery_days' ? `${signed(f.size)} ${Math.abs(f.size) === 1 ? 'day' : 'days'}` : `${signed(f.size * 100)} %`
   return (
     <span className="whitespace-nowrap">
       {metricCs(f.metric)}{' '}
       {f.size_stated ? (
         <b className="font-medium tabular-nums text-slate-100">{v}</b>
       ) : (
-        <span className="text-muted" title="příběh velikost neuvádí, simulace použila odhad">
+        <span className="text-muted" title="the story gives no size, the simulation used an estimate">
           neuvedeno <span className="tabular-nums">(sim. {v})</span>
         </span>
       )}
@@ -98,7 +98,7 @@ function When({ e }: { e: SpecEvent }) {
 const lags = (e: SpecEvent) => [...new Set(e.effects.map((f) => lagCs(f.lag_days)))].join(', ') || 'hned'
 
 function Events({ s }: { s: Spec }) {
-  if (!s.events.length) return <p className="text-sm text-muted">Příběh neobsahuje žádné události.</p>
+  if (!s.events.length) return <p className="text-sm text-muted">The story contains no events.</p>
   return (
     <>
       <ul className="grid gap-2 md:hidden">
@@ -114,7 +114,7 @@ function Events({ s }: { s: Spec }) {
               {e.effects.map((f, i) => (
                 <Size key={i} f={f} />
               ))}
-              <span>zpoždění: {lags(e)}</span>
+              <span>lag: {lags(e)}</span>
             </div>
           </li>
         ))}
@@ -126,8 +126,8 @@ function Events({ s }: { s: Spec }) {
               <th className="py-2 pr-3 font-medium">Co</th>
               <th className="py-2 pr-3 font-medium">Od – do</th>
               <th className="py-2 pr-3 font-medium">Koho</th>
-              <th className="py-2 pr-3 font-medium">Velikost v příběhu</th>
-              <th className="py-2 font-medium">Zpoždění</th>
+              <th className="py-2 pr-3 font-medium">Size in the story</th>
+              <th className="py-2 font-medium">Lag</th>
             </tr>
           </thead>
           <tbody>
@@ -140,7 +140,7 @@ function Events({ s }: { s: Spec }) {
                       {e.narrative_cs || EVENT_TYPE_CS[e.type] || e.type}
                       <span className="mt-0.5 block text-xs text-muted">
                         {EVENT_TYPE_CS[e.type] ?? e.type}
-                        {e.caused_by && <> · následek {e.caused_by}</>}
+                        {e.caused_by && <> · consequence of {e.caused_by}</>}
                       </span>
                     </span>
                   </div>
@@ -169,7 +169,7 @@ function DevYaml({ yaml }: { yaml: string }) {
   return (
     <div className="grid justify-items-start gap-2">
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="text-xs text-slate-500 hover:text-slate-300">
-        {open ? '▾' : '▸'} pro vývojáře
+        {open ? '▾' : '▸'} for developers
       </button>
       {open && (
         <div className="grid w-full gap-1.5">
@@ -194,7 +194,7 @@ export function SpecView({ r, spec, fallback }: { r: JobResult; spec: Spec | nul
         <>
           <Company s={spec} />
           <div className="grid gap-2">
-            <h3 className="text-xs text-muted">Události příběhu</h3>
+            <h3 className="text-xs text-muted">Story events</h3>
             <Events s={spec} />
           </div>
         </>

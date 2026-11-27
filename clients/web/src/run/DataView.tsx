@@ -32,7 +32,7 @@ function cell(v: Cell) {
 
 /**
  * One table the way psql shows it: names, types and keys in the header, then `SELECT * … LIMIT 5`.
- * `lit` lights a column (the Shrnutí points at the one an event changed).
+ * `lit` lights a column (the Summary points at the one an event changed).
  */
 export function PsqlTable({
   id,
@@ -81,8 +81,8 @@ export function PsqlTable({
               >
                 <span className="inline-flex items-center gap-1">
                   {pgType(c.type)}
-                  {pk.has(c.name) && <KeyBadge kind="PK" title="primární klíč" />}
-                  {fk.has(c.name) && <KeyBadge kind="FK" title={`cizí klíč → ${fk.get(c.name)}`} />}
+                  {pk.has(c.name) && <KeyBadge kind="PK" title="primary key" />}
+                  {fk.has(c.name) && <KeyBadge kind="FK" title={`foreign key → ${fk.get(c.name)}`} />}
                 </span>
               </th>
             ))}
@@ -107,13 +107,13 @@ export function PsqlTable({
       </table>
       {q.isPending && (
         <p className="px-2 py-1 text-xs text-muted">
-          <Spinner /> Načítám první řádky…
+          <Spinner /> Loading the first rows…
         </p>
       )}
       {q.error && <p className="px-2 py-1 text-xs text-rose-300">{q.error.message}</p>}
       {q.data && (
         <p className="px-2 pt-1 font-mono text-[11px] text-muted">
-          ({rowsCs(q.data.rows.length)} z {intCs(t.rows)}{only && keep.length < full.columns.length ? `, ${keep.length} z ${full.columns.length} sloupců` : ''})
+          ({rowsCs(q.data.rows.length)} of {intCs(t.rows)}{only && keep.length < full.columns.length ? `, ${keep.length} of ${full.columns.length} columns` : ''})
         </p>
       )}
     </div>
@@ -142,8 +142,8 @@ export function PsqlCard({ id, t, lit }: { id: string; t: TableInfo; lit?: strin
 
 type Tab = 'tables' | 'browse'
 const TABS: [Tab, string][] = [
-  ['tables', 'Tabulky'],
-  ['browse', 'Hledat a SQL'],
+  ['tables', 'Tables'],
+  ['browse', 'Search and SQL'],
 ]
 const FIRST_TABLES = 3
 
@@ -155,7 +155,7 @@ export function DataView({ id }: { id: string }) {
   if (!q.data)
     return (
       <p className="text-sm text-muted">
-        <Spinner /> Načítám tabulky…
+        <Spinner /> Loading tables…
       </p>
     )
   const tables = q.data.tables
@@ -175,7 +175,7 @@ export function DataView({ id }: { id: string }) {
         ))}
         <span className="ml-auto flex items-center gap-2">
           <Link to={`/run/${id}/data`} className="text-xs text-muted hover:text-white">
-            celá stránka ↗
+            full page ↗
           </Link>
           <DownloadButton id={id} />
         </span>
@@ -186,7 +186,7 @@ export function DataView({ id }: { id: string }) {
             <PsqlCard key={t.name} id={id} t={t} />
           ))}
           {tables.length > FIRST_TABLES && (
-            <ShowMore open={all} onClick={() => setAll((a) => !a)} more={tables.length - FIRST_TABLES} noun={['tabulku', 'tabulky', 'tabulek']} />
+            <ShowMore open={all} onClick={() => setAll((a) => !a)} more={tables.length - FIRST_TABLES} noun={['table', 'tables']} />
           )}
         </div>
       )}

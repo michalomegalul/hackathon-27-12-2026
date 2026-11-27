@@ -1,9 +1,9 @@
-// Shrnutí of Rev story: what the blind detective told next to what the story planted. Left the
+// Summary of Rev story: what the blind detective told next to what the story planted. Left the
 // detective's narrative and its finds, right the original prompt and the planted events (from
 // /answer-key; the verification rows if this user may not see it). A matched pair (match.ts, the
 // pairing behind the API's P/R/F1) is linked by an arrow found → planted; a planted event nobody
-// found is marked "nenalezeno", a find that is no planted event "falešný nález", a find that
-// follows from a found one "důsledek". Arrows: an SVG inside the section (container pixels),
+// found is marked "not found", a find that is no planted event "false find", a find that
+// follows from a found one "consequence". Arrows: an SVG inside the section (container pixels),
 // drawn in one by one with anime.js when it scrolls into view. Lazy chunk (anime.js).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -105,8 +105,8 @@ function FoundCard({ e, m, hover, setHover }: { e: DetectEvent; m: Matching; hov
   const tag: Tag = pair
     ? { text: `= ${pair.planted.event_id}`, t: 'green' }
     : cons
-      ? { text: `důsledek ${cons.of}`, t: 'gray' }
-      : { text: ff?.decoy ? `falešný nález (návnada)` : 'falešný nález', t: 'red' }
+      ? { text: `consequence of ${cons.of}`, t: 'gray' }
+      : { text: ff?.decoy ? `false find (decoy)` : 'false find', t: 'red' }
   return (
     <Card
       side="found"
@@ -124,15 +124,15 @@ function FoundCard({ e, m, hover, setHover }: { e: DetectEvent; m: Matching; hov
       }
       meta={
         <>
-          <span className="font-mono">{e.segment || 'všichni'}</span>
+          <span className="font-mono">{e.segment || 'everyone'}</span>
           <span>
             {KIND_CS[e.kind] ?? e.kind} od {dateCs(e.start_date)}
           </span>
-          <span className="tabular-nums" title="jistota detektivu">
+          <span className="tabular-nums" title="detective confidence">
             jistota {Math.round(e.confidence * 100)} %
           </span>
           {pair && (
-            <span className="tabular-nums" title="shoda podle s2d/score.py: 0,4 čas + 0,4 segment + 0,2 velikost">
+            <span className="tabular-nums" title="match per s2d/score.py: 0.4 time + 0.4 segment + 0.2 size">
               shoda {num(pair.score, 2)}, posun {pair.slots.deltaDays > 0 ? '+' : ''}
               {pair.slots.deltaDays} d
             </span>
@@ -146,7 +146,7 @@ function FoundCard({ e, m, hover, setHover }: { e: DetectEvent; m: Matching; hov
 function PlantedCard({ t, m, hover, setHover }: { t: PlantedEvent; m: Matching; hover: string | null; setHover: (k: string | null) => void }) {
   const pair = m.pairs.find((p) => p.planted.event_id === t.event_id)
   const tag: Tag = !t.simulated
-    ? { text: 'nesimulováno', t: 'gray' }
+    ? { text: 'not simulated', t: 'gray' }
     : pair
       ? { text: `nalezeno ${pair.found.id}`, t: 'green' }
       : { text: 'nenalezeno', t: 'amber' }
@@ -165,10 +165,10 @@ function PlantedCard({ t, m, hover, setHover }: { t: PlantedEvent; m: Matching; 
           <span>
             {metricCs(t.metric)} {arrow(t.direction)} {pct(t.magnitude_pct)}
           </span>
-          <span className="font-mono">{t.segment || 'všichni'}</span>
+          <span className="font-mono">{t.segment || 'everyone'}</span>
           <span>
             od {dateCs(t.start_date)}
-            {t.lag_days ? `, se zpožděním ${t.lag_days} d` : ''}
+            {t.lag_days ? `, lag ${t.lag_days} d` : ''}
           </span>
         </>
       }
@@ -250,8 +250,8 @@ function Arrows({ root, m, hover, reduce }: { root: HTMLElement; m: Matching; ho
 // ---- the section -------------------------------------------------------------------------
 
 function Prompt({ input }: { input: JobInput | undefined }) {
-  if (!input) return <p className="text-sm text-muted">Načítám zadání…</p>
-  if (input.spec_given) return <p className="text-sm text-muted">Běh vznikl z hotové specifikace, bez textového zadání; události jsou dole.</p>
+  if (!input) return <p className="text-sm text-muted">Loading the prompt…</p>
+  if (input.spec_given) return <p className="text-sm text-muted">This run was made from a ready-made spec, with no prompt text; the events are below.</p>
   return (
     <div className="grid gap-2 border-l-2 border-line py-1 pl-3 text-sm leading-relaxed">
       {input.company && input.company !== input.story && <p className="text-xs text-muted">{input.company}</p>}
@@ -266,27 +266,27 @@ function Verdict({ m, nFound, server }: { m: Matching; nFound: number; server: R
   return (
     <div className="grid gap-1">
       <p className="text-base font-medium sm:text-lg">
-        Detektiv naslepo našel <b className="text-accent tabular-nums">{m.pairs.length}</b> z <b className="tabular-nums">{n}</b>{' '}
-        zasazených událostí
+        The blind detective found <b className="text-accent tabular-nums">{m.pairs.length}</b> of <b className="tabular-nums">{n}</b>{' '}
+        planted events
         {m.falseFinds.length > 0 && (
           <>
-            , <b className="tabular-nums text-rose-300">{m.falseFinds.length}</b> {m.falseFinds.length === 1 ? 'falešný nález' : 'falešné nálezy'}
+            , <b className="tabular-nums text-rose-300">{m.falseFinds.length}</b> {m.falseFinds.length === 1 ? 'false find' : 'false finds'}
           </>
         )}
         {m.consequences.length > 0 && (
           <>
-            , <b className="tabular-nums">{m.consequences.length}</b> {m.consequences.length === 1 ? 'důsledek' : 'důsledky'}
+            , <b className="tabular-nums">{m.consequences.length}</b> {m.consequences.length === 1 ? 'consequence' : 'consequences'}
           </>
         )}
         .
       </p>
       <p className="text-xs text-muted">
-        {nFound} {nFound === 1 ? 'nález' : nFound < 5 && nFound > 1 ? 'nálezy' : 'nálezů'}; pár se počítá od shody 0,5 (čas, segment, velikost), stejně jako
-        skóre na serveru
+        {nFound} {nFound === 1 ? 'finding' : 'findings'}; a pair counts from a match of 0.5 (time, segment, size), the same as
+        the server-side score
         {s && (
           <>
             {' '}
-            (přesnost {num(s.precision, 2)}, úplnost {num(s.recall, 2)}, F1 {num(s.f1, 2)})
+            (precision {num(s.precision, 2)}, recall {num(s.recall, 2)}, F1 {num(s.f1, 2)})
           </>
         )}
         .
@@ -312,7 +312,7 @@ export default function RevSummary({ run }: { run: Run }) {
   const reduce = useMedia('(prefers-reduced-motion: reduce)')
 
   if (key.error && !forbidden) return <p className="text-sm text-rose-200">{key.error.message}</p>
-  if (!m || !planted) return <p className="text-sm text-muted">Načítám zasazené události…</p>
+  if (!m || !planted) return <p className="text-sm text-muted">Loading the planted events…</p>
 
   // found: pairs first in planted order, then consequences, then false finds; planted in story order
   const order = new Map(planted.map((t, i) => [t.event_id, i]))
@@ -328,14 +328,14 @@ export default function RevSummary({ run }: { run: Run }) {
       <Verdict m={m} nFound={found.length} server={d} />
       <div ref={setRoot} className="relative grid gap-6 lg:grid-cols-2 lg:gap-x-20">
         <div className="grid content-start gap-3">
-          <h3 className="text-xs text-muted">Detektiv, bez znalosti příběhu</h3>
+          <h3 className="text-xs text-muted">Detective, without knowing the story</h3>
           {d.narrative?.text ? (
             <blockquote className="border-l-2 border-line py-1 pl-3 text-sm leading-relaxed whitespace-pre-line text-slate-200">
               {d.narrative.text}
               {d.narrative.source && <footer className="mt-2 text-xs text-slate-500">{d.narrative.source}</footer>}
             </blockquote>
           ) : (
-            <p className="text-sm text-muted">Detektiv nenapsal žádný příběh.</p>
+            <p className="text-sm text-muted">The detective wrote no story.</p>
           )}
           {found.length ? (
             <ul className="grid gap-1.5">
@@ -344,13 +344,13 @@ export default function RevSummary({ run }: { run: Run }) {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted">Detektiv v datech nic nenašel.</p>
+            <p className="text-sm text-muted">The detective found nothing in the data.</p>
           )}
         </div>
         <div className="grid content-start gap-3">
-          <h3 className="text-xs text-muted">Původní zadání a zasazené události</h3>
+          <h3 className="text-xs text-muted">Original prompt and planted events</h3>
           <Prompt input={run.input} />
-          {forbidden && <p className="text-[11px] text-slate-500">Klíč s odpověďmi vidí jen učitel; události jsou z ověřovací tabulky.</p>}
+          {forbidden && <p className="text-[11px] text-slate-500">Only the teacher sees the answer key; the events come from the verification table.</p>}
           <ul className="grid gap-1.5">
             {planted.map((t) => (
               <PlantedCard key={t.event_id} t={t} m={m} hover={hover} setHover={setHover} />

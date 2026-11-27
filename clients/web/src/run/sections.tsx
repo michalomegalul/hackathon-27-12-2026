@@ -1,5 +1,5 @@
 // The six sections of the run view, in order. Each is a grey placeholder (RunView.Section) until
-// its stage is done. Data and Shrnutí are lazy chunks (React Flow, TanStack Table, uPlot, anime.js).
+// its stage is done. Data and Summary are lazy chunks (React Flow, TanStack Table, uPlot, anime.js).
 import { Suspense, lazy, useState, type ReactNode } from 'react'
 import { type DetectEvent, type DetectScore, type JobResult, type Step } from '../api'
 import { Notes, VerificationTable } from '../components/Result'
@@ -44,10 +44,10 @@ export function PromptSection({ run, specName, composer }: { run: Run; specName?
   return (
     <Section run={run} id="prompt" title="Prompt" hint={run.id && <span className="font-mono">{run.id}</span>}>
       {!i ? (
-        <Waiting>Načítám zadání…</Waiting>
+        <Waiting>Loading the prompt…</Waiting>
       ) : i.spec_given ? (
         <p className="text-sm text-slate-300">
-          Hotová specifikace{specName ? <span className="font-mono"> {specName}</span> : null}, bez AI.
+          Ready-made spec{specName ? <span className="font-mono"> {specName}</span> : null}, no LLM.
         </p>
       ) : (
         <div className="grid max-w-3xl gap-2 border-l-2 border-line py-1 pl-4 text-sm leading-relaxed">
@@ -65,7 +65,7 @@ function EventsTable({ r }: { r: JobResult }) {
   // one event can give several rows (one per KPI it moves): list each event once
   const seen = new Set<string>()
   const rows = r.verification.filter((v) => (seen.has(v.event_id) ? false : (seen.add(v.event_id), true)))
-  if (!rows.length) return <p className="text-sm text-muted">Příběh neobsahuje žádné ověřitelné události.</p>
+  if (!rows.length) return <p className="text-sm text-muted">The story contains no verifiable events.</p>
   return (
     <>
       <ul className="grid gap-2 md:hidden">
@@ -77,7 +77,7 @@ function EventsTable({ r }: { r: JobResult }) {
             </div>
             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
               <span>{kpi(v.kpi)}</span>
-              <span className="font-mono">{v.target || 'všichni'}</span>
+              <span className="font-mono">{v.target || 'everyone'}</span>
               <span>od {dateCs(v.start)}</span>
               <span className="tabular-nums text-slate-300">{withUnit(v.story_size, v.story_unit)}</span>
             </div>
@@ -88,11 +88,11 @@ function EventsTable({ r }: { r: JobResult }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-muted">
-              <th className="py-2 pr-3 font-medium">Událost</th>
+              <th className="py-2 pr-3 font-medium">Event</th>
               <th className="py-2 pr-3 font-medium">KPI</th>
               <th className="py-2 pr-3 font-medium">Koho</th>
               <th className="py-2 pr-3 font-medium">Od</th>
-              <th className="py-2 text-right font-medium whitespace-nowrap">Velikost v příběhu</th>
+              <th className="py-2 text-right font-medium whitespace-nowrap">Size in the story</th>
             </tr>
           </thead>
           <tbody>
@@ -103,7 +103,7 @@ function EventsTable({ r }: { r: JobResult }) {
                   {v.claim_cs}
                 </td>
                 <td className="py-2 pr-3 whitespace-nowrap">{kpi(v.kpi)}</td>
-                <td className="py-2 pr-3 font-mono text-xs leading-5">{v.target || 'všichni'}</td>
+                <td className="py-2 pr-3 font-mono text-xs leading-5">{v.target || 'everyone'}</td>
                 <td className="py-2 pr-3 whitespace-nowrap tabular-nums">{dateCs(v.start)}</td>
                 <td className="py-2 text-right whitespace-nowrap tabular-nums">{withUnit(v.story_size, v.story_unit)}</td>
               </tr>
@@ -124,7 +124,7 @@ export function SpecSection({ run, spec }: { run: Run; spec: Spec | null }) {
       id="spec"
       title="Spec"
       hint={note}
-      waiting={<Waiting>AI čte příběh a píše specifikaci…</Waiting>}
+      waiting={<Waiting>The LLM is reading the story and writing the spec…</Waiting>}
     >
       {run.result ? (
         <div className="grid gap-4">
@@ -136,9 +136,9 @@ export function SpecSection({ run, spec }: { run: Run; spec: Spec | null }) {
           <Notes r={run.result} />
         </div>
       ) : run.stages.data.state === 'error' ? (
-        <p className="text-sm text-muted">Specifikace je hotová; parametry se ukážou s výsledkem.</p>
+        <p className="text-sm text-muted">The spec is ready; its parameters appear with the result.</p>
       ) : (
-        <Waiting>Specifikace je hotová. Parametry a události se ukážou, až simulátor data vyrobí a ověří.</Waiting>
+        <Waiting>The spec is ready. Parameters and events appear once the simulator has generated and verified the data.</Waiting>
       )}
     </Section>
   )
@@ -175,11 +175,11 @@ export function DataSection({ run }: { run: Run }) {
       run={run}
       id="data"
       title="Data"
-      hint={total > 0 && `${intCs(total)} řádků`}
+      hint={total > 0 && `${intCs(total)} rows`}
       waiting={<SubSteps steps={steps} current={run.job?.step_index ?? 0} />}
     >
       {run.id && (
-        <Suspense fallback={<Waiting>Načítám tabulky…</Waiting>}>
+        <Suspense fallback={<Waiting>Loading tables…</Waiting>}>
           <DataView id={run.id} />
         </Suspense>
       )}
@@ -187,7 +187,7 @@ export function DataSection({ run }: { run: Run }) {
   )
 }
 
-// ---- 4. Detektiv -----------------------------------------------------------------------
+// ---- 4. Detective -----------------------------------------------------------------------
 
 const arrow = (d: string) => (d === 'up' ? '↑' : d === 'down' ? '↓' : '·')
 
@@ -199,13 +199,13 @@ function FoundEvent({ e }: { e: DetectEvent }) {
         <span title={KIND_CS[e.kind] ?? e.kind}>
           {METRIC_CS[e.metric] ?? e.metric} <span className={e.direction === 'down' ? 'text-rose-300' : 'text-emerald-300'}>{arrow(e.direction)}</span>
         </span>
-        <span className="font-mono text-xs text-slate-400">{e.segment || 'všichni'}</span>
+        <span className="font-mono text-xs text-slate-400">{e.segment || 'everyone'}</span>
         <span className="text-xs text-muted">
           {KIND_CS[e.kind] ?? e.kind}, od {dateCs(e.start_date)}
           {e.end_date && ` do ${dateCs(e.end_date)}`}
         </span>
         {e.magnitude_pct !== null && <span className="ml-auto tabular-nums">{withUnit(e.magnitude_pct, '%')}</span>}
-        <span className="text-xs tabular-nums text-muted" title="jistota detektivu">
+        <span className="text-xs tabular-nums text-muted" title="detective confidence">
           {Math.round(e.confidence * 100)} %
         </span>
       </div>
@@ -223,11 +223,11 @@ export function DetectSection({ run }: { run: Run }) {
     <Section
       run={run}
       id="detect"
-      title="Detektiv"
-      hint={d && `${d.events?.length ?? 0} nálezů za ${duration(d.elapsed_s)}`}
+      title="Detective"
+      hint={d && `${d.events?.length ?? 0} findings in ${duration(d.elapsed_s)}`}
       waiting={
         <Waiting>
-          {d?.status === 'queued' ? 'Detektiv čeká ve frontě…' : 'Detektiv prohledává data, aniž by znal příběh…'}
+          {d?.status === 'queued' ? 'The detective is queued…' : 'The detective is searching the data without knowing the story…'}
         </Waiting>
       }
     >
@@ -241,11 +241,11 @@ export function DetectSection({ run }: { run: Run }) {
                 ))}
               </ul>
               {found.length > FIRST_FOUND && (
-                <ShowMore open={all} onClick={() => setAll((a) => !a)} more={found.length - FIRST_FOUND} noun={['nález', 'nálezy', 'nálezů']} />
+                <ShowMore open={all} onClick={() => setAll((a) => !a)} more={found.length - FIRST_FOUND} noun={['finding', 'findings']} />
               )}
             </div>
           ) : (
-            <p className="text-sm text-muted">Detektiv v datech nic nenašel.</p>
+            <p className="text-sm text-muted">The detective found nothing in the data.</p>
           )}
           {d.narrative?.text && (
             <blockquote className="border-l-2 border-line pl-3 text-sm leading-relaxed whitespace-pre-line text-slate-300">
@@ -259,7 +259,7 @@ export function DetectSection({ run }: { run: Run }) {
   )
 }
 
-// ---- 5. Skóre --------------------------------------------------------------------------
+// ---- 5. Score --------------------------------------------------------------------------
 
 type Light = 'green' | 'amber' | 'red' | null
 const LIGHT: Record<string, [string, string]> = {
@@ -282,12 +282,12 @@ function Tile({ label, value, sub, good, light }: { label: string; value: ReactN
 
 function DetectiveTiles({ s }: { s: DetectScore | null }) {
   if (!s)
-    return <Tile label="detektiv" value="–" sub="skóre vidí jen učitel" good={null} />
+    return <Tile label="detective" value="–" sub="only the teacher sees the score" good={null} />
   return (
     <Tile
-      label="detektiv P / R / F1"
+      label="detective P / R / F1"
       value={`${num(s.precision, 2)} / ${num(s.recall, 2)} / ${num(s.f1, 2)}`}
-      sub="přesnost / úplnost / F1 proti klíči"
+      sub="precision / recall / F1 against the key"
       good={s.f1 >= 0.6}
     />
   )
@@ -296,7 +296,7 @@ function DetectiveTiles({ s }: { s: DetectScore | null }) {
 export function ScoreSection({ run }: { run: Run }) {
   const r = run.result
   return (
-    <Section run={run} id="score" title="Skóre">
+    <Section run={run} id="score" title="Score">
       {r && (
         <div className="grid gap-4">
           <div className="grid gap-3 sm:grid-cols-3">
@@ -305,11 +305,11 @@ export function ScoreSection({ run }: { run: Run }) {
               const [hit] = frac(r.summary.twin)
               return (
                 <>
-                  <Tile label="příběh" value={`${ok}/${all}`} sub="událostí potvrzeno v datech" good={all > 0 && ok === all} />
+                  <Tile label="story" value={`${ok}/${all}`} sub="events confirmed in the data" good={all > 0 && ok === all} />
                   <Tile
-                    label="neidentifikované události"
+                    label="unidentified events"
                     value={hit}
-                    sub="nalezeno v dvojčeti, které příběh nemá (má být 0)"
+                    sub="found in the twin, which has no story (should be 0)"
                     light={hit === 0 ? 'green' : hit === 1 ? 'amber' : 'red'}
                   />
                 </>
@@ -320,7 +320,7 @@ export function ScoreSection({ run }: { run: Run }) {
           {r.verification.length > 0 && (
             <details className="group">
               <summary className="cursor-pointer text-sm text-muted select-none hover:text-white">
-                Ověření událost po události (naměřeno, 95% CI, z, SQL)
+                Verification event by event (measured, 95% CI, z, SQL)
               </summary>
               <div className="mt-3">
                 <VerificationTable rows={r.verification} jobId={r.job_id} />
@@ -333,13 +333,13 @@ export function ScoreSection({ run }: { run: Run }) {
   )
 }
 
-// ---- 6. Shrnutí ------------------------------------------------------------------------
+// ---- 6. Summary ------------------------------------------------------------------------
 
 export function SummarySection({ run, spec, mode = 'story' }: { run: Run; spec: Spec | null; mode?: Mode }) {
   return (
-    <Section run={run} id="summary" title="Shrnutí" hint={mode === 'rev' && 'detektiv proti zadání'}>
+    <Section run={run} id="summary" title="Summary" hint={mode === 'rev' && 'detective vs. prompt'}>
       {run.result && run.id && (
-        <Suspense fallback={<Waiting>Připravuji shrnutí…</Waiting>}>
+        <Suspense fallback={<Waiting>Preparing the summary…</Waiting>}>
           {mode === 'rev' && run.detect ? <RevSummary run={run} /> : <Summary run={run} spec={spec} />}
         </Suspense>
       )}
@@ -347,7 +347,7 @@ export function SummarySection({ run, spec, mode = 'story' }: { run: Run; spec: 
   )
 }
 
-/** story: Shrnutí links the prompt to charts and tables; rev: the detective's story against the prompt. */
+/** story: Summary links the prompt to charts and tables; rev: the detective's story against the prompt. */
 export type Mode = 'story' | 'rev'
 
 export function Sections({ run, specName, mode = 'story', composer }: { run: Run; specName?: string; mode?: Mode; composer?: ReactNode }) {

@@ -240,40 +240,40 @@ export function readSpec(yaml: string): Spec | null {
 
 // ---- Czech labels ----------------------------------------------------------------------
 
-export const CHANNEL_CS: Record<string, string> = { eshop: 'e-shop', store: 'kamenné prodejny', app: 'aplikace', marketplace: 'marketplace' }
+export const CHANNEL_CS: Record<string, string> = { eshop: 'e-shop', store: 'physical stores', app: 'app', marketplace: 'marketplace' }
 
 /** s2d/spec.py EventType */
 export const EVENT_TYPE_CS: Record<string, string> = {
-  price_change: 'změna ceny',
-  churn_shock: 'odchod zákazníků',
-  competitor_entry: 'nový konkurent',
-  campaign: 'kampaň',
-  supplier_delay: 'zpoždění dodavatele',
-  stockout: 'výpadek zásob',
-  courier_change: 'změna kurýra',
-  service_outage: 'výpadek služby',
-  quality_issue: 'problém s kvalitou',
-  staff_shortage: 'nedostatek lidí',
-  viral_spike: 'virální výkyv',
+  price_change: 'price change',
+  churn_shock: 'customer churn',
+  competitor_entry: 'new competitor',
+  campaign: 'campaign',
+  supplier_delay: 'supplier delay',
+  stockout: 'stock-out',
+  courier_change: 'courier change',
+  service_outage: 'service outage',
+  quality_issue: 'quality issue',
+  staff_shortage: 'staff shortage',
+  viral_spike: 'viral spike',
 }
 
 /** s2d/spec.py Metric, the ones format.METRIC_CS (the detective's) does not name */
 export const SPEC_METRIC_CS: Record<string, string> = {
-  basket_size: 'velikost košíku',
-  return_rate: 'vratky',
-  payment_failure_rate: 'neúspěšné platby',
+  basket_size: 'basket size',
+  return_rate: 'returns',
+  payment_failure_rate: 'failed payments',
 }
 
 export const TARGET_CS: Record<keyof Target, string> = {
   segment: 'segment',
-  city: 'město',
-  channel: 'kanál',
-  category: 'kategorie',
-  supplier: 'dodavatel',
-  product: 'produkt',
+  city: 'city',
+  channel: 'channel',
+  category: 'category',
+  supplier: 'supplier',
+  product: 'product',
 }
 
-/** "segment student · město Brno", or "všichni" for an empty target. */
+/** "segment student · city Brno", or "everyone" for an empty target. */
 export function targetCs(t: Target, spec?: Spec): string {
   const parts = Object.entries(t)
     .filter(([, v]) => v && v.length)
@@ -283,14 +283,14 @@ export function targetCs(t: Target, spec?: Spec): string {
       )
       return `${TARGET_CS[k as keyof Target] ?? k} ${names.join(', ')}`
     })
-  return parts.length ? parts.join(' · ') : 'všichni'
+  return parts.length ? parts.join(' · ') : 'everyone'
 }
 
-/** "42 dní" / "6 týdnů" / "bez zpoždění" */
+/** "42 days" / "6 weeks" / "no lag" */
 export function lagCs(d: number | undefined): string {
-  if (!d) return 'hned'
-  if (d % 7 === 0 && d >= 14) return `${d / 7} týdnů`
-  return d === 1 ? '1 den' : d < 5 ? `${d} dny` : `${d} dní`
+  if (!d) return 'none'
+  if (d % 7 === 0 && d >= 14) return `${d / 7} weeks`
+  return d === 1 ? '1 day' : `${d} days`
 }
 
 const DAY_MS = 86_400_000
