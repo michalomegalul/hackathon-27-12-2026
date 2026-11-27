@@ -23,6 +23,10 @@ Authorization: Bearer <token>
 
 A job you may not see answers `404 job not found` (not 403), so ids do not leak.
 
+**Public mode** (`API_PUBLIC_ROLE`, on for the hackathon demo with `teacher`): a request **without**
+`Authorization` is user `public` with that role, so the web page works without a login.
+A token still wins, and an unknown token is still `401`.
+
 ## Errors
 
 Every error is `{"detail": "<message>"}` with these codes:

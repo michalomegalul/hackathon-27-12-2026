@@ -1,7 +1,7 @@
 // Typed client for docs/API.md. All URLs are relative (/v1/...): the Vite dev proxy and
 // nginx in production both route them to the API.
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query'
-import { getToken, markTokenInvalid } from './token'
+import { getToken, markTokenInvalid, setLoginRequired } from './token'
 
 // ---- shapes ----------------------------------------------------------------------------
 
@@ -196,7 +196,12 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
     throw new NetworkError('Server je dočasně nedostupný.')
   }
   setNetDown(false)
-  if (res.status === 401) markTokenInvalid() // unknown token: ask for a new one, say why
+  if (res.status === 401) {
+    // a token was sent and is unknown: forget it (the API may be public and work without one);
+    // no token and still 401: the API is not public, so the token form shows
+    if (token) markTokenInvalid()
+    else setLoginRequired()
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: string | ValidationIssue[] } | null
     const detail = body?.detail ?? res.statusText ?? `HTTP ${res.status}`

@@ -60,3 +60,13 @@ export function markTokenInvalid() {
 }
 
 export const useTokenInvalid = () => useSyncExternalStore(subscribe, () => invalid)
+
+// The API may run in public mode (API_PUBLIC_ROLE): then no token is needed and the page opens
+// directly. The token form shows only after a request without a token got 401.
+let loginRequired = false
+export function setLoginRequired() {
+  if (loginRequired) return
+  loginRequired = true
+  listeners.forEach((l) => l())
+}
+export const useLoginRequired = () => useSyncExternalStore(subscribe, () => loginRequired)

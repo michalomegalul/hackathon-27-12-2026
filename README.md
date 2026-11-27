@@ -87,6 +87,7 @@ Set them in `.env` next to `compose.yaml` (never commit it). All have defaults.
 | `DATA_DIR` | `data` (`/data` in Docker) | Job files (`jobs/`) and simulated runs (`runs/`). |
 | `LLM_CACHE_DIR` | `data/llm_cache` | Every LLM response, keyed by hash(step, prompt, schema, model). |
 | `TEXT_POOL_DIR` | `data/text_pools` | Generated review and ticket pools. |
+| `API_PUBLIC_ROLE` | empty (`teacher` in `compose.yaml`) | `student`, `teacher` or `admin`: a request without a token is user `public` with this role. Empty: every request needs a token. Set it to empty after the hackathon. |
 
 Every Ollama call sends `num_ctx 16384`, `keep_alive -1` and `stream false`. Calls with a
 schema send `think false` plus `format`. A different `num_ctx` would make Ollama reload
