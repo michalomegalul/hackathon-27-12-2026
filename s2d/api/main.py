@@ -248,6 +248,8 @@ def compute_stats(now: float | None = None) -> dict:
         "median_run_s": _median_s(list(run_s.values())),
         "events_confirmed_pct": _pct(total["confirmed"], total["tested"]),
         "twin_false_pct": _pct(total["twin_false"], total["twin_tested"]),
+        "events_tested": total["tested"], "events_confirmed": total["confirmed"],
+        "twin_tested": total["twin_tested"], "twin_false": total["twin_false"],
         "customers_simulated": total["customers"], "rows_generated": total["rows"],
         "recent": [{"job_id": st["job_id"], "title": st.get("title", ""), "finished": store.iso(st["finished"]),
                     "elapsed_s": _elapsed(st), "summary": (facts.get(st["job_id"]) or {}).get("summary")}

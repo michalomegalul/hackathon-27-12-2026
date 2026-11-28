@@ -493,7 +493,7 @@ def test_story_preview_and_input(api):
 
 STATS_KEYS = {"jobs_total", "jobs_done", "jobs_today", "running", "waiting", "median_run_s",
               "events_confirmed_pct", "twin_false_pct", "customers_simulated", "rows_generated",
-              "recent", "timeline"}
+              "events_tested", "events_confirmed", "twin_tested", "twin_false", "recent", "timeline"}
 
 
 def test_stats_needs_no_token_and_has_no_owners_or_stories(api, monkeypatch):
@@ -507,6 +507,7 @@ def test_stats_needs_no_token_and_has_no_owners_or_stories(api, monkeypatch):
     assert j["jobs_total"] >= j["jobs_done"] >= 1 and j["jobs_today"] >= 1 and j["waiting"] >= 0
     assert j["median_run_s"] > 0
     assert 0 <= j["events_confirmed_pct"] <= 100 and 0 <= j["twin_false_pct"] <= 100
+    assert j["events_tested"] >= j["events_confirmed"] and j["twin_tested"] >= j["twin_false"]
     assert j["customers_simulated"] >= 1500 and j["rows_generated"] > j["customers_simulated"]
     row = next(x for x in j["recent"] if x["job_id"] == api["id"])
     assert set(row) == {"job_id", "title", "finished", "elapsed_s", "summary"}

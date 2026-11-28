@@ -72,30 +72,30 @@ function Trend({ xs, ys, color, max, unit }: { xs: number[]; ys: (number | null)
   return <div ref={box} className="uplot-dark w-full" />
 }
 
-function Card({ title, value, unit, sub, children }: { title: string; value: ReactNode; unit?: string; sub?: ReactNode; children: ReactNode }) {
+/** One live reading: label, big number, a line of context, the trend. Flat: a hairline on top, no box. */
+function Metric({ title, value, unit, sub, children }: { title: string; value: ReactNode; unit?: string; sub?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border border-line bg-panel p-4 sm:p-5">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-medium tracking-wide text-slate-200 uppercase">{title}</h2>
-        {sub && <span className="truncate text-sm text-slate-300">{sub}</span>}
-      </div>
-      <div className="mt-1 mb-2 flex items-baseline gap-2">
+    <section className="border-t border-line pt-3">
+      <h2 className="text-sm font-medium tracking-wide text-slate-300 uppercase">{title}</h2>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
         <span className="text-5xl font-semibold tabular-nums sm:text-6xl">{value}</span>
         {unit && <span className="text-xl text-slate-300">{unit}</span>}
       </div>
+      <div className="mb-2 min-h-5 text-sm text-slate-300">{sub}</div>
       {children}
     </section>
   )
 }
 
-function Tile({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) {
+/** A track-record figure: the percentage and, underneath, the counts it comes from. */
+function Fact({ label, value, counts, tone }: { label: string; value: ReactNode; counts: ReactNode; tone?: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-panel px-4 py-3">
-      <div className="text-sm tracking-wide text-slate-300 uppercase">{label}</div>
-      <div className="text-4xl font-semibold tabular-nums sm:text-5xl" style={{ color: tone }}>
+    <div>
+      <div className="text-sm text-slate-300">{label}</div>
+      <div className="text-4xl font-semibold tabular-nums" style={{ color: tone }}>
         {value}
       </div>
-      {sub && <div className="truncate text-sm text-slate-300">{sub}</div>}
+      <div className="text-sm text-slate-400 tabular-nums">{counts}</div>
     </div>
   )
 }
@@ -122,61 +122,98 @@ export function Spec() {
   const customersNow = sys?.customers_now ?? 0
   const running = stats?.running
 
+  const gpu = sys?.gpu
+  const onGpu = gpu?.loaded && gpu.model_gb ? Math.round((100 * gpu.vram_gb) / gpu.model_gb) : null
+  const memPct = now?.mem_gb != null && sys?.mem_total_gb ? Math.round((100 * now.mem_gb) / sys.mem_total_gb) : null
+  const jobNow = running
+    ? `${running.step ?? 'running'} · ${Math.round(running.progress * 100)} %${running.eta_s ? ` · ${duration(running.eta_s)} left` : ''}`
+    : sys?.waiting
+      ? `${sys.waiting} waiting`
+      : 'idle'
+
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">What it runs on, live</h1>
         <button
-          className="rounded-lg border border-line px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded border border-line px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
           onClick={() => (document.fullscreenElement ? void document.exitFullscreen() : void document.documentElement.requestFullscreen())}
         >
           Full screen
         </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Server CPU" value={cpuNow === null ? '–' : nf.format(cpuNow)} unit="%" sub={sys?.cores ? `${sys.cores} cores · load ${now?.load ?? '–'}` : undefined}>
-          <Trend xs={xs} ys={col(s, 'cpu')} color={COLOR.cpu} max={100} unit="%" />
-        </Card>
-        <Card
-          title="Customers simulated right now"
-          value={int.format(customersNow)}
-          sub={running ? `${running.step ?? ''} · ${Math.round(running.progress * 100)} %${running.eta_s ? ` · ${duration(running.eta_s)} left` : ''}` : sys?.waiting ? `${sys.waiting} waiting` : 'idle'}
+      <div className="grid gap-x-10 gap-y-6 md:grid-cols-2">
+        <Metric
+          title="Server CPU"
+          value={cpuNow === null ? '–' : nf.format(cpuNow)}
+          unit="%"
+          sub={sys?.cores ? `${sys.cores} cores · load average ${now?.load ?? '–'}` : undefined}
         >
+          <Trend xs={xs} ys={col(s, 'cpu')} color={COLOR.cpu} max={100} unit="%" />
+        </Metric>
+        <Metric title="Customers in the current run" value={int.format(customersNow)} sub={jobNow}>
           <Trend xs={xs} ys={col(s, 'customers')} color={COLOR.customers} unit="customers" />
-        </Card>
-        <Card title="Server memory" value={now?.mem_gb == null ? '–' : nf.format(now.mem_gb)} unit="GB" sub={sys?.mem_total_gb ? `of ${nf.format(sys.mem_total_gb)} GB` : undefined}>
+        </Metric>
+        <Metric
+          title="Server memory in use"
+          value={now?.mem_gb == null ? '–' : nf.format(now.mem_gb)}
+          unit="GB"
+          sub={sys?.mem_total_gb ? `of ${nf.format(sys.mem_total_gb)} GB${memPct === null ? '' : ` · ${memPct} %`}` : undefined}
+        >
           <Trend xs={xs} ys={col(s, 'mem_gb')} color={COLOR.mem} max={sys?.mem_total_gb ?? undefined} unit="GB" />
-        </Card>
-        <Card
-          title="Model on the GPU"
+        </Metric>
+        <Metric
+          title="Language model"
           value={now?.vram_gb == null ? '–' : nf.format(now.vram_gb)}
-          unit="GB VRAM"
-          sub={llm ? `${llm.model} · ${sys?.gpu ? (sys.gpu.loaded ? 'loaded' : 'not loaded') : llm.backend}` : undefined}
+          unit="GB in GPU memory"
+          sub={
+            llm
+              ? `${llm.model} · ${gpu ? (gpu.loaded ? `loaded${onGpu === null ? '' : `, ${Math.min(onGpu, 100)} % of it on the GPU`}` : 'not loaded (idle)') : llm.backend}`
+              : undefined
+          }
         >
           <Trend xs={xs} ys={col(s, 'vram_gb')} color={COLOR.gpu} unit="GB" />
-        </Card>
+        </Metric>
       </div>
 
       {stats && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <Tile label="Customers simulated" value={int.format(stats.customers_simulated)} sub="all runs together" />
-          <Tile label="Rows generated" value={int.format(stats.rows_generated)} sub="in all tables" />
-          <Tile label="Runs" value={int.format(stats.jobs_done)} sub={`${int.format(stats.jobs_today)} today · median ${stats.median_run_s === null ? '–' : duration(stats.median_run_s)}`} />
-          <Tile label="Events confirmed" value={stats.events_confirmed_pct === null ? '–' : `${nf.format(stats.events_confirmed_pct)} %`} sub="detective finds the planted story" tone={COLOR.cpu} />
-          <Tile label="Twin false alarms" value={stats.twin_false_pct === null ? '–' : `${nf.format(stats.twin_false_pct)} %`} sub="same data, no story" tone={COLOR.customers} />
-        </div>
+        <section className="border-t border-line pt-3">
+          <h2 className="mb-3 text-sm font-medium tracking-wide text-slate-300 uppercase">Track record, all runs together</h2>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-6 lg:grid-cols-5">
+            <Fact label="Customers simulated" value={int.format(stats.customers_simulated)} counts={`${int.format(stats.jobs_done)} finished runs`} />
+            <Fact label="Rows generated" value={int.format(stats.rows_generated)} counts="in all tables" />
+            <Fact
+              label="Run time, median"
+              value={stats.median_run_s === null ? '–' : duration(stats.median_run_s)}
+              counts={`${int.format(stats.jobs_today)} started today`}
+            />
+            <Fact
+              label="Planted events found"
+              value={stats.events_confirmed_pct === null ? '–' : `${nf.format(stats.events_confirmed_pct)} %`}
+              counts={`${int.format(stats.events_confirmed)} of ${int.format(stats.events_tested)} testable events`}
+              tone={COLOR.cpu}
+            />
+            <Fact
+              label="False alarms on the twin"
+              value={stats.twin_false_pct === null ? '–' : `${nf.format(stats.twin_false_pct)} %`}
+              counts={`${int.format(stats.twin_false)} of ${int.format(stats.twin_tested)} on data with no story`}
+              tone={COLOR.customers}
+            />
+          </div>
+        </section>
       )}
 
-      <section className="rounded-2xl border border-line bg-panel p-4 sm:p-5">
-        <h2 className="mb-3 text-base font-medium tracking-wide text-slate-200 uppercase">What we use</h2>
-        <ul className="grid gap-x-8 gap-y-2 text-lg md:grid-cols-2">
+      <section className="border-t border-line pt-3">
+        <h2 className="mb-2 text-sm font-medium tracking-wide text-slate-300 uppercase">What we use</h2>
+        <dl className="grid gap-x-10 md:grid-cols-2">
           {STACK.map(([name, what]) => (
-            <li key={name}>
-              <b className="text-white">{name}</b> <span className="text-slate-300">– {what}</span>
-            </li>
+            <div key={name} className="flex flex-col gap-0.5 border-b border-line/60 py-2 sm:flex-row sm:gap-4">
+              <dt className="font-medium text-white sm:w-56 sm:shrink-0">{name}</dt>
+              <dd className="text-slate-300">{what}</dd>
+            </div>
           ))}
-        </ul>
+        </dl>
       </section>
     </div>
   )

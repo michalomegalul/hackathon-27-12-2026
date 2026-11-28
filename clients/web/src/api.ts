@@ -195,6 +195,10 @@ export type Stats = {
   median_run_s: number | null
   events_confirmed_pct: number | null
   twin_false_pct: number | null
+  events_tested: number
+  events_confirmed: number
+  twin_tested: number
+  twin_false: number
   customers_simulated: number
   rows_generated: number
   recent: { job_id: string; title: string; finished: string; elapsed_s: number; summary: Summary | null }[]
@@ -215,7 +219,7 @@ export type SystemInfo = {
   cores: number | null
   mem_total_gb: number | null
   period_s: number
-  gpu: { loaded: boolean; vram_gb: number } | null
+  gpu: { loaded: boolean; vram_gb: number; model_gb?: number } | null
   step: string | null
   customers_now: number
   waiting: number
