@@ -9,7 +9,7 @@ until `status` is `done` or `error`, then read `/result`.
 
 ## Auth
 
-Every endpoint except `GET /v1/health`, `GET /v1/stats`, `/docs` and `/openapi.json` needs
+Every endpoint except `GET /v1/health`, `GET /v1/stats`, `GET /v1/system`, `/docs` and `/openapi.json` needs
 
 ```
 Authorization: Bearer <token>
@@ -65,6 +65,19 @@ Every error is `{"detail": "<message>"}` with these codes:
 `running` is the id of the running job or `null`. `reachable`: Ollama answers (`ollama`), an
 API key is set (`claude`), always `true` for `replay` (cache only, no network). `ok` is
 `false` only when the worker thread is dead.
+
+### `GET /v1/system` (no auth): server load for the live Spec page
+
+One sample a second of the last 15 minutes (oldest first), so a chart is full when it opens.
+CPU, memory and load are the server's (`/proc`); `vram_gb` is the Ollama model's, `null` when
+the backend is not Ollama or does not answer.
+
+```json
+{"cores": 14, "mem_total_gb": 33.4, "period_s": 1.0, "gpu": {"loaded": true, "vram_gb": 17.8},
+ "step": "kalibrace a simulace", "customers_now": 20000, "waiting": 0,
+ "samples": [{"t": 1796000000.0, "cpu": 63.5, "mem_gb": 5.2, "load": 4.1, "vram_gb": 17.8,
+              "progress": 0.55, "customers": 20000}]}
+```
 
 ### `GET /v1/stats` (no auth): the homepage dashboard
 

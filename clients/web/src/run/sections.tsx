@@ -156,7 +156,7 @@ function SubSteps({ steps, current }: { steps: Step[]; current: number }) {
         const running = !s.done && n === current
         return (
           <li key={s.name} className="flex items-center gap-2.5">
-            <span className={`w-4 text-center text-xs ${s.done ? 'text-accent' : running ? 'text-accent' : 'text-slate-600'}`}>
+            <span className={`w-4 text-center text-xs ${s.done ? 'text-emerald-400' : running ? 'text-accent' : 'text-slate-600'}`}>
               {s.done ? '✓' : running ? <Spinner /> : '·'}
             </span>
             <span className={s.done ? 'text-slate-300' : running ? 'text-white' : 'text-slate-500'}>{stepEn(s.name)}</span>

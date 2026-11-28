@@ -44,7 +44,7 @@ function StatusBlock({ s, compact = false }: { s: Status; compact?: boolean }) {
 // ---- process list ----------------------------------------------------------------------
 
 function Marker({ state, n }: { state: StageState; n: number }) {
-  if (state === 'done') return <span className="grid size-5 place-items-center bg-accent/15 text-[11px] font-bold text-accent">✓</span>
+  if (state === 'done') return <span className="grid size-5 place-items-center text-[13px] font-bold text-emerald-400">✓</span>
   if (state === 'error') return <span className="grid size-5 place-items-center bg-rose-500/20 text-[11px] font-bold text-rose-300">!</span>
   if (state === 'running')
     return (

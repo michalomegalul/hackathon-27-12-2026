@@ -149,6 +149,7 @@ function Shell({ children }: { children: ReactNode }) {
     [lastRev ? `/rev/${lastRev}` : '/rev', 'Rev story', pathname === '/rev' || pathname.startsWith('/rev/')],
     ['/history', 'History', pathname.startsWith('/history')],
     ['/demo', 'Demo', pathname.startsWith('/demo')],
+    ['/spec', 'Spec', pathname.startsWith('/spec')],
   ]
   return (
     <div className="flex min-h-dvh flex-col">

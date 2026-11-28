@@ -189,6 +189,28 @@ export type Stats = {
   timeline: { hour: string; jobs: number; median_run_s: number | null }[]
 }
 
+/** GET /v1/system: the server's last 15 minutes, one sample a second (null = not readable). */
+export type SystemSample = {
+  t: number
+  cpu: number | null
+  mem_gb: number | null
+  load: number | null
+  vram_gb: number | null
+  progress: number | null
+  customers: number
+}
+export type SystemInfo = {
+  cores: number | null
+  mem_total_gb: number | null
+  period_s: number
+  gpu: { loaded: boolean; vram_gb: number } | null
+  step: string | null
+  customers_now: number
+  waiting: number
+  samples: SystemSample[]
+}
+export type Health = { ok: boolean; llm: { backend: string; model: string; reachable: boolean } }
+
 // ---- errors ----------------------------------------------------------------------------
 
 /** FastAPI 422 item: `detail` is a list of these. */
@@ -307,6 +329,8 @@ export const getDetect = (id: string) => api<Detect>(`/v1/jobs/${encodeURICompon
 export const getResult = (id: string) => api<JobResult>(`/v1/jobs/${encodeURIComponent(id)}/result`)
 export const getAnswerKey = (id: string) => api<AnswerKey>(`/v1/jobs/${encodeURIComponent(id)}/answer-key`)
 export const getStats = () => api<Stats>('/v1/stats')
+export const getSystem = () => api<SystemInfo>('/v1/system')
+export const getHealth = () => api<Health>('/v1/health')
 export const getTables = (id: string) => api<{ tables: TableInfo[] }>(`/v1/jobs/${encodeURIComponent(id)}/tables`)
 export const getTable = (id: string, name: string, limit = 100, offset = 0, signal?: AbortSignal, world: World = 'story') =>
   api<TablePage>(
@@ -435,3 +459,10 @@ export const tableRowsOptions = (id: string, name: string, enabled: boolean) =>
     staleTime: Infinity, // a finished job's data never changes
     retry: retryTransient,
   })
+
+/** The server's load history; the whole buffer comes each time, so the charts are full from the first paint. */
+export const systemOptions = () =>
+  queryOptions({ queryKey: ['system'], queryFn: getSystem, refetchInterval: 2000, retry: retryTransient })
+
+export const healthOptions = () =>
+  queryOptions({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30_000, retry: retryTransient })

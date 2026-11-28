@@ -558,3 +558,35 @@ def test_stats_running_job(api, monkeypatch):
     finally:
         st.update(status="error", error="test")
         store.save_job(st)
+
+
+# ---------------------------------------------------------------- system load
+
+
+def test_system_needs_no_token_and_the_buffer_is_bounded(api):
+    from s2d.api import main, sysmon
+    c = api["c"]
+    main.monitor.sample()
+    j = c.get("/v1/system").json()
+    assert {"cores", "mem_total_gb", "period_s", "gpu", "step", "customers_now", "waiting", "samples"} <= set(j)
+    assert set(j["samples"][-1]) == {"t", "cpu", "mem_gb", "load", "vram_gb", "progress", "customers"}
+    for _ in range(sysmon.KEEP + 5):
+        main.monitor.sample()
+    assert len(c.get("/v1/system").json()["samples"]) == sysmon.KEEP
+
+
+def test_sysmon_cpu_is_the_delta_between_samples(tmp_path):
+    from s2d.api.sysmon import Monitor
+    (tmp_path / "meminfo").write_text("MemTotal: 1000000 kB\nMemAvailable: 250000 kB\n")
+    (tmp_path / "loadavg").write_text("1.50 1.00 0.50 1/100 123\n")
+    (tmp_path / "stat").write_text("cpu 100 0 100 700 100 0 0 0\n")  # busy 200, total 1000
+    m = Monitor(lambda: {"progress": 0.5, "customers": 7}, proc=tmp_path, gpu=lambda: {"loaded": True, "vram_gb": 9.5})
+    (tmp_path / "stat").write_text("cpu 200 0 200 800 100 0 0 0\n")  # +200 busy of +300 total
+    s = m.sample(now=100.0)
+    assert (s["cpu"], s["mem_gb"], s["load"], s["vram_gb"], s["progress"], s["customers"]) == (66.7, 0.77, 1.5, 9.5, 0.5, 7)
+
+
+def test_sysmon_without_proc_or_gpu_gives_none(tmp_path):
+    from s2d.api.sysmon import Monitor
+    s = Monitor(proc=tmp_path / "nope", gpu=lambda: None).sample(now=1.0)
+    assert (s["cpu"], s["mem_gb"], s["load"], s["vram_gb"], s["progress"], s["customers"]) == (None, None, None, None, None, 0)

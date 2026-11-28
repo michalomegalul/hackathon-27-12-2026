@@ -10,6 +10,7 @@ import { History, HistoryRun } from './pages/History'
 import { Rev } from './pages/Rev'
 import { About } from './pages/About'
 import { Demo } from './pages/Demo'
+import { Spec } from './pages/Spec'
 import { retryTransient } from './api'
 
 const id = (p: { id?: string }) => encodeURIComponent(p.id ?? '')
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
       { path: 'history/:id', Component: HistoryRun },
       { path: 'about', Component: About },
       { path: 'demo', Component: Demo },
+      { path: 'spec', Component: Spec },
       // the v1 links (shared, bookmarked) open the new views
       { path: 'jobs', loader: () => redirect('/history') },
       { path: 'jobs/:id', loader: ({ params }) => redirect(`/run/${id(params)}`) },

@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from s2d.sim import pg
 
-from . import bundle, pipeline, sandbox, store
+from . import bundle, pipeline, sandbox, store, sysmon
 from .auth import User, current_user, staff_user
 from .worker import worker
 
@@ -29,7 +29,9 @@ from .worker import worker
 async def lifespan(_app: FastAPI):
     worker.recover()
     worker.start()
+    monitor.start()
     yield
+    monitor.stop()
     worker.stop()
 
 
@@ -212,6 +214,17 @@ def _running() -> dict | None:
             "eta_s": round(left)}
 
 
+def _pipeline_now() -> dict:
+    """What the pipeline does this second, for the load monitor."""
+    r = _running()
+    st = store.load_job(r["job_id"]) if r and worker.running and worker.running[0] == "generate" else None
+    return {"progress": r["progress"] if r else None, "step": r["step"] if r else None,
+            "customers": int((st or {}).get("n_customers") or 0), "waiting": worker.waiting()}
+
+
+monitor = sysmon.Monitor(_pipeline_now)
+
+
 def compute_stats(now: float | None = None) -> dict:
     now = now or time.time()
     jobs = store.all_jobs()
@@ -249,6 +262,11 @@ def stats():
         if _stats_cache["value"] is None or time.time() - _stats_cache["at"] >= STATS_TTL_S:
             _stats_cache.update(value=compute_stats(), at=time.time())
         return _stats_cache["value"]
+
+
+@app.get("/v1/system")
+def system():
+    return monitor.snapshot()
 
 
 @app.post("/v1/jobs", status_code=202)
