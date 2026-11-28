@@ -4,30 +4,17 @@
 // detective's blind guess, then the chart (story vs twin) and the Postgres card (Summary.Block; a
 // find's chart is the verifier's test of it, Detect.charts). Then every matched pair in a table,
 // and, folded, the detective's finds against the planted events: a matched pair (match.ts, the
-// pairing behind the API's P/R/F1) is linked by an arrow found → planted; a planted event nobody
+// pairing behind the API's P/R/F1) is paired found → planted (same card highlight on hover); a planted event nobody
 // found is marked "not found", a find that is no planted event "false find", a find that follows
-// from a found one "consequence". Arrows: an SVG inside the section (container pixels), drawn in
-// one by one with anime.js when it scrolls into view. Lazy chunk (anime.js).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+// from a found one "consequence". Lazy chunk.
+import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { createScope, createTimeline, onScroll, stagger, svg, utils } from 'animejs'
 import { answerKeyOptions, isStatus, tablesOptions, type DetectEvent, type JobInput, type PlantedEvent, type VerificationRow } from '../api'
 import { Badge } from '../components/ui'
 import { KIND_CS, METRIC_CS, dateCs, num, signed } from '../format'
 import { fromServer, matchEvents, type Matching } from './match'
 import { Block, HighlightedPrompt } from './Summary'
 import type { Run } from './useRun'
-
-function useMedia(q: string) {
-  return useSyncExternalStore(
-    (cb) => {
-      const m = matchMedia(q)
-      m.addEventListener('change', cb)
-      return () => m.removeEventListener('change', cb)
-    },
-    () => matchMedia(q).matches,
-  )
-}
 
 const metricCs = (m: string) => METRIC_CS[m] ?? m
 const arrow = (d: string) => (d === 'up' ? '↑' : d === 'down' ? '↓' : '·')
@@ -195,77 +182,6 @@ function PlantedCard({ t, m, hover, setHover }: { t: PlantedEvent; m: Matching; 
         </>
       }
     />
-  )
-}
-
-// ---- the arrows (container pixels) ---------------------------------------------------------
-
-type Path = { key: string; d: string; x2: number; y2: number }
-
-function geometry(root: HTMLElement, m: Matching): Path[] {
-  const r = root.getBoundingClientRect()
-  const out: Path[] = []
-  for (const p of m.pairs) {
-    const a = root.querySelector<HTMLElement>(`[data-rev="found:${CSS.escape(p.found.id)}"]`)?.getBoundingClientRect()
-    const b = root.querySelector<HTMLElement>(`[data-rev="planted:${CSS.escape(p.planted.event_id)}"]`)?.getBoundingClientRect()
-    if (!a || !b) continue
-    const x1 = a.right - r.left + 3
-    const y1 = a.top - r.top + Math.min(20, a.height / 2)
-    const x2 = b.left - r.left - 5
-    const y2 = b.top - r.top + Math.min(20, b.height / 2)
-    const dx = Math.max(24, (x2 - x1) * 0.5)
-    out.push({ key: p.planted.event_id, x2, y2, d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` })
-  }
-  return out
-}
-
-function Arrows({ root, m, hover, reduce }: { root: HTMLElement; m: Matching; hover: string | null; reduce: boolean }) {
-  const [paths, setPaths] = useState<Path[]>(() => geometry(root, m))
-  useLayoutEffect(() => {
-    let raf = 0
-    const update = () => {
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => setPaths(geometry(root, m)))
-    }
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(root)
-    root.querySelectorAll('[data-rev]').forEach((el) => ro.observe(el))
-    return () => {
-      cancelAnimationFrame(raf)
-      ro.disconnect()
-    }
-  }, [root, m])
-
-  const ref = useRef<SVGSVGElement>(null)
-  const n = paths.length
-  useEffect(() => {
-    if (reduce || !n || !ref.current) return
-    const el = ref.current
-    const scope = createScope().add(() => {
-      const lines = svg.createDrawable(el.querySelectorAll<SVGPathElement>('path.arrow'))
-      const heads = el.querySelectorAll('.head')
-      utils.set(lines, { draw: '0 0' })
-      utils.set(heads, { opacity: 0 })
-      createTimeline({ autoplay: onScroll({ target: root, enter: 'bottom-=20% top' }) })
-        .add(lines, { draw: ['0 0', '0 1'], duration: 600, delay: stagger(220), ease: 'inOutQuad' })
-        .add(heads, { opacity: [0, 1], duration: 200, delay: stagger(220) }, 400)
-    })
-    return () => scope.revert()
-  }, [n, reduce, root])
-
-  return (
-    <svg ref={ref} className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden>
-      {paths.map((p) => {
-        const on = hover === p.key
-        return (
-          <g key={p.key} style={{ opacity: hover === null ? 0.75 : on ? 1 : 0.12, transition: 'opacity 250ms' }}>
-            <path className="arrow" d={p.d} fill="none" stroke="var(--color-accent)" strokeWidth={on ? 2.2 : 1.5} strokeLinecap="round" />
-            <circle className="head" cx={p.x2} cy={p.y2} r={on ? 4.5 : 3.5} fill="var(--color-accent)" />
-          </g>
-        )
-      })}
-    </svg>
   )
 }
 
@@ -521,9 +437,6 @@ export default function RevSummary({ run }: { run: Run }) {
   const [hover, setHover] = useState<string | null>(null)
   const [hl, setHl] = useState<string | null>(null)
   const [at, setAt] = useState(0)
-  const [root, setRoot] = useState<HTMLDivElement | null>(null)
-  const wide = useMedia('(min-width: 1024px)')
-  const reduce = useMedia('(prefers-reduced-motion: reduce)')
 
   const rows = useMemo(() => run.result?.verification ?? [], [run.result])
   const extras = useMemo(
@@ -623,7 +536,7 @@ export default function RevSummary({ run }: { run: Run }) {
         <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">
           Find by find: everything the detective reported against everything the story planted
         </summary>
-        <div ref={setRoot} className="relative mt-4 grid gap-6 lg:grid-cols-2 lg:gap-x-20">
+        <div className="relative mt-4 grid gap-6 lg:grid-cols-2 lg:gap-x-20">
           <div className="grid content-start gap-3">
             <h3 className="text-xs text-muted">Detective, without knowing the story</h3>
             {found.length ? (
@@ -661,7 +574,6 @@ export default function RevSummary({ run }: { run: Run }) {
               ))}
             </ul>
           </div>
-          {wide && root && m.pairs.length > 0 && <Arrows root={root} m={m} hover={hover} reduce={reduce} />}
         </div>
       </details>
     </div>
