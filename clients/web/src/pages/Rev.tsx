@@ -1,18 +1,19 @@
 // Rev story "/rev" and "/rev/:id": data → story. Its input is the data: drop the download ZIP of a
 // run (or its CSVs), the browser fingerprints it and the API finds the run that made it (run/
-// dataFile.ts, POST /v1/jobs/match); demos and earlier runs can be opened directly. On /rev/:id
+// dataFile.ts, POST /v1/jobs/match); demos and earlier runs can be opened directly. "Run again"
+// makes a new run of the same prompt with a new seed even when identical runs exist. On /rev/:id
 // the detective starts by itself (useRun), and Summary sets the
 // detective's story against the original prompt (RevSummary). Same run view as Story, in the
 // order it happens here (REV_ORDER): data, detective, score, then the prompt and the summary.
 import { useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
 import { jobsOptions, matchJobs, type JobListItem, type MatchedJob } from '../api'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { REV_ORDER, useRun } from '../run/useRun'
 import { fingerprint } from '../run/dataFile'
-import { recallSent, useResend, useSend } from '../run/useSend'
+import { recallSent, rerunBody, useResend, useSend } from '../run/useSend'
 import { isDemo, matchesQuery } from '../run/jobs'
 import { forgetLast, useRememberLast } from '../run/lastRun'
 import { Alert, Badge, Spinner } from '../components/ui'
@@ -44,6 +45,15 @@ function Pick({ j, onPick }: { j: JobListItem; onPick: () => void }) {
   )
 }
 
+const btn = 'border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50'
+
+/** "Run again" in Rev story: the same prompt (or spec) as a new run with a new seed, opened here, so
+ *  the detective gets fresh data even when an identical run exists. */
+function useRunAgain() {
+  const send = useSend('/rev')
+  return useMutation({ mutationFn: async (id: string) => send.mutateAsync(await rerunBody(id)) })
+}
+
 type Drop =
   | { phase: 'idle' }
   | { phase: 'reading'; msg: string }
@@ -58,6 +68,7 @@ function DropData() {
   const [over, setOver] = useState(false)
   const [st, setSt] = useState<Drop>({ phase: 'idle' })
   const busy = st.phase === 'reading'
+  const again = useRunAgain()
 
   async function take(list: FileList | null) {
     const files = [...(list ?? [])]
@@ -142,6 +153,12 @@ function DropData() {
                 </li>
               ))}
             </ul>
+            <div className="flex flex-wrap items-center gap-2">
+              <button className={btn} disabled={again.isPending} onClick={() => again.mutate(st.jobs[0].job_id)} title="Same prompt, new seed: new data">
+                {again.isPending ? <Spinner /> : 'Or generate a new run (new seed)'}
+              </button>
+              {again.error && <span className="text-xs text-rose-300">{again.error.message}</span>}
+            </div>
           </div>
         ))}
     </div>
@@ -219,6 +236,7 @@ export function Rev() {
   const { id } = useParams()
   const send = useSend('/rev')
   const run = useRun(id, useResend(id, send))
+  const again = useRunAgain()
   const { data } = useQuery({ ...jobsOptions('all'), enabled: Boolean(id) })
   const title = data?.jobs.find((j) => j.job_id === id)?.title
   useRememberLast('rev', id)
@@ -231,11 +249,20 @@ export function Rev() {
       run={run}
       order={REV_ORDER}
       top={
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
           <Link to="/rev" onClick={() => forgetLast('rev')} className="text-sm text-muted hover:text-white">
             ← Pick another database
           </Link>
-          {title && <span className="text-sm font-medium">{title}</span>}
+          {title && <span className="mr-auto text-sm font-medium">{title}</span>}
+          {again.error && <span className="text-xs text-rose-300">{again.error.message}</span>}
+          <button
+            className={`${btn} ${title ? '' : 'ml-auto'}`}
+            disabled={!run.input || again.isPending}
+            onClick={() => again.mutate(id)}
+            title="The same prompt as a new run with a new seed: new data, the detective runs on them"
+          >
+            {again.isPending ? <Spinner /> : 'Run again with a new seed'}
+          </button>
         </div>
       }
     >
