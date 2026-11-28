@@ -1,8 +1,8 @@
 // Summary, the end of the run page and the demo's money shot: the prompt as sent on top with
-// each event's phrase highlighted (dim until hovered); clicking a phrase pins that event, and
-// under the prompt come its chart (the story against the twin without it, as big as it gets)
-// and its Postgres card, the table and column it changed with the before/after numbers and the
-// SQL that proves it. The first event is pinned to start with. Lazy chunk (uPlot).
+// each event's phrase highlighted (dim until hovered); clicking a phrase jumps to that event.
+// Under the prompt is ONE chart at a time (the story against the twin without it, as big as it
+// gets; Previous / Next steps through them) and its Postgres card, the table and column it changed
+// with the before/after numbers and the SQL that proves it. Lazy chunk (uPlot).
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
@@ -301,16 +301,20 @@ export default function Summary({ run, spec }: { run: Run; spec: Spec | null }) 
   const tables = useQuery(tablesOptions(id, true))
   const rows = r.verification
   const [hover, setHover] = useState<string | null>(null)
-  // one event's charts at a time: the first to start with, then whichever phrase was clicked last
-  const [picked, pin] = useState<string | null>(null)
-  const pinned = picked ?? rows[0]?.event_id ?? null
-  const shown = rows.filter((v) => v.event_id === pinned)
+  // one chart at a time: the first to start with, then whichever phrase was clicked last or Previous / Next
+  const [at, setAt] = useState(0)
+  const i = Math.min(at, Math.max(0, rows.length - 1))
+  const pinned = rows[i]?.event_id ?? null
+  const pin = (ev: string) => setAt(Math.max(0, rows.findIndex((v) => v.event_id === ev)))
+  const shown = rows.slice(i, i + 1)
+  const step = (d: number) => setAt((i + d + rows.length) % rows.length)
+  const btn = 'border border-line px-3 py-1.5 text-sm text-slate-200 hover:border-slate-400 hover:bg-white/5'
 
   return (
     <div className="grid gap-5">
       <Verdict r={r} run={run} spec={spec} />
       <div className="grid gap-2">
-        <h3 className="text-xs text-muted">Prompt as sent · click a highlighted phrase to see its charts</h3>
+        <h3 className="text-xs text-muted">Prompt as sent · click a highlighted phrase to jump to its chart</h3>
         {run.input ? (
           <HighlightedPrompt input={run.input} rows={rows} hover={hover} setHover={setHover} pinned={pinned} pin={pin} />
         ) : (
@@ -325,6 +329,19 @@ export default function Summary({ run, spec }: { run: Run; spec: Spec | null }) 
       </div>
       <div className="grid min-w-0 content-start gap-4">
         {rows.length === 0 && <p className="text-sm text-muted">The story has no verifiable event.</p>}
+        {rows.length > 1 && (
+          <nav aria-label="Charts" className="flex items-center gap-3">
+            <button onClick={() => step(-1)} className={btn}>
+              ← Previous
+            </button>
+            <span className="text-sm tabular-nums text-muted">
+              {i + 1} / {rows.length}
+            </span>
+            <button onClick={() => step(1)} className={btn}>
+              Next →
+            </button>
+          </nav>
+        )}
         {tables.data && shown.map((v) => <Block key={rowKey(v)} jobId={id} v={v} tables={tables.data.tables} />)}
         {r.untested.length > 0 && (
           <p className="text-xs text-muted">
