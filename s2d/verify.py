@@ -1045,6 +1045,69 @@ def verify(run_dir: str | Path, twin_dir: str | Path | None = None) -> dict:
     return res
 
 
+MAX_FINDS = 30  # finds charted per detective run (each costs two tests, ~0.2 s)
+
+
+def find_hypothesis(e: dict) -> Hypothesis | None:
+    """A detective find as a test the verifier can run: its metric (a stock-out: the share of the
+    target's products with no stock), its segment as treated group, its start date. Keys the KPI
+    cannot split by (courier, sku) are left out; a ticket topic filters the tickets."""
+    kpi = "stockout_days" if e.get("kind") == "stockout" else KPI.get(e.get("metric"))
+    if kpi is None:
+        return None
+    seg: dict[str, list[str]] = {}
+    for part in filter(None, (e.get("segment") or "").split(";")):
+        k, _, v = part.partition("=")
+        seg[k] = v.split(",")
+    keys = [k for k in KEY_ORDER if k in seg and k in COLUMNS[kpi]]
+    vary = keys[0] if keys else None
+    if kpi == "stockout_days" and vary is None:
+        return None
+    mag = e.get("magnitude_pct")
+    return Hypothesis(
+        event_id=e["id"], type="detective", metric=e.get("metric") or "", kpi=kpi,
+        segment=";".join(f"{k}={','.join(seg[k])}" for k in keys), vary=vary,
+        treated=seg[vary] if vary else [], fixed={k: seg[k] for k in keys[1:]},
+        start=date.fromisoformat(str(e["start_date"])[:10]), lag=0,
+        direction="up" if kpi == "stockout_days" else e.get("direction") or "up",
+        story_pct=float(mag) if mag is not None and kpi != "stockout_days" else 0.0, expected_pct=None,
+        claim_cs=e.get("hypothesis_cs") or e.get("label_cs") or "",
+        dropped=[k for k in seg if k not in keys and k != "topic"],
+        topic=(seg.get("topic") or [None])[0] if kpi == "tickets" else None)
+
+
+def check_finds_con(con, twin_con, events: list[dict]) -> dict[str, dict]:
+    """The verifier's test of each detective find, on the story and the twin, so the page can
+    chart a find the prompt never told (story against twin, with its SQL) like a planted event.
+    Returns {find id: test row as in verify_con}; a find with no testable KPI is left out."""
+    lo, hi = _range(con)
+    out = {}
+    for e in events[:MAX_FINDS]:
+        h = find_hypothesis(e)
+        if h is None:
+            continue
+        try:
+            h = resolve(con, h, lo, hi)
+            r = test(con, h, lo, hi)
+            if twin_con is not None:
+                tlo, thi = _range(twin_con)
+                t = test(twin_con, h, tlo, thi, check_sql=False)
+                r["twin"] = {k: t.get(k) for k in ("measured_pct", "ci_pct", "z", "confirmed", "status")}
+        except duckdb.Error:
+            continue
+        r.pop("series", None)
+        if not r.get("sql"):  # not testable (too near an edge of the data): still chart what there is
+            r["sql"] = sql(h, lo, hi)
+        out[e["id"]] = r
+    return out
+
+
+def check_finds(run_dir: str | Path, twin_dir: str | Path | None, events: list[dict]) -> dict[str, dict]:
+    con = duckdb.connect(str(Path(run_dir) / "story.duckdb"), read_only=True)
+    twin_con = duckdb.connect(str(Path(twin_dir) / "story.duckdb"), read_only=True) if twin_dir else None
+    return check_finds_con(con, twin_con, events)
+
+
 def world_con(world) -> duckdb.DuckDBPyConnection:
     """An in-memory DuckDB with a simulated world's analyst tables (no files)."""
     from s2d.sim.output import DATE_COLUMNS

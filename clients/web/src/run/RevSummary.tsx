@@ -1,17 +1,21 @@
-// Summary of Rev story: what the blind detective told next to what the story planted. Left the
-// detective's narrative and its finds, right the original prompt and the planted events (from
-// /answer-key; the verification rows if this user may not see it). A matched pair (match.ts, the
+// Summary of Rev story. On top, the prompt that made the data with each planted event highlighted,
+// and under it, written the same way, what the detective found that the prompt never told (its
+// hypotheses). Clicking either shows ONE event at a time: the prompt's sentence beside the
+// detective's blind guess, then the chart (story vs twin) and the Postgres card (Summary.Block; a
+// find's chart is the verifier's test of it, Detect.charts). Then every matched pair in a table,
+// and, folded, the detective's finds against the planted events: a matched pair (match.ts, the
 // pairing behind the API's P/R/F1) is linked by an arrow found → planted; a planted event nobody
-// found is marked "not found", a find that is no planted event "false find", a find that
-// follows from a found one "consequence". Arrows: an SVG inside the section (container pixels),
-// drawn in one by one with anime.js when it scrolls into view. Lazy chunk (anime.js).
+// found is marked "not found", a find that is no planted event "false find", a find that follows
+// from a found one "consequence". Arrows: an SVG inside the section (container pixels), drawn in
+// one by one with anime.js when it scrolls into view. Lazy chunk (anime.js).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createScope, createTimeline, onScroll, stagger, svg, utils } from 'animejs'
-import { answerKeyOptions, isStatus, type DetectEvent, type JobInput, type PlantedEvent, type VerificationRow } from '../api'
+import { answerKeyOptions, isStatus, tablesOptions, type DetectEvent, type JobInput, type PlantedEvent, type VerificationRow } from '../api'
 import { Badge } from '../components/ui'
 import { KIND_CS, METRIC_CS, dateCs, num, signed } from '../format'
 import { fromServer, matchEvents, type Matching } from './match'
+import { Block, HighlightedPrompt } from './Summary'
 import type { Run } from './useRun'
 
 function useMedia(q: string) {
@@ -119,6 +123,17 @@ function FoundCard({ e, m, hover, setHover }: { e: DetectEvent; m: Matching; hov
       setHover={setHover}
       tag={tag}
       dashed={!pair}
+      body={
+        e.hypothesis_cs ? (
+          <>
+            {e.observation_cs && <p className="text-xs text-muted">{e.observation_cs}</p>}
+            <p>
+              <span className="text-xs text-muted">Hypothesis: </span>
+              {e.hypothesis_cs}
+            </p>
+          </>
+        ) : undefined
+      }
       head={
         e.kind === 'stockout' ? (
           <>One SKU with no sales ({e.segment})</>
@@ -254,6 +269,63 @@ function Arrows({ root, m, hover, reduce }: { root: HTMLElement; m: Matching; ho
   )
 }
 
+// ---- prompt sentence vs the detective's hypothesis ------------------------------------------
+
+function SideBySide({ m, hover, setHover }: { m: Matching; hover: string | null; setHover: (k: string | null) => void }) {
+  const pairs = m.pairs
+    .filter((p) => p.planted.narrative_cs || p.found.hypothesis_cs)
+    .sort((a, b) => a.planted.event_id.localeCompare(b.planted.event_id, undefined, { numeric: true }))
+  if (!pairs.length) return null
+  return (
+    <section className="grid gap-2">
+      <h3 className="text-xs text-muted">What the prompt planted and what the detective guessed, for each event it found</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted">
+              <th className="w-0 py-1 pr-3 font-normal">Event</th>
+              <th className="py-1 pr-4 font-normal">Sentence from the prompt</th>
+              <th className="py-1 pr-4 font-normal">Detective's hypothesis</th>
+              <th className="w-0 py-1 font-normal whitespace-nowrap">Match</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pairs.map((p) => {
+              const k = p.planted.event_id
+              const on = hover === k
+              return (
+                <tr
+                  key={k}
+                  tabIndex={0}
+                  onMouseEnter={() => setHover(k)}
+                  onMouseLeave={() => setHover(null)}
+                  onFocus={() => setHover(k)}
+                  onBlur={() => setHover(null)}
+                  className={`border-t border-line align-top transition-[opacity,background-color] duration-300 ${on ? 'bg-accent/[0.04]' : ''} ${
+                    hover !== null && !on ? 'opacity-45' : ''
+                  }`}
+                >
+                  <td className="py-2 pr-3 font-mono text-xs whitespace-nowrap text-accent">
+                    {k} = {p.found.id}
+                  </td>
+                  <td className="py-2 pr-4 text-slate-200">{p.planted.narrative_cs || metricCs(p.planted.metric)}</td>
+                  <td className="py-2 pr-4 text-slate-200">
+                    {p.found.hypothesis_cs || <span className="text-muted">{p.found.label_cs || 'no hypothesis (an older run)'}</span>}
+                    {p.found.observation_cs && <div className="mt-0.5 text-xs text-muted">{p.found.observation_cs}</div>}
+                  </td>
+                  <td className="py-2 text-xs whitespace-nowrap text-muted tabular-nums" title="match per s2d/score.py: 0.4 time + 0.4 segment + 0.2 size">
+                    {num(p.score, 2)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 // ---- the section -------------------------------------------------------------------------
 
 function Prompt({ input }: { input: JobInput | undefined }) {
@@ -308,10 +380,130 @@ function Verdict({ m, nFound, server }: { m: Matching; nFound: number; server: R
   )
 }
 
+// ---- the story: the prompt, then what the detective found on top of it ----------------------------
+
+/** A find that is no planted event but reads like one: a false find or a consequence with its
+ *  hypothesis (single-SKU stock-outs and finds the twin has too are noise, left out). */
+function isExtra(e: DetectEvent, m: Matching) {
+  if (m.pairs.some((p) => p.found.id === e.id) || m.background.some((b) => b.found.id === e.id)) return false
+  if (m.consequences.some((c) => c.found.id === e.id)) return true
+  return e.kind !== 'stockout'
+}
+
+function extraTag(e: DetectEvent, m: Matching): Tag {
+  const c = m.consequences.find((x) => x.found.id === e.id)
+  if (c) return { text: `consequence of ${c.of}`, t: 'gray' }
+  return m.falseFinds.find((f) => f.found.id === e.id)?.decoy ? { text: 'decoy', t: 'red' } : { text: 'not in the prompt', t: 'amber' }
+}
+
+function ExtraFinds({
+  extras,
+  hover,
+  setHover,
+  pinned,
+  pin,
+}: {
+  extras: DetectEvent[]
+  hover: string | null
+  setHover: (k: string | null) => void
+  pinned: string | null
+  pin: (k: string) => void
+}) {
+  if (!extras.length) return null
+  return (
+    <div className="grid gap-1.5">
+      <h3 className="text-xs text-muted">And what the detective found on top of it: not in the prompt, but in the data</h3>
+      <p className="max-w-4xl text-base leading-8 text-slate-500">
+        {extras.map((e) => (
+          <mark
+            key={e.id}
+            tabIndex={0}
+            role="button"
+            aria-pressed={pinned === e.id}
+            onMouseEnter={() => setHover(e.id)}
+            onMouseLeave={() => setHover(null)}
+            onClick={() => pin(e.id)}
+            onKeyDown={(k) => {
+              if (k.key === 'Enter' || k.key === ' ') {
+                k.preventDefault()
+                pin(e.id)
+              }
+            }}
+            className={`mr-1.5 cursor-pointer border-b-2 border-dashed px-0.5 transition-colors duration-200 [box-decoration-break:clone] focus:outline-none ${
+              pinned === e.id
+                ? 'border-amber-300 bg-amber-300/20 text-white'
+                : hover === e.id
+                  ? 'border-amber-300/70 bg-amber-300/10 text-slate-100'
+                  : 'border-amber-300/30 bg-amber-300/[0.04] text-slate-300'
+            }`}
+          >
+            <sup className="mr-0.5 font-mono text-[9px] text-amber-300">{e.id}</sup>
+            {e.hypothesis_cs || e.label_cs || `${metricCs(e.metric)} ${arrow(e.direction)} ${pct(e.magnitude_pct)}`}
+          </mark>
+        ))}
+      </p>
+    </div>
+  )
+}
+
+// ---- one event at a time: the two sentences, then its chart ------------------------------------
+
+function Said({ who, children, tone = 'slate' }: { who: string; children: ReactNode; tone?: 'slate' | 'amber' }) {
+  return (
+    <div className={`grid content-start gap-1 border-l-2 py-1 pl-3 ${tone === 'amber' ? 'border-amber-300/50' : 'border-line'}`}>
+      <span className="text-xs text-muted">{who}</span>
+      <div className="text-sm text-slate-100">{children}</div>
+    </div>
+  )
+}
+
+function Guess({ e }: { e: DetectEvent }) {
+  return (
+    <>
+      <p>{e.hypothesis_cs || e.label_cs || <span className="text-muted">no hypothesis (an older run)</span>}</p>
+      {e.observation_cs && <p className="mt-0.5 text-xs text-muted">{e.observation_cs}</p>}
+    </>
+  )
+}
+
+type Item = { key: string; v?: VerificationRow; find?: DetectEvent; planted?: PlantedEvent }
+
+function ItemHead({ it, m }: { it: Item; m: Matching }) {
+  if (it.planted || !it.find) {
+    const pair = m.pairs.find((p) => p.planted.event_id === it.key)
+    return (
+      <header className="grid gap-3 sm:grid-cols-2">
+        <Said who={`${it.key} · the prompt says`}>{it.v?.claim_cs || it.planted?.narrative_cs}</Said>
+        {pair ? (
+          <Said who={`${pair.found.id} · the detective guessed, blind (match ${num(pair.score, 2)}, offset ${signed(pair.slots.deltaDays)} d)`}>
+            <Guess e={pair.found} />
+          </Said>
+        ) : (
+          <Said who="the detective" tone="amber">
+            <span className="text-amber-200">did not find this one</span>
+          </Said>
+        )}
+      </header>
+    )
+  }
+  const tag = extraTag(it.find, m)
+  return (
+    <header className="grid gap-3 sm:grid-cols-2">
+      <Said who="the prompt says" tone="amber">
+        <span className="text-muted">nothing about this</span> <Badge t={tag.t}>{tag.text}</Badge>
+      </Said>
+      <Said who={`${it.find.id} · the detective guessed, blind (confidence ${Math.round(it.find.confidence * 100)} %)`}>
+        <Guess e={it.find} />
+      </Said>
+    </header>
+  )
+}
+
 export default function RevSummary({ run }: { run: Run }) {
   const id = run.id!
   const d = run.detect!
   const key = useQuery(answerKeyOptions(id, true))
+  const tables = useQuery(tablesOptions(id, true))
   const forbidden = isStatus(key.error, 403) || isStatus(key.error, 401)
   const planted = useMemo(
     () => (key.data ? key.data.answer_key : forbidden && run.result ? fromVerification(uniqueEvents(run.result.verification)) : null),
@@ -327,22 +519,46 @@ export default function RevSummary({ run }: { run: Run }) {
     [found, planted, key.data, d.matching],
   )
   const [hover, setHover] = useState<string | null>(null)
+  const [hl, setHl] = useState<string | null>(null)
+  const [at, setAt] = useState(0)
   const [root, setRoot] = useState<HTMLDivElement | null>(null)
   const wide = useMedia('(min-width: 1024px)')
   const reduce = useMedia('(prefers-reduced-motion: reduce)')
 
+  const rows = useMemo(() => run.result?.verification ?? [], [run.result])
+  const extras = useMemo(
+    () => (m ? found.filter((e) => isExtra(e, m)).sort((a, b) => a.start_date.localeCompare(b.start_date)) : []),
+    [found, m],
+  )
+  // the planted events (one chart per verification row), then the detective's own finds
+  const items = useMemo<Item[]>(() => {
+    const charts = new Map((d.charts ?? []).map((v) => [v.event_id, v]))
+    const byId = new Map((planted ?? []).map((t) => [t.event_id, t]))
+    return [
+      ...rows.map((v) => ({ key: v.event_id, v, planted: byId.get(v.event_id) })),
+      ...extras.map((e) => ({ key: e.id, v: charts.get(e.id), find: e })),
+    ]
+  }, [rows, extras, d.charts, planted])
+
   if (key.error && !forbidden) return <p className="text-sm text-rose-200">{key.error.message}</p>
   if (!m || !planted) return <p className="text-sm text-muted">Loading the planted events…</p>
 
+  const i = Math.min(at, Math.max(0, items.length - 1))
+  const it = items[i]
+  const pinned = it?.key ?? null
+  const pin = (k: string) => setAt(Math.max(0, items.findIndex((x) => x.key === k)))
+  const step = (n: number) => setAt((i + n + items.length) % items.length)
+  const btn = 'border border-line px-3 py-1.5 text-sm text-slate-200 hover:border-slate-400 hover:bg-white/5'
+
   // found: pairs first in planted order, then consequences, then false finds; planted in story order
-  const order = new Map(planted.map((t, i) => [t.event_id, i]))
+  const order = new Map(planted.map((t, j) => [t.event_id, j]))
   const foundSorted = [...found].sort((a, b) => rank(a) - rank(b))
   // stock-outs of single SKUs that are no planted event: folded into one line instead of a wall of "false find"
   const isLooseStockout = (e: DetectEvent) =>
     e.kind === 'stockout' &&
-    !m!.pairs.some((p) => p.found.id === e.id) &&
-    !m!.consequences.some((c) => c.found.id === e.id) &&
-    !m!.background.some((b) => b.found.id === e.id)
+    !m.pairs.some((p) => p.found.id === e.id) &&
+    !m.consequences.some((c) => c.found.id === e.id) &&
+    !m.background.some((b) => b.found.id === e.id)
   const looseStockouts = foundSorted.filter(isLooseStockout)
   function rank(e: DetectEvent) {
     const p = m!.pairs.find((x) => x.found.id === e.id)
@@ -352,56 +568,102 @@ export default function RevSummary({ run }: { run: Run }) {
   }
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-5">
       <Verdict m={m} nFound={found.length} server={d} />
-      <div ref={setRoot} className="relative grid gap-6 lg:grid-cols-2 lg:gap-x-20">
-        <div className="grid content-start gap-3">
-          <h3 className="text-xs text-muted">Detective, without knowing the story</h3>
-          {d.narrative?.text ? (
-            <blockquote className="border-l-2 border-line py-1 pl-3 text-sm leading-relaxed whitespace-pre-line text-slate-200">
-              {d.narrative.text}
-              {d.narrative.source && <footer className="mt-2 text-xs text-slate-500">{d.narrative.source}</footer>}
-            </blockquote>
+
+      <div className="grid gap-4">
+        <div className="grid gap-2">
+          <h3 className="text-xs text-muted">The prompt that made the data · click a highlighted phrase for its chart and the detective's guess</h3>
+          {run.input ? (
+            <HighlightedPrompt input={run.input} rows={rows} hover={hl} setHover={setHl} pinned={pinned} pin={pin} />
           ) : (
-            <p className="text-sm text-muted">The detective wrote no story.</p>
-          )}
-          {found.length ? (
-            <>
-              <ul className="grid gap-1.5">
-                {foundSorted.filter((e) => !isLooseStockout(e)).map((e) => (
-                  <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
-                ))}
-              </ul>
-              {looseStockouts.length > 0 && (
-                <details className="border-l-2 border-dashed border-line py-1 pl-3 text-sm">
-                  <summary className="cursor-pointer text-slate-300 select-none hover:text-white">
-                    {looseStockouts.length} single-SKU stock-outs that match no planted event{' '}
-                    <span className="text-xs text-muted">(the simulator's inventory also runs out by itself; counted as false finds in the score)</span>
-                  </summary>
-                  <ul className="mt-2 grid gap-1.5">
-                    {looseStockouts.map((e) => (
-                      <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-muted">The detective found nothing in the data.</p>
+            <p className="text-sm text-muted">Loading the prompt…</p>
           )}
         </div>
-        <div className="grid content-start gap-3">
-          <h3 className="text-xs text-muted">Original prompt and planted events</h3>
-          <Prompt input={run.input} />
-          {forbidden && <p className="text-[11px] text-slate-500">Only the teacher sees the answer key; the events come from the verification table.</p>}
-          <ul className="grid gap-1.5">
-            {planted.map((t) => (
-              <PlantedCard key={t.event_id} t={t} m={m} hover={hover} setHover={setHover} />
-            ))}
-          </ul>
-        </div>
-        {wide && root && m.pairs.length > 0 && <Arrows root={root} m={m} hover={hover} reduce={reduce} />}
+        <ExtraFinds extras={extras} hover={hl} setHover={setHl} pinned={pinned} pin={pin} />
+        {d.narrative?.text && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">The detective's own story, written blind</summary>
+            <p className="mt-2 max-w-4xl leading-relaxed whitespace-pre-line text-slate-300">{d.narrative.text}</p>
+            {d.narrative.source && <p className="mt-1 text-xs text-slate-500">{d.narrative.source}</p>}
+          </details>
+        )}
       </div>
+
+      <div className="grid min-w-0 content-start gap-4">
+        {items.length > 1 && (
+          <nav aria-label="Events" className="flex items-center gap-3">
+            <button onClick={() => step(-1)} className={btn}>
+              ← Previous
+            </button>
+            <span className="text-sm tabular-nums text-muted">
+              {i + 1} / {items.length}
+            </span>
+            <button onClick={() => step(1)} className={btn}>
+              Next →
+            </button>
+          </nav>
+        )}
+        {it &&
+          (it.v && tables.data ? (
+            <Block key={`${it.key}·${i}`} jobId={id} v={it.v} tables={tables.data.tables} head={<ItemHead it={it} m={m} />} />
+          ) : (
+            <article className="grid gap-3 border-t border-line pt-4">
+              <ItemHead it={it} m={m} />
+              <p className="text-sm text-muted">
+                {it.v ? 'Loading the tables…' : 'No chart for this find (a run from before the detective tested its finds, or a KPI it cannot chart).'}
+              </p>
+            </article>
+          ))}
+      </div>
+
+      <SideBySide m={m} hover={hover} setHover={setHover} />
+
+      <details className="grid gap-4">
+        <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">
+          Find by find: everything the detective reported against everything the story planted
+        </summary>
+        <div ref={setRoot} className="relative mt-4 grid gap-6 lg:grid-cols-2 lg:gap-x-20">
+          <div className="grid content-start gap-3">
+            <h3 className="text-xs text-muted">Detective, without knowing the story</h3>
+            {found.length ? (
+              <>
+                <ul className="grid gap-1.5">
+                  {foundSorted.filter((e) => !isLooseStockout(e)).map((e) => (
+                    <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
+                  ))}
+                </ul>
+                {looseStockouts.length > 0 && (
+                  <details className="border-l-2 border-dashed border-line py-1 pl-3 text-sm">
+                    <summary className="cursor-pointer text-slate-300 select-none hover:text-white">
+                      {looseStockouts.length} single-SKU stock-outs that match no planted event{' '}
+                      <span className="text-xs text-muted">(the simulator's inventory also runs out by itself; counted as false finds in the score)</span>
+                    </summary>
+                    <ul className="mt-2 grid gap-1.5">
+                      {looseStockouts.map((e) => (
+                        <FoundCard key={e.id} e={e} m={m} hover={hover} setHover={setHover} />
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted">The detective found nothing in the data.</p>
+            )}
+          </div>
+          <div className="grid content-start gap-3">
+            <h3 className="text-xs text-muted">Original prompt and planted events</h3>
+            <Prompt input={run.input} />
+            {forbidden && <p className="text-[11px] text-slate-500">Only the teacher sees the answer key; the events come from the verification table.</p>}
+            <ul className="grid gap-1.5">
+              {planted.map((t) => (
+                <PlantedCard key={t.event_id} t={t} m={m} hover={hover} setHover={setHover} />
+              ))}
+            </ul>
+          </div>
+          {wide && root && m.pairs.length > 0 && <Arrows root={root} m={m} hover={hover} reduce={reduce} />}
+        </div>
+      </details>
     </div>
   )
 }

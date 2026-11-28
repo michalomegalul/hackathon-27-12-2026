@@ -1,13 +1,14 @@
 // Rev story "/rev" and "/rev/:id": data → story. Pick a finished database (or attach a .yaml spec,
 // which runs as a job first), the detective starts by itself (useRun), and Summary sets the
-// detective's story against the original prompt (RevSummary). Same run view as Story.
+// detective's story against the original prompt (RevSummary). Same run view as Story, in the
+// order it happens here (REV_ORDER): data, detective, score, then the prompt and the summary.
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
 import { jobsOptions, type JobListItem } from '../api'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
-import { useRun } from '../run/useRun'
+import { REV_ORDER, useRun } from '../run/useRun'
 import { recallSent, useResend, useSend } from '../run/useSend'
 import { isDemo, matchesQuery } from '../run/jobs'
 import { forgetLast, useRememberLast } from '../run/lastRun'
@@ -152,6 +153,7 @@ export function Rev() {
   return (
     <RunView
       run={run}
+      order={REV_ORDER}
       top={
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
           <Link to="/rev" onClick={() => forgetLast('rev')} className="text-sm text-muted hover:text-white">

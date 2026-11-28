@@ -28,7 +28,20 @@ function Waiting({ children }: { children: ReactNode }) {
 
 // ---- 1. Prompt -------------------------------------------------------------------------
 
-export function PromptSection({ run, specName, composer }: { run: Run; specName?: string; composer?: ReactNode }) {
+export function PromptSection({
+  run,
+  specName,
+  composer,
+  title = 'Prompt',
+  children,
+}: {
+  run: Run
+  specName?: string
+  composer?: ReactNode
+  title?: string
+  /** under the prompt (Rev story: the spec, folded) */
+  children?: ReactNode
+}) {
   const i = run.input
   // a new run: the prompt is typed right here
   if (composer)
@@ -42,19 +55,22 @@ export function PromptSection({ run, specName, composer }: { run: Run; specName?
       </section>
     )
   return (
-    <Section run={run} id="prompt" title="Prompt" hint={run.id && <span className="font-mono">{run.id}</span>}>
-      {!i ? (
-        <Waiting>Loading the prompt…</Waiting>
-      ) : i.spec_given ? (
-        <p className="text-sm text-slate-300">
-          Ready-made spec{specName ? <span className="font-mono"> {specName}</span> : null}, no LLM.
-        </p>
-      ) : (
-        <div className="grid max-w-3xl gap-2 border-l-2 border-line py-1 pl-4 text-sm leading-relaxed">
-          <p className="text-slate-300">{i.company}</p>
-          {i.story && i.story !== i.company && <p className="whitespace-pre-line text-slate-100">{i.story}</p>}
-        </div>
-      )}
+    <Section run={run} id="prompt" title={title} hint={run.id && <span className="font-mono">{run.id}</span>}>
+      <div className="grid gap-4">
+        {!i ? (
+          <Waiting>Loading the prompt…</Waiting>
+        ) : i.spec_given ? (
+          <p className="text-sm text-slate-300">
+            Ready-made spec{specName ? <span className="font-mono"> {specName}</span> : null}, no LLM.
+          </p>
+        ) : (
+          <div className="grid max-w-3xl gap-2 border-l-2 border-line py-1 pl-4 text-sm leading-relaxed">
+            <p className="text-slate-300">{i.company}</p>
+            {i.story && i.story !== i.company && <p className="whitespace-pre-line text-slate-100">{i.story}</p>}
+          </div>
+        )}
+        {children}
+      </div>
     </Section>
   )
 }
@@ -211,6 +227,12 @@ function FoundEvent({ e }: { e: DetectEvent }) {
           {Math.round(e.confidence * 100)} %
         </span>
       </div>
+      {e.hypothesis_cs && (
+        <p className="text-slate-300">
+          <span className="text-xs text-muted">Hypothesis: </span>
+          {e.hypothesis_cs}
+        </p>
+      )}
     </li>
   )
 }
@@ -354,6 +376,28 @@ export type Mode = 'story' | 'rev'
 
 export function Sections({ run, specName, mode = 'story', composer }: { run: Run; specName?: string; mode?: Mode; composer?: ReactNode }) {
   const spec = useSpec(run.result?.spec_yaml)
+  if (mode === 'rev')
+    // the order it happens in here (useRun.REV_ORDER): data, the detective reads it, the score, and
+    // only then the prompt that made the data (its spec folded in) and the summary of both
+    return (
+      <>
+        <DataSection run={run} />
+        <DetectSection run={run} />
+        <ScoreSection run={run} />
+        <PromptSection run={run} specName={specName} title="Prompt that made the data">
+          {run.result && (
+            <details>
+              <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">The spec the LLM wrote from it</summary>
+              <div className="mt-3 grid gap-4">
+                <SpecView r={run.result} spec={spec} fallback={<EventsTable r={run.result} />} />
+                <Notes r={run.result} />
+              </div>
+            </details>
+          )}
+        </PromptSection>
+        <SummarySection run={run} spec={spec} mode={mode} />
+      </>
+    )
   return (
     <>
       <PromptSection run={run} specName={specName} composer={composer} />

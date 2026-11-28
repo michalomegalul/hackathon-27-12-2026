@@ -450,4 +450,6 @@ def get_detect(job_id: str, user: User = Depends(current_user)):
             "elapsed_s": _elapsed(d), "error": d.get("error"),
             "events": res["events"] if res else None, "narrative": res["narrative"] if res else None,
             "score": res["score"] if res and user.staff else None,
-            "matching": res.get("matching") if res and user.staff else None}
+            "matching": res.get("matching") if res and user.staff else None,
+            # the verifier's test of each find (story vs twin, SQL): charts, no answer key in them
+            "charts": res.get("charts") if res else None}

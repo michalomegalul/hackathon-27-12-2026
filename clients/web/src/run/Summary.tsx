@@ -44,7 +44,7 @@ function Verdict({ r, run, spec }: { r: JobResult; run: Run; spec: Spec | null }
 
 // ---- the prompt with highlights ----------------------------------------------------------
 
-function HighlightedPrompt({
+export function HighlightedPrompt({
   input,
   rows,
   hover,
@@ -256,22 +256,28 @@ function PgCard({ jobId, v, tables, lit }: { jobId: string; v: VerificationRow; 
 
 // ---- one block per verification row -----------------------------------------------------
 
-function Block({
+/** One event: its sentence, the chart (story vs twin) and the Postgres card. `head` replaces the
+ *  sentence line (Rev story puts the prompt and the detective's hypothesis there side by side). */
+export function Block({
   jobId,
   v,
   tables,
+  head,
 }: {
   jobId: string
   v: VerificationRow
   tables: TableInfo[]
+  head?: ReactNode
 }) {
   return (
     <article className="grid min-w-0 gap-4 border-t border-line pt-4">
-      <header className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-sm">
-        <span className="font-mono text-xs text-accent">{v.event_id}</span>
-        <span className="min-w-0 flex-1">{v.claim_cs}</span>
-        <VerificationBadge s={v.status} />
-      </header>
+      {head ?? (
+        <header className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-sm">
+          <span className="font-mono text-xs text-accent">{v.event_id}</span>
+          <span className="min-w-0 flex-1">{v.claim_cs}</span>
+          <VerificationBadge s={v.status} />
+        </header>
+      )}
       <figure data-target={`${rowKey(v)}:chart`} className="grid gap-1.5 py-1">
         <figcaption className="flex flex-wrap items-baseline gap-x-3 text-xs">
           <span className="font-medium text-slate-200">{KPI_CS[v.kpi] ?? v.kpi}</span>

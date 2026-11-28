@@ -122,6 +122,45 @@ def test_narrator_survives_llm_failure(monkeypatch):
     assert "LLM failed" in out["source"] and "klesají o 20 %" in out["narrative_cs"]
 
 
+def test_narrator_fills_missing_hypothesis_from_rules(monkeypatch):
+    monkeypatch.setattr(narrate.llm, "complete", lambda *a, **k: {
+        "events": [{"candidate_id": "C001", "accept": True, "merged_into": None, "label_cs": "Pokles v Brně",
+                    "observation_cs": "Objednávky v Brně klesly.", "hypothesis_cs": "Konkurence v Brně."},
+                   {"candidate_id": "C002", "accept": True, "merged_into": None, "label_cs": "x",
+                    "observation_cs": "", "hypothesis_cs": " "}],
+        "narrative_cs": "V září klesly objednávky v Brně."})
+    out = narrate.narrate(_result())
+    ev = {e["candidate_id"]: e for e in out["events"]}
+    assert ev["C001"]["hypothesis_cs"] == "Konkurence v Brně."
+    assert ev["C002"]["hypothesis_cs"].strip() and ev["C002"]["observation_cs"].startswith("Od 2026-09-07")
+
+
+def test_template_hypothesis_uses_anchors_and_causes():
+    res = _result(1)
+    res["anchors"] = [{"kind": "price", "date": "2026-08-20", "segment": "category=kava", "pct": 15.0}]
+    out = narrate._template(res)
+    assert "Zdražení o 15 % od 2026-08-20" in out["events"][0]["hypothesis_cs"]
+    res["anchors"] = []
+    churn = {**res["events"][0], "id": "C002", "metric": "churn_hazard", "direction": "up",
+             "caused_by": "C001", "lag_days": 14}
+    res["events"].append(churn)
+    hyp = {e["candidate_id"]: e["hypothesis_cs"] for e in narrate._template(res)["events"]}
+    assert hyp["C002"].startswith("Navazuje na C001")
+    assert "konkurence" in hyp["C001"].lower() and "Brno" in hyp["C001"]
+    assert "roste" in narrate.observation(churn)  # "odchod zákazníků roste", singular
+
+
+def test_prompt_examples_are_not_planted_sentences():
+    """The blind detective must not see a spec's narrative_cs as an example."""
+    import yaml
+    from pathlib import Path
+    prompt = narrate.build_prompt(_result())
+    for f in Path(__file__).parents[1].glob("examples/*.yaml"):
+        for ev in (yaml.safe_load(f.read_text()) or {}).get("events") or []:
+            text = (ev or {}).get("narrative_cs")
+            assert not text or text not in prompt, f"{f.name}: {text}"
+
+
 def test_narrator_uses_detective_step_with_schema(monkeypatch):
     seen = {}
 

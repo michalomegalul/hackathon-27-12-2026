@@ -225,7 +225,7 @@ def run_generate(state: dict) -> None:
 
 
 def run_detect(state: dict) -> None:
-    from s2d import detective, score
+    from s2d import detective, score, verify
 
     jd = store.job_dir(state["job_id"])
     run, twin = jd / "run", jd / "run" / "twin"
@@ -235,17 +235,27 @@ def run_detect(state: dict) -> None:
     detective.save(res, run / "detective.json")
     tw = detective.run(twin, narrate=False)
     detective.save(tw, twin / "detective.json")
+    # the verifier's test of every find (story against twin, with its SQL): the page charts a
+    # find the prompt never told like a planted event
+    words = {n["candidate_id"]: n for n in (res.get("narration") or {}).get("events", [])}
+    tested = verify.check_finds(run, twin, [{**e, **words.get(e["id"], {})} for e in res["events"]])
     card = score.scorecard(run, twin)
     store.write_json(run / "scorecard.json", card)
     cols = ["id", "metric", "segment", "start_date", "end_date", "direction", "magnitude_pct",
             "lag_days", "caused_by", "kind", "confidence", "evidence"]
     narr = res.get("narration") or {}
+    # the narrator's words per find: what is odd and its hypothesis (the web sets it beside
+    # the planted event's narrative_cs)
+    words = {n["candidate_id"]: n for n in narr.get("events", [])}
+    texts = ("label_cs", "observation_cs", "hypothesis_cs")
     out = {
-        "events": [{k: e.get(k) for k in cols} for e in res["events"]],
+        "events": [{**{k: e.get(k) for k in cols}, **{k: words.get(e["id"], {}).get(k, "") for k in texts}}
+                   for e in res["events"]],
         "narrative": {"text": narr.get("narrative_cs", ""), "source": narr.get("source", "")},
         "score": _score_summary(card["score"], card.get("twin", {}).get("false_events_per_year"),
                                 card["placebo"]["p_value"]),
         "matching": matching(card["score"]),
+        "charts": verification_rows({"tests": list(tested.values())}),
     }
     store.write_json(jd / "detect_result.json", json.loads(json.dumps(out, default=str)))
 

@@ -445,16 +445,31 @@ returned as is (no second run).
   "events": [{"id": "C3", "metric": "orders", "segment": "segment=student",
               "start_date": "2026-03-02", "end_date": null, "direction": "down",
               "magnitude_pct": -12.8, "lag_days": null, "caused_by": null,
-              "kind": "shift", "confidence": 0.9, "evidence": "..."}],
+              "kind": "shift", "confidence": 0.9, "evidence": "...",
+              "label_cs": "Pokles objednávek studentů",
+              "observation_cs": "Od 2026-03-02 objednávky (segment student) klesají o 13 %.",
+              "hypothesis_cs": "Studenti po zdražení nakupují méně."}],
   "narrative": {"text": "V březnu 2026 začali ubývat studenti ...", "source": "ollama gemma4:26b"},
   "score": {"precision": 1.0, "recall": 0.75, "f1": 0.86,
-            "twin_false_events_per_year": 0.5, "placebo_p": 0.01}
+            "twin_false_events_per_year": 0.5, "placebo_p": 0.01},
+  "matching": {"pairs": [{"found_id": "C3", "event_id": "E2", "score": 0.83, "...": "..."}],
+               "missed": [], "false_finds": [], "consequences": [], "background": []},
+  "charts": [{"event_id": "C3", "claim_cs": "Studenti po zdražení nakupují méně.", "kpi": "orders",
+              "...": "as a verification row of the result"}]
 }
 ```
 
 `status`/`position` as for a job (the detective waits in the same queue and takes about
-40 s). `events`, `narrative` and `score` are `null` until `done`. `score` is `null` for a student
-(always). 404 `"detective not run"` before a `POST`.
+40 s). `events`, `narrative`, `score` and `charts` are `null` until `done`. `score` and
+`matching` are `null` for a student (always). 404 `"detective not run"` before a `POST`.
+
+Each find carries the narrator's words: `label_cs` (a few words), `observation_cs` (what is odd
+in the data) and `hypothesis_cs` (what most likely happened, one Czech sentence shaped like a
+spec event's `narrative_cs`). They are `""` in results saved before they existed. `charts` is the
+verifier's test of each find, in the shape of the result's `verification` rows with
+`event_id` = the find's `id` and `claim_cs` = its hypothesis: the story against the twin with
+the SQL, so a client can chart a find the prompt never told like a planted event (a find with
+no testable KPI is left out; `null` in older results).
 
 ## curl
 

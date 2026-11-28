@@ -137,6 +137,11 @@ export type DetectEvent = {
   kind: string
   confidence: number
   evidence: string
+  /** the narrator's words (absent in results saved before them): a short label, what is odd, and
+   *  its hypothesis of what happened, one Czech sentence shaped like a spec's narrative_cs */
+  label_cs?: string
+  observation_cs?: string
+  hypothesis_cs?: string
 }
 export type DetectScore = {
   precision: number
@@ -166,6 +171,8 @@ export type Detect = {
   narrative: { text: string; source: string } | null
   score: DetectScore | null
   matching?: DetectMatching | null
+  /** the verifier's test of each find (event_id = the find's id): its chart, story vs twin, and SQL */
+  charts?: VerificationRow[] | null
 }
 
 /** GET /answer-key row: an event the story planted (the hidden truth; teacher and admin). */

@@ -301,3 +301,32 @@ def test_the_brief_story_is_confirmed_and_its_twin_is_not():
     r = res["tests"][0]
     assert r["confirmed"] and r["measured_pct"] == pytest.approx(-5, abs=1.5)
     assert not r["twin"]["confirmed"] and abs(r["twin"]["measured_pct"]) < 2.5
+
+
+def _find(**k):
+    return {"id": "C001", "metric": "purchase_rate", "segment": "city=Brno;channel=store",
+            "start_date": "2026-09-07", "direction": "down", "magnitude_pct": -40.0, "kind": "shift",
+            "hypothesis_cs": "Nejspíš konkurence v Brně.", **k}
+
+
+def test_a_find_becomes_a_hypothesis():
+    h = verify.find_hypothesis(_find())
+    assert (h.kpi, h.vary, h.treated, h.fixed, str(h.T)) == ("orders", "city", ["Brno"], {"channel": ["store"]}, "2026-09-07")
+    assert h.claim_cs == "Nejspíš konkurence v Brně." and h.type == "detective"
+    s = verify.find_hypothesis(_find(kind="stockout", segment="category=etiopie;supplier=S_ETH;sku=X1"))
+    assert (s.kpi, s.vary, s.fixed, s.direction) == ("stockout_days", "supplier", {"category": ["etiopie"]}, "up")
+    assert verify.find_hypothesis(_find(kind="stockout", segment="sku=X1")) is None  # nothing to compare with
+    t = verify.find_hypothesis(_find(metric="ticket_rate", segment="topic=zpoždění;city=Plzeň"))
+    assert (t.kpi, t.topic, t.treated) == ("tickets", "zpoždění", ["Plzeň"])
+
+
+def test_finds_are_tested_on_story_and_twin(worlds):
+    spec, _ = worlds
+    story = simulate(spec, seed=5)
+    twin = simulate(without_story(spec), seed=5)
+    out = verify.check_finds_con(verify.world_con(story), verify.world_con(twin),
+                                 [_find(), _find(id="C002", metric="unknown")])
+    assert set(out) == {"C001"}  # a find with no KPI is left out
+    r = out["C001"]
+    assert r["confirmed"] and r["measured_pct"] < -30 and r["sql"] and r["sql_matches"]
+    assert not r["twin"]["confirmed"]

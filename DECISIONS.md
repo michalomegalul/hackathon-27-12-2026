@@ -1474,3 +1474,36 @@ on 18 cores: 21 s (A) and 16 s (B), against 17 s and 12 s before.
      - Anchored misses: E1 (verifier z 2.0–3.3, power), E2 in seeds 1 and 4 (dated 7 days early; p
        0.15 in seed 4), B's E2 dated 2–3 weeks before the key's lag. B's E3 (campaign on geek × mobily)
        has oracle z ≤ 1 on the detective's KPIs and is not reachable.
+
+## Detective forms hypotheses (2026-11-28)
+
+143. **Every find gets an observation and a hypothesis.** The narrator no longer only labels and
+     accepts the scan's candidates: for each suspicious finding it writes `observation_cs` (what is
+     odd: what, where, since when, how much) and `hypothesis_cs` (what most likely happened in the
+     company, one Czech sentence shaped like a spec's `narrative_cs`). The page puts the hypothesis
+     next to the planted sentence for each matched pair, so a student sees how close a blind guess
+     came to the story, not only that a date and a segment matched. The score is unchanged: it still
+     pairs finds on metric, direction, time, segment and size, never on the wording.
+     - The hypothesis may lean only on what the blind detective has: the candidates, their evidence
+       and `caused_by`, and the anchors (price lists, courier switches from treatment tables,
+       decision 137). The prompt's examples are shapes with `<placeholders>`; a test checks that no
+       `narrative_cs` from `examples/` appears in the prompt, which would hand the detective the answer.
+     - Without the LLM the rules write it (`narrate.hypothesis`): a stock-out is a supply failure, a
+       find with `caused_by` follows its source, a price anchor up to 60 days before explains orders,
+       churn and new customers, a courier switch in the find's city explains delivery, rating, tickets
+       and churn; otherwise a table by metric and direction proposes the usual business cause with
+       "nejspíš". An empty field in the LLM's answer is filled the same way.
+144. **Every find is tested and charted like a planted event** (`verify.check_finds`). After the
+     scan, the verifier runs its own test on each reported find (at most 30): the find's metric as
+     its KPI (a stock-out: the share of the target's products with no stock), its segment as the
+     treated group, its start date, on the story and on the twin. The page gets these rows next
+     to the finds and charts a find the prompt never told with the same chart and SQL as a
+     planted event. This runs after the detective, for presentation only: it does not change
+     what the detective reports, and it reads only the analyst tables. Keys a KPI cannot split
+     by (courier, sku) are left out; a find too near an edge of the data to test keeps its SQL,
+     so its chart still shows.
+145. **Rev story runs in the order things happen there.** Data first, the detective reads it,
+     the score, and only then the prompt that made the data and the summary. The Summary is the
+     prompt with its events highlighted and the detective's extra finds written under it as
+     sentences: a false find with a sensible hypothesis reads like one more event of the story,
+     and a student can open it and see in the chart whether the data backs it.

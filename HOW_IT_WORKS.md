@@ -19,6 +19,8 @@ One job runs these steps (`s2d/api/pipeline.py`):
 The answer key stays in a hidden `_truth` schema.
 The detective (`s2d/detective/`) is a separate job: it only sees the analyst tables and looks for events by itself,
 and `s2d/score.py` compares what it found with the answer key.
+For every suspicious find its narrator writes what is odd and a hypothesis of what happened, one Czech sentence
+shaped like a story's event, and the verifier tests each find on the story and the twin so the page can chart it.
 
 Every LLM answer is cached on disk, so a demo story does not wait for the model twice.
 Backend (`ollama`, `claude`, `replay`) is set by `LLM_BACKEND`, see `README.md`.

@@ -1,9 +1,12 @@
 // The run view used by Story, Rev story and History: the process in a left sidebar (a top drawer
 // on the phone) with a sticky status block, and the six sections in the main column.
-import { useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 import { duration, stepEn } from '../format'
-import { STAGES, scrollToStage, sectionId, type Run, type StageId, type StageState, type Status } from './useRun'
+import { STAGES, STORY_ORDER, scrollToStage, sectionId, type Run, type StageId, type StageState, type Status } from './useRun'
+
+/** The stages this page shows, in its order (Rev story: data first). */
+const Order = createContext<StageId[]>(STORY_ORDER)
 
 // ---- status block ----------------------------------------------------------------------
 
@@ -56,9 +59,11 @@ function Marker({ state, n }: { state: StageState; n: number }) {
 }
 
 function ProcessList({ run, onPick }: { run: Run; onPick?: () => void }) {
+  const order = useContext(Order)
+  const stages = order.map((id) => STAGES.find((s) => s.id === id)!)
   return (
     <ol className="grid gap-0.5">
-      {STAGES.map((st, i) => {
+      {stages.map((st, i) => {
         const s = run.stages[st.id]
         const reachable = s.state === 'done' || s.state === 'error'
         const label = (
@@ -159,7 +164,7 @@ export function Section({
   waiting?: ReactNode
 }) {
   const s = run.stages[id]
-  const n = STAGES.findIndex((x) => x.id === id) + 1
+  const n = useContext(Order).indexOf(id) + 1
   return (
     <section
       id={sectionId(id)}
@@ -196,7 +201,19 @@ export function Section({
 // ---- the frame -------------------------------------------------------------------------
 
 /** Sidebar + main column. `children` are the sections; `bottom` sits under them (the chat input). */
-export function RunView({ run, children, bottom, top }: { run: Run; children: ReactNode; bottom?: ReactNode; top?: ReactNode }) {
+export function RunView({
+  run,
+  children,
+  bottom,
+  top,
+  order = STORY_ORDER,
+}: {
+  run: Run
+  children: ReactNode
+  bottom?: ReactNode
+  top?: ReactNode
+  order?: StageId[]
+}) {
   // a link with #s-<stage> (e.g. the old /jobs/:id/story) scrolls there once that section is filled
   const { hash } = useLocation()
   const target = STAGES.find((s) => `#${sectionId(s.id)}` === hash)?.id
@@ -206,23 +223,25 @@ export function RunView({ run, children, bottom, top }: { run: Run; children: Re
   }, [target, ready])
 
   return (
-    <div className="lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:gap-6">
-      <MobileBar run={run} />
-      <aside className="hidden lg:block">
-        <div className="sticky top-20 grid gap-4">
-          <div className="border-b border-line pb-4">
-            <StatusBlock s={run.status} />
+    <Order.Provider value={order}>
+      <div className="lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:gap-6">
+        <MobileBar run={run} />
+        <aside className="hidden lg:block">
+          <div className="sticky top-20 grid gap-4">
+            <div className="border-b border-line pb-4">
+              <StatusBlock s={run.status} />
+            </div>
+            <nav aria-label="Progress" className="">
+              <ProcessList run={run} />
+            </nav>
           </div>
-          <nav aria-label="Progress" className="">
-            <ProcessList run={run} />
-          </nav>
+        </aside>
+        <div className="grid min-w-0 content-start gap-4">
+          {top}
+          {children}
+          {bottom}
         </div>
-      </aside>
-      <div className="grid min-w-0 content-start gap-4">
-        {top}
-        {children}
-        {bottom}
       </div>
-    </div>
+    </Order.Provider>
   )
 }

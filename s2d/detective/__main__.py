@@ -28,7 +28,12 @@ def main(argv=None) -> int:
                 "lag_days", "caused_by", "kind", "confidence"]
         print(pd.DataFrame(res["events"])[cols].to_string(index=False))
     if "narration" in res:
-        print(f"\n[{res['narration']['source']}]\n{res['narration']['narrative_cs']}")
+        words = {n["candidate_id"]: n for n in res["narration"]["events"]}
+        print(f"\n[{res['narration']['source']}]")
+        for e in res["events"]:
+            w = words.get(e["id"], {})
+            print(f"{e['id']}  {w.get('observation_cs', '')}\n      hypotéza: {w.get('hypothesis_cs', '')}")
+        print(f"\n{res['narration']['narrative_cs']}")
     if args.out:
         save(res, args.out)
         print(f"wrote {args.out}")

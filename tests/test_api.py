@@ -315,6 +315,9 @@ def test_detective(api):
     s = _wait(c, f"/v1/jobs/{jid}/detect", h["student"])
     assert s["status"] == "done", s["error"]
     assert isinstance(s["events"], list) and s["narrative"]["text"] is not None
+    # every find carries the narrator's hypothesis (the template's when the LLM is not there)
+    assert all(e["hypothesis_cs"] and e["observation_cs"] for e in s["events"])
+    assert {c["event_id"] for c in s["charts"]} <= {e["id"] for e in s["events"]}  # tested finds, any role
     assert s["score"] is None  # students never see the score
     t = c.get(f"/v1/jobs/{jid}/detect", headers=h["teacher"]).json()
     assert {"precision", "recall", "f1"} <= set(t["score"])

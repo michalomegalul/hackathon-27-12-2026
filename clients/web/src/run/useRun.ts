@@ -30,6 +30,12 @@ export const STAGES: { id: StageId; label: string }[] = [
   { id: 'summary', label: 'Summary' },
 ]
 
+/** Rev story goes the other way: the data first, the detective reads it, the score, and only then
+ *  the prompt that made the data and the summary that sets the two side by side (the spec is
+ *  folded into the prompt section). */
+export const REV_ORDER: StageId[] = ['data', 'detect', 'score', 'prompt', 'summary']
+export const STORY_ORDER: StageId[] = STAGES.map((s) => s.id)
+
 export const sectionId = (s: StageId) => `s-${s}`
 
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
