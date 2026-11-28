@@ -64,8 +64,8 @@ def read_gpu() -> dict | None:
         return None
     if m is None:
         return {"loaded": False, "vram_gb": 0.0}
-    return {"loaded": True, "vram_gb": round(int(m.get("size_vram") or 0) / 1e9, 2),
-            "model_gb": round(int(m.get("size") or 0) / 1e9, 2)}  # size > size_vram: the rest sits in RAM
+    gb = round(int(m.get("size") or 0) / 1e9, 2)  # whole model memory (size), not Ollama's partial size_vram
+    return {"loaded": True, "vram_gb": gb, "model_gb": gb}
 
 
 class Monitor:

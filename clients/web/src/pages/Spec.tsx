@@ -101,12 +101,12 @@ function Fact({ label, value, counts, tone }: { label: string; value: ReactNode;
 }
 
 const STACK: [name: string, what: string][] = [
-  ['Gemma 4 26b · Ollama', 'writes the spec and the Czech summary, nothing else'],
-  ['numpy', 'day-by-day simulation over customer arrays'],
-  ['DuckDB', 'working store and SQL sandbox, export to Postgres'],
-  ['statsmodels · ruptures · scipy', 'STL, change points, difference-in-differences'],
-  ['FastAPI', 'queued jobs, status with ETA, queries, ZIP'],
-  ['React · Vite · uPlot', 'this site'],
+  ['Gemma 4 26b · Ollama', 'spec and Czech summary'],
+  ['numpy', 'daily simulation'],
+  ['DuckDB', 'data store, SQL sandbox, Postgres export'],
+  ['statsmodels · ruptures · scipy', 'STL, change points, diff-in-diff'],
+  ['FastAPI', 'job queue, queries, ZIP export'],
+  ['React · Vite · uPlot', 'frontend'],
 ]
 
 const col = (s: SystemSample[], k: keyof SystemSample) => s.map((x) => x[k] as number | null)
@@ -123,7 +123,6 @@ export function Spec() {
   const running = stats?.running
 
   const gpu = sys?.gpu
-  const onGpu = gpu?.loaded && gpu.model_gb ? Math.round((100 * gpu.vram_gb) / gpu.model_gb) : null
   const memPct = now?.mem_gb != null && sys?.mem_total_gb ? Math.round((100 * now.mem_gb) / sys.mem_total_gb) : null
   const jobNow = running
     ? `${running.step ?? 'running'} · ${Math.round(running.progress * 100)} %${running.eta_s ? ` · ${duration(running.eta_s)} left` : ''}`
@@ -133,8 +132,7 @@ export function Spec() {
 
   return (
     <div className="grid gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">What it runs on, live</h1>
+      <div className="flex justify-end">
         <button
           className="rounded border border-line px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
           onClick={() => (document.fullscreenElement ? void document.exitFullscreen() : void document.documentElement.requestFullscreen())}
@@ -164,12 +162,12 @@ export function Spec() {
           <Trend xs={xs} ys={col(s, 'mem_gb')} color={COLOR.mem} max={sys?.mem_total_gb ?? undefined} unit="GB" />
         </Metric>
         <Metric
-          title="Language model"
+          title="Model"
           value={now?.vram_gb == null ? '–' : nf.format(now.vram_gb)}
-          unit="GB in GPU memory"
+          unit="GB"
           sub={
             llm
-              ? `${llm.model} · ${gpu ? (gpu.loaded ? `loaded${onGpu === null ? '' : `, ${Math.min(onGpu, 100)} % of it on the GPU`}` : 'not loaded (idle)') : llm.backend}`
+              ? `${llm.model} · ${gpu ? (gpu.loaded ? 'loaded' : 'not loaded') : llm.backend}`
               : undefined
           }
         >
@@ -179,10 +177,9 @@ export function Spec() {
 
       {stats && (
         <section className="border-t border-line pt-3">
-          <h2 className="mb-3 text-sm font-medium tracking-wide text-slate-300 uppercase">Track record, all runs together</h2>
           <div className="grid grid-cols-2 gap-x-8 gap-y-6 lg:grid-cols-5">
             <Fact label="Customers simulated" value={int.format(stats.customers_simulated)} counts={`${int.format(stats.jobs_done)} finished runs`} />
-            <Fact label="Rows generated" value={int.format(stats.rows_generated)} counts="in all tables" />
+            <Fact label="Rows generated" value={int.format(stats.rows_generated)} counts="all tables" />
             <Fact
               label="Run time, median"
               value={stats.median_run_s === null ? '–' : duration(stats.median_run_s)}
@@ -191,13 +188,13 @@ export function Spec() {
             <Fact
               label="Planted events found"
               value={stats.events_confirmed_pct === null ? '–' : `${nf.format(stats.events_confirmed_pct)} %`}
-              counts={`${int.format(stats.events_confirmed)} of ${int.format(stats.events_tested)} testable events`}
+              counts={`${int.format(stats.events_confirmed)} of ${int.format(stats.events_tested)} events`}
               tone={COLOR.cpu}
             />
             <Fact
               label="False alarms on the twin"
               value={stats.twin_false_pct === null ? '–' : `${nf.format(stats.twin_false_pct)} %`}
-              counts={`${int.format(stats.twin_false)} of ${int.format(stats.twin_tested)} on data with no story`}
+              counts={`${int.format(stats.twin_false)} of ${int.format(stats.twin_tested)} on data without the event`}
               tone={COLOR.customers}
             />
           </div>
@@ -205,7 +202,6 @@ export function Spec() {
       )}
 
       <section className="border-t border-line pt-3">
-        <h2 className="mb-2 text-sm font-medium tracking-wide text-slate-300 uppercase">What we use</h2>
         <dl className="grid gap-x-10 md:grid-cols-2">
           {STACK.map(([name, what]) => (
             <div key={name} className="flex flex-col gap-0.5 border-b border-line/60 py-2 sm:flex-row sm:gap-4">
