@@ -283,11 +283,11 @@ export function Block({
           <span className="font-medium text-slate-200">{KPI_CS[v.kpi] ?? v.kpi}</span>
           <span className="font-mono text-muted">{v.target || 'everyone'}</span>
           <span className="ml-auto text-muted">
-            <span className="mr-1 inline-block h-0.5 w-3 bg-[#ffffff] align-middle" /> story
-            <span className="mr-1 ml-3 inline-block h-0 w-3 border-t-2 border-dashed border-[#808080] align-middle" /> twin
+            <span className="mr-1 inline-block h-0.5 w-3 bg-[#73bf69] align-middle" /> story
+            <span className="mr-1 ml-3 inline-block h-0 w-3 border-t-2 border-dashed border-[#b8c0cc] align-middle" /> twin
             {v.control_mode !== 'none' && (
               <>
-                <span className="mr-1 ml-3 inline-block h-0.5 w-3 bg-[#a6a6a6]/60 align-middle" /> kontrola
+                <span className="mr-1 ml-3 inline-block h-0.5 w-3 bg-[#8ab8ff]/60 align-middle" /> kontrola
               </>
             )}
           </span>
