@@ -4,11 +4,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { jobsOptions, type JobListItem } from '../api'
 import { BRIEF_EXAMPLE, NAHAPRAVDA_EXAMPLE, ZRNKO_EXAMPLE } from '../examples'
+import { demoOfPrompt, fold } from './demoMatch'
 import { isDemo } from './jobs'
 
 export type DemoKey = 'brief' | 'coffee' | 'nahapravda'
 
-const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/\s+/g, ' ').trim()
 const BRIEF_START = fold(BRIEF_EXAMPLE.story).slice(0, 40)
 
 /** What each demo looks like in GET /v1/jobs: the story preview (text jobs) or the title (spec jobs). */
@@ -39,19 +39,18 @@ export function useDemoRun(key: DemoKey): string | null {
 /** The router state that makes /run/:id play as a live run. */
 export const REPLAY_STATE = { replay: true }
 
-/** The story each demo was made from, folded; typing or pasting it opens the finished run instead of a new one. */
-const PROMPT_START: Record<DemoKey, string> = {
-  brief: BRIEF_START,
-  coffee: fold(ZRNKO_EXAMPLE.story).slice(0, 40),
-  nahapravda: fold(NAHAPRAVDA_EXAMPLE.story).slice(0, 40),
+/** The story each demo was made from; typing or pasting all of it opens the finished run instead of a new one. */
+const PROMPT_STORY: Record<DemoKey, string> = {
+  brief: BRIEF_EXAMPLE.story,
+  coffee: ZRNKO_EXAMPLE.story,
+  nahapravda: NAHAPRAVDA_EXAMPLE.story,
 }
 
 /** A function that gives the finished run for a prompt that is one of the demo prompts, else null. */
 export function useDemoPrompt(): (text: string) => string | null {
   const { data } = useQuery(jobsOptions('all'))
   return (text) => {
-    const t = fold(text)
-    const key = (Object.keys(PROMPT_START) as DemoKey[]).find((k) => t.includes(PROMPT_START[k]))
+    const key = demoOfPrompt(text, PROMPT_STORY)
     return key ? findDemoRun(data?.jobs, key) : null
   }
 }
