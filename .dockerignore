@@ -8,3 +8,4 @@ research_notes
 **/node_modules
 clients/web/dist
 **/.env*
+rust/target

@@ -15,6 +15,8 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from s2d import rustk
+
 from .data import tables
 
 MIN_EVENTS = 30          # skip a segment series with fewer events in total
@@ -93,14 +95,41 @@ def _add_counts(ks: KPISet, kpi: str, ev: pd.DataFrame, dims: list[str], value: 
         s = g.groupby("date")["_v"].sum().reindex(idx, fill_value=0.0)
         ks.series[(kpi, seg)] = s
 
-    put("", ev)
     groups = [(d,) for d in dims]
     if pairs:
         groups += [c for c in combinations(dims, 2) if not (c[0] == c[1])]
+    if rustk.LIB is not None and np.isfinite(ev["_v"].to_numpy()).all():
+        _counts_fast(ks, kpi, ev, idx, groups, None if not value else ev["_v"].to_numpy())
+        return
+    put("", ev)
     for keys in groups:
         for vals, g in ev.groupby(list(keys)):
             vals = vals if isinstance(vals, tuple) else (vals,)
             put(seg_text(keys, vals), g)
+
+
+def _group_codes(df: pd.DataFrame, keys: tuple[str, ...]) -> tuple[np.ndarray, list[tuple], np.ndarray]:
+    """Group code per row (-1 for a row with a missing key), the key tuples and the sizes, in the
+    sorted order `df.groupby(list(keys))` iterates in."""
+    grp = df.groupby(list(keys))
+    codes = np.nan_to_num(grp.ngroup().to_numpy(dtype=float), nan=-1).astype(np.int64)
+    sizes = grp.size()
+    labels = [v if isinstance(v, tuple) else (v,) for v in sizes.index]
+    return codes, labels, sizes.to_numpy()
+
+
+def _counts_fast(ks: KPISet, kpi: str, ev: pd.DataFrame, idx: pd.DatetimeIndex, groups: list[tuple[str, ...]],
+                 vals: np.ndarray | None) -> None:
+    """`_add_counts.put` for every group at once (Rust kernel), same series in the same order."""
+    pos = idx.get_indexer(ev["date"])
+    passes = [((), np.zeros(len(ev), dtype=np.int64), [()], np.array([len(ev)]))]
+    passes += [(keys, *_group_codes(ev, keys)) for keys in groups]
+    for keys, codes, labels, sizes in passes:
+        sums = rustk.group_sums(codes, pos, vals, len(labels), len(idx))
+        for g, (label, size) in enumerate(zip(labels, sizes)):
+            if size < MIN_EVENTS:
+                continue
+            ks.series[(kpi, seg_text(keys, label) if keys else "")] = pd.Series(sums[g], index=idx, name="_v")
 
 
 def build(con: duckdb.DuckDBPyConnection) -> KPISet:
@@ -161,6 +190,15 @@ def build(con: duckdb.DuckDBPyConnection) -> KPISet:
 def _add_category(ks: KPISet, by_cat: pd.DataFrame, dims: list[str]) -> None:
     ks.events["orders_by_category"] = by_cat
     idx = ks.dates
+    if rustk.LIB is not None:
+        pos = idx.get_indexer(by_cat["date"])
+        for keys in [("category",)] + [("category", d) for d in dims]:
+            codes, labels, sizes = _group_codes(by_cat, keys)
+            sums = rustk.group_sums(codes, pos, None, len(labels), len(idx))
+            for g, (label, size) in enumerate(zip(labels, sizes)):
+                if size >= MIN_EVENTS:
+                    ks.series[("orders", seg_text(keys, label))] = pd.Series(sums[g], index=idx)
+        return
     for keys in [("category",)] + [("category", d) for d in dims]:
         for vals, g in by_cat.groupby(list(keys)):
             vals = vals if isinstance(vals, tuple) else (vals,)
@@ -335,35 +373,46 @@ def _repeat(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str) -> 
         return
     cust, ci = np.unique(df["customer_id"].to_numpy(), return_inverse=True)
     day = (pd.to_datetime(df["date"]) - ks.dates[0]).dt.days.to_numpy()
-    # cum[i, t] = number of order days of customer i before day t
-    cum = np.zeros((len(cust), n_days + 1), dtype=np.int16)
-    np.add.at(cum, (ci, day + 1), 1)
-    np.cumsum(cum, axis=1, out=cum)
     t = np.arange(a, n_days - f + 1)              # anchor: active in [t-a, t), buys in [t, t+f)
-    active = (cum[:, t] - cum[:, t - a]) > 0
-    again = active & ((cum[:, t + f] - cum[:, t]) > 0)
     idx = ks.dates[t + f - 1]                     # dated at the last day of the 30-day window
     info = df.groupby("customer_id")[[d for d in dims]].first().reindex(cust)
 
-    def put(seg: str, rows: np.ndarray) -> None:
-        if not len(rows):
-            return
-        den = active[rows].sum(0).astype(float)
-        if den.mean() < REPEAT_MIN_ACTIVE:
-            return
-        num = again[rows].sum(0).astype(float)
+    ks.dims["repeat_rate"] = dims
+    ks.valid_from["repeat_rate"] = idx[0]
+    groups = [("", np.arange(len(cust)))]
+    for keys in [(d,) for d in dims] + list(combinations(dims, 2)):
+        for vals, g in info.groupby(list(keys)):
+            vals = vals if isinstance(vals, tuple) else (vals,)
+            groups.append((seg_text(keys, vals), np.flatnonzero(info.index.isin(g.index))))
+    for (seg, rows), (num, den) in zip(groups, _repeat_counts(ci, day, len(cust), n_days, a, f, [r for _, r in groups])):
+        if not len(rows) or den.mean() < REPEAT_MIN_ACTIVE:
+            continue
         num_s, den_s = pd.Series(num, idx), pd.Series(den, idx)
         ks.parts[("repeat_rate", seg)] = (num_s, den_s)
         ks.series[("repeat_rate", seg)] = (num_s / den_s.where(den_s > 0)).interpolate(limit_direction="both")
 
-    ks.dims["repeat_rate"] = dims
-    ks.valid_from["repeat_rate"] = idx[0]
-    put("", np.arange(len(cust)))
-    groups = [(d,) for d in dims] + list(combinations(dims, 2))
-    for keys in groups:
-        for vals, g in info.groupby(list(keys)):
-            vals = vals if isinstance(vals, tuple) else (vals,)
-            put(seg_text(keys, vals), np.flatnonzero(info.index.isin(g.index)))
+
+def _repeat_counts(ci: np.ndarray, day: np.ndarray, n_cust: int, n_days: int, a: int, f: int,
+                   groups: list[np.ndarray]):
+    """(numerator, denominator) per group: customers with an order in [t-a, t) and those of them
+    who order again in [t, t+f), for every anchor day t."""
+    if rustk.LIB is not None:
+        try:
+            num, den = rustk.repeat_counts(ci, day, n_cust, n_days, a, f, groups)
+        except ValueError:
+            pass  # out-of-range input: the numpy path below raises its own error
+        else:
+            yield from zip(num, den)
+            return
+    # cum[i, t] = number of order days of customer i before day t
+    cum = np.zeros((n_cust, n_days + 1), dtype=np.int16)
+    np.add.at(cum, (ci, day + 1), 1)
+    np.cumsum(cum, axis=1, out=cum)
+    t = np.arange(a, n_days - f + 1)
+    active = (cum[:, t] - cum[:, t - a]) > 0
+    again = active & ((cum[:, t + f] - cum[:, t]) > 0)
+    for rows in groups:
+        yield again[rows].sum(0).astype(float), active[rows].sum(0).astype(float)
 
 
 def _later_tables(ks: KPISet, con, have: dict[str, set[str]]) -> None:

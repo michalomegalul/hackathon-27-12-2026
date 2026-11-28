@@ -1,0 +1,320 @@
+{
+  "baseline": {
+    "payment_failure_rate": 0.03,
+    "return_rate": 0.06,
+    "review_rate": 0.08,
+    "seasonality": {
+      "black_friday": true,
+      "christmas": true,
+      "cz_holidays_closed": false,
+      "profile": "retail_cz",
+      "weekly": [
+        1.05,
+        1.0,
+        1.0,
+        1.0,
+        0.95,
+        0.85,
+        1.15
+      ]
+    },
+    "ticket_rate_per_order": 0.03
+  },
+  "company": {
+    "channels": [
+      {
+        "channel": "eshop",
+        "weight": 0.85
+      },
+      {
+        "channel": "app",
+        "weight": 0.15
+      }
+    ],
+    "cities": [
+      {
+        "has_store": false,
+        "name": "Praha",
+        "weight": 0.3
+      },
+      {
+        "has_store": false,
+        "name": "Brno",
+        "weight": 0.18
+      },
+      {
+        "has_store": false,
+        "name": "Ostrava",
+        "weight": 0.12
+      },
+      {
+        "has_store": false,
+        "name": "Plzeň",
+        "weight": 0.1
+      },
+      {
+        "has_store": false,
+        "name": "Olomouc",
+        "weight": 0.1
+      },
+      {
+        "has_store": false,
+        "name": "Liberec",
+        "weight": 0.1
+      },
+      {
+        "has_store": false,
+        "name": "Hradec Králové",
+        "weight": 0.1
+      }
+    ],
+    "description": "Online prodejce domácí elektroniky s doručením po celé ČR.",
+    "industry": "eshop",
+    "legal_form": "a.s.",
+    "name": "ElektroDomov"
+  },
+  "decoys": [
+    {
+      "date": "2025-09-18",
+      "size": -1.0,
+      "target": {
+        "category": null,
+        "channel": [
+          "app"
+        ],
+        "city": null,
+        "segment": null,
+        "supplier": null
+      },
+      "type": "data_outage"
+    }
+  ],
+  "entities": {
+    "customers": {
+      "growth_per_year": 0.1,
+      "n": 30000,
+      "segments": [
+        {
+          "base_churn_per_month": 0.03,
+          "base_orders_per_month": 0.35,
+          "id": "rodina",
+          "price_sensitivity": 1.2,
+          "share": 0.5,
+          "subscription": null
+        },
+        {
+          "base_churn_per_month": 0.02,
+          "base_orders_per_month": 0.7,
+          "id": "geek",
+          "price_sensitivity": 0.7,
+          "share": 0.2,
+          "subscription": null
+        },
+        {
+          "base_churn_per_month": 0.025,
+          "base_orders_per_month": 0.2,
+          "id": "senior",
+          "price_sensitivity": 1.5,
+          "share": 0.3,
+          "subscription": null
+        }
+      ]
+    },
+    "employees": {
+      "support_agents": 10,
+      "tickets_per_agent_day": 30.0
+    },
+    "products": {
+      "categories": [
+        {
+          "id": "mala_spotrebice",
+          "n_skus": 120,
+          "price_max": 4990.0,
+          "price_min": 390.0,
+          "supplier": "S1",
+          "zipf_s": 1.1
+        },
+        {
+          "id": "velka_spotrebice",
+          "n_skus": 60,
+          "price_max": 39990.0,
+          "price_min": 6990.0,
+          "supplier": "S2",
+          "zipf_s": 1.0
+        },
+        {
+          "id": "mobily",
+          "n_skus": 80,
+          "price_max": 34990.0,
+          "price_min": 2990.0,
+          "supplier": "S3",
+          "zipf_s": 1.3
+        }
+      ]
+    },
+    "stores": {
+      "per_city_with_store": 0
+    },
+    "suppliers": [
+      {
+        "id": "S1",
+        "lead_time_days": 5,
+        "name": "Distri CZ",
+        "reliability": 0.98
+      },
+      {
+        "id": "S2",
+        "lead_time_days": 12,
+        "name": "BigHome EU",
+        "reliability": 0.96
+      },
+      {
+        "id": "S3",
+        "lead_time_days": 4,
+        "name": "MobilNet",
+        "reliability": 0.98
+      }
+    ]
+  },
+  "events": [
+    {
+      "caused_by": null,
+      "effects": [
+        {
+          "decay_halflife_days": null,
+          "duration_days": 120,
+          "lag_days": 0,
+          "metric": "delivery_days",
+          "ramp_days": 0,
+          "size": 2.5,
+          "size_stated": true
+        },
+        {
+          "decay_halflife_days": null,
+          "duration_days": 120,
+          "lag_days": 3,
+          "metric": "rating_mean",
+          "ramp_days": 0,
+          "size": -0.9,
+          "size_stated": false
+        }
+      ],
+      "id": "E1",
+      "narrative_cs": "Přechod na levnějšího přepravce na Moravě → pozdní doručení.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": 2.5,
+        "lead_time_multiplier": null,
+        "price_change_pct": null
+      },
+      "start": "2026-02-02",
+      "target": {
+        "category": null,
+        "channel": null,
+        "city": [
+          "Ostrava",
+          "Olomouc"
+        ],
+        "segment": null,
+        "supplier": null
+      },
+      "type": "courier_change"
+    },
+    {
+      "caused_by": "E1",
+      "effects": [
+        {
+          "decay_halflife_days": 30,
+          "duration_days": 90,
+          "lag_days": 35,
+          "metric": "churn_hazard",
+          "ramp_days": 14,
+          "size": 0.9,
+          "size_stated": false
+        }
+      ],
+      "id": "E2",
+      "narrative_cs": "Zákazníci s opožděnou zásilkou odcházejí za ~5 týdnů.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": null,
+        "price_change_pct": null
+      },
+      "start": "2026-02-02",
+      "target": {
+        "category": null,
+        "channel": null,
+        "city": [
+          "Ostrava",
+          "Olomouc"
+        ],
+        "segment": null,
+        "supplier": null
+      },
+      "type": "courier_change"
+    },
+    {
+      "caused_by": null,
+      "effects": [
+        {
+          "decay_halflife_days": 7,
+          "duration_days": 21,
+          "lag_days": 0,
+          "metric": "acquisition_rate",
+          "ramp_days": 2,
+          "size": 0.8,
+          "size_stated": false
+        },
+        {
+          "decay_halflife_days": 7,
+          "duration_days": 21,
+          "lag_days": 0,
+          "metric": "purchase_rate",
+          "ramp_days": 2,
+          "size": 0.3,
+          "size_stated": false
+        }
+      ],
+      "id": "E3",
+      "narrative_cs": "Jarní kampaň na mobily pro technické nadšence.",
+      "params": {
+        "budget_czk": 400000.0,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": null,
+        "price_change_pct": null
+      },
+      "start": "2026-04-13",
+      "target": {
+        "category": [
+          "mobily"
+        ],
+        "channel": null,
+        "city": null,
+        "segment": [
+          "geek"
+        ],
+        "supplier": null
+      },
+      "type": "campaign"
+    }
+  ],
+  "meta": {
+    "currency": "CZK",
+    "days": 600,
+    "difficulty": "hard",
+    "locale": "cs_CZ",
+    "seed": 4242,
+    "start": "2025-03-01"
+  },
+  "noise": {
+    "messiness": "medium"
+  },
+  "version": 1
+}

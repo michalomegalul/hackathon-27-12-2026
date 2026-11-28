@@ -1,0 +1,385 @@
+{
+  "baseline": {
+    "payment_failure_rate": 0.02,
+    "return_rate": 0.01,
+    "review_rate": 0.12,
+    "seasonality": {
+      "black_friday": true,
+      "christmas": true,
+      "cz_holidays_closed": true,
+      "profile": "winter_peak",
+      "weekly": [
+        0.95,
+        0.95,
+        1.0,
+        1.0,
+        1.1,
+        1.2,
+        0.8
+      ]
+    },
+    "ticket_rate_per_order": 0.015
+  },
+  "company": {
+    "channels": [
+      {
+        "channel": "eshop",
+        "weight": 0.55
+      },
+      {
+        "channel": "store",
+        "weight": 0.45
+      }
+    ],
+    "cities": [
+      {
+        "has_store": true,
+        "name": "Praha",
+        "weight": 0.45
+      },
+      {
+        "has_store": true,
+        "name": "Brno",
+        "weight": 0.25
+      },
+      {
+        "has_store": true,
+        "name": "Ostrava",
+        "weight": 0.15
+      },
+      {
+        "has_store": true,
+        "name": "Plzeň",
+        "weight": 0.15
+      }
+    ],
+    "description": "Výběrová káva, e-shop s předplatným a 4 kavárny.",
+    "industry": "cafe_chain",
+    "legal_form": "s.r.o.",
+    "name": "Pražírna Zrnko"
+  },
+  "decoys": [
+    {
+      "date": "2025-10-14",
+      "size": 2.5,
+      "target": {
+        "category": [
+          "prislusenstvi"
+        ],
+        "channel": null,
+        "city": null,
+        "segment": null,
+        "supplier": null
+      },
+      "type": "viral_spike"
+    },
+    {
+      "date": "2025-11-28",
+      "size": 1.8,
+      "target": {
+        "category": null,
+        "channel": null,
+        "city": null,
+        "segment": null,
+        "supplier": null
+      },
+      "type": "seasonal_peak"
+    }
+  ],
+  "entities": {
+    "customers": {
+      "growth_per_year": 0.2,
+      "n": 40000,
+      "segments": [
+        {
+          "base_churn_per_month": 0.04,
+          "base_orders_per_month": 1.2,
+          "id": "student",
+          "price_sensitivity": 2.0,
+          "share": 0.25,
+          "subscription": null
+        },
+        {
+          "base_churn_per_month": 0.02,
+          "base_orders_per_month": 2.0,
+          "id": "predplatitel",
+          "price_sensitivity": 0.8,
+          "share": 0.3,
+          "subscription": true
+        },
+        {
+          "base_churn_per_month": 0.03,
+          "base_orders_per_month": 0.8,
+          "id": "bezny",
+          "price_sensitivity": 1.0,
+          "share": 0.45,
+          "subscription": null
+        }
+      ]
+    },
+    "employees": {
+      "support_agents": 4,
+      "tickets_per_agent_day": 25.0
+    },
+    "products": {
+      "categories": [
+        {
+          "id": "etiopie",
+          "n_skus": 6,
+          "price_max": 490.0,
+          "price_min": 290.0,
+          "supplier": "S_ETH",
+          "zipf_s": 1.1
+        },
+        {
+          "id": "kolumbie",
+          "n_skus": 8,
+          "price_max": 420.0,
+          "price_min": 250.0,
+          "supplier": "S_COL",
+          "zipf_s": 1.1
+        },
+        {
+          "id": "espresso",
+          "n_skus": 10,
+          "price_max": 380.0,
+          "price_min": 220.0,
+          "supplier": "S_BRA",
+          "zipf_s": 1.2
+        },
+        {
+          "id": "prislusenstvi",
+          "n_skus": 25,
+          "price_max": 4900.0,
+          "price_min": 150.0,
+          "supplier": "S_CZ",
+          "zipf_s": 1.3
+        }
+      ]
+    },
+    "stores": {
+      "per_city_with_store": 1
+    },
+    "suppliers": [
+      {
+        "id": "S_ETH",
+        "lead_time_days": 21,
+        "name": "Addis Green Coffee",
+        "reliability": 0.95
+      },
+      {
+        "id": "S_COL",
+        "lead_time_days": 25,
+        "name": "Huila Cooperative",
+        "reliability": 0.95
+      },
+      {
+        "id": "S_BRA",
+        "lead_time_days": 18,
+        "name": "Minas Trading",
+        "reliability": 0.97
+      },
+      {
+        "id": "S_CZ",
+        "lead_time_days": 3,
+        "name": "Barista Potřeby s.r.o.",
+        "reliability": 0.99
+      }
+    ]
+  },
+  "events": [
+    {
+      "caused_by": null,
+      "effects": [
+        {
+          "decay_halflife_days": null,
+          "duration_days": null,
+          "lag_days": 0,
+          "metric": "purchase_rate",
+          "ramp_days": 7,
+          "size": -0.06,
+          "size_stated": false
+        }
+      ],
+      "id": "E1",
+      "narrative_cs": "Zdražení kávy o 15 % od 1. 3. 2026.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": null,
+        "price_change_pct": 15.0
+      },
+      "start": "2026-03-01",
+      "target": {
+        "category": [
+          "etiopie",
+          "kolumbie",
+          "espresso"
+        ],
+        "channel": null,
+        "city": null,
+        "segment": null,
+        "supplier": null
+      },
+      "type": "price_change"
+    },
+    {
+      "caused_by": "E1",
+      "effects": [
+        {
+          "decay_halflife_days": 21,
+          "duration_days": 45,
+          "lag_days": 42,
+          "metric": "churn_hazard",
+          "ramp_days": 14,
+          "size": 0.6,
+          "size_stated": false
+        }
+      ],
+      "id": "E2",
+      "narrative_cs": "Studenti po zdražení odcházejí se zpožděním ~6 týdnů.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": null,
+        "price_change_pct": null
+      },
+      "start": "2026-03-01",
+      "target": {
+        "category": null,
+        "channel": null,
+        "city": null,
+        "segment": [
+          "student"
+        ],
+        "supplier": null
+      },
+      "type": "price_change"
+    },
+    {
+      "caused_by": null,
+      "effects": [
+        {
+          "decay_halflife_days": 7,
+          "duration_days": 35,
+          "lag_days": 10,
+          "metric": "ticket_rate",
+          "ramp_days": 3,
+          "size": 1.5,
+          "size_stated": false
+        }
+      ],
+      "id": "E3",
+      "narrative_cs": "Zpoždění dodávky z Etiopie → vyprodaná etiopská zrna, stížnosti.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": 3.0,
+        "price_change_pct": null
+      },
+      "start": "2026-05-04",
+      "target": {
+        "category": null,
+        "channel": null,
+        "city": null,
+        "segment": null,
+        "supplier": [
+          "S_ETH"
+        ]
+      },
+      "type": "supplier_delay"
+    },
+    {
+      "caused_by": "E3",
+      "effects": [
+        {
+          "decay_halflife_days": 14,
+          "duration_days": 30,
+          "lag_days": 21,
+          "metric": "churn_hazard",
+          "ramp_days": 7,
+          "size": 0.8,
+          "size_stated": false
+        }
+      ],
+      "id": "E4",
+      "narrative_cs": "Brněnští předplatitelé po výpadku a stížnostech částečně odchází.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": null,
+        "price_change_pct": null
+      },
+      "start": "2026-05-14",
+      "target": {
+        "category": null,
+        "channel": null,
+        "city": [
+          "Brno"
+        ],
+        "segment": [
+          "predplatitel"
+        ],
+        "supplier": null
+      },
+      "type": "quality_issue"
+    },
+    {
+      "caused_by": null,
+      "effects": [
+        {
+          "decay_halflife_days": null,
+          "duration_days": null,
+          "lag_days": 0,
+          "metric": "purchase_rate",
+          "ramp_days": 30,
+          "size": -0.2,
+          "size_stated": true
+        }
+      ],
+      "id": "E5",
+      "narrative_cs": "Otevření konkurenční kavárny v Brně.",
+      "params": {
+        "budget_czk": null,
+        "churn_pct": null,
+        "churn_window_days": null,
+        "delivery_delay_days": null,
+        "lead_time_multiplier": null,
+        "price_change_pct": null
+      },
+      "start": "2026-09-07",
+      "target": {
+        "category": null,
+        "channel": [
+          "store"
+        ],
+        "city": [
+          "Brno"
+        ],
+        "segment": null,
+        "supplier": null
+      },
+      "type": "competitor_entry"
+    }
+  ],
+  "meta": {
+    "currency": "CZK",
+    "days": 670,
+    "difficulty": "medium",
+    "locale": "cs_CZ",
+    "seed": 20261127,
+    "start": "2025-01-01"
+  },
+  "noise": {
+    "messiness": "light"
+  },
+  "version": 1
+}

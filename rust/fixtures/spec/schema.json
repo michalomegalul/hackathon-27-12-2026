@@ -1,0 +1,1028 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "baseline": {
+      "additionalProperties": false,
+      "default": {
+        "payment_failure_rate": 0.02,
+        "return_rate": 0.02,
+        "review_rate": 0.1,
+        "seasonality": {
+          "black_friday": false,
+          "christmas": false,
+          "cz_holidays_closed": false,
+          "profile": "flat",
+          "weekly": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "ticket_rate_per_order": 0.02
+      },
+      "properties": {
+        "payment_failure_rate": {
+          "default": 0.02,
+          "maximum": 0.5,
+          "minimum": 0,
+          "title": "Payment Failure Rate",
+          "type": "number"
+        },
+        "return_rate": {
+          "default": 0.02,
+          "maximum": 0.5,
+          "minimum": 0,
+          "title": "Return Rate",
+          "type": "number"
+        },
+        "review_rate": {
+          "default": 0.1,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Review Rate",
+          "type": "number"
+        },
+        "seasonality": {
+          "additionalProperties": false,
+          "default": {
+            "black_friday": false,
+            "christmas": false,
+            "cz_holidays_closed": false,
+            "profile": "flat",
+            "weekly": [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "properties": {
+            "black_friday": {
+              "default": false,
+              "title": "Black Friday",
+              "type": "boolean"
+            },
+            "christmas": {
+              "default": false,
+              "title": "Christmas",
+              "type": "boolean"
+            },
+            "cz_holidays_closed": {
+              "default": false,
+              "title": "Cz Holidays Closed",
+              "type": "boolean"
+            },
+            "profile": {
+              "default": "flat",
+              "enum": [
+                "retail_cz",
+                "flat",
+                "summer_peak",
+                "winter_peak"
+              ],
+              "title": "SeasonProfile",
+              "type": "string"
+            },
+            "weekly": {
+              "default": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "items": {
+                "maximum": 5,
+                "minimum": 0,
+                "type": "number"
+              },
+              "maxItems": 7,
+              "minItems": 7,
+              "title": "Weekly",
+              "type": "array"
+            }
+          },
+          "title": "Seasonality",
+          "type": "object"
+        },
+        "ticket_rate_per_order": {
+          "default": 0.02,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Ticket Rate Per Order",
+          "type": "number"
+        }
+      },
+      "title": "Baseline",
+      "type": "object"
+    },
+    "company": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "channel": {
+                "enum": [
+                  "eshop",
+                  "store",
+                  "app",
+                  "phone"
+                ],
+                "title": "Channel",
+                "type": "string"
+              },
+              "weight": {
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "title": "Weight",
+                "type": "number"
+              }
+            },
+            "required": [
+              "channel",
+              "weight"
+            ],
+            "title": "ChannelWeight",
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Channels",
+          "type": "array"
+        },
+        "cities": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "has_store": {
+                "default": false,
+                "title": "Has Store",
+                "type": "boolean"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "weight": {
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "title": "Weight",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "weight"
+            ],
+            "title": "City",
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Cities",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "industry": {
+          "enum": [
+            "retail",
+            "eshop",
+            "cafe_chain",
+            "subscription",
+            "services"
+          ],
+          "title": "Industry",
+          "type": "string"
+        },
+        "legal_form": {
+          "default": "s.r.o.",
+          "enum": [
+            "s.r.o.",
+            "a.s.",
+            "other"
+          ],
+          "title": "LegalForm",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "industry",
+        "channels",
+        "cities"
+      ],
+      "title": "Company",
+      "type": "object"
+    },
+    "decoys": {
+      "default": [],
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "size": {
+            "maximum": 10,
+            "minimum": -1,
+            "title": "Size",
+            "type": "number"
+          },
+          "target": {
+            "additionalProperties": false,
+            "default": {
+              "category": null,
+              "channel": null,
+              "city": null,
+              "segment": null,
+              "supplier": null
+            },
+            "description": "Who/what an event hits. An empty list or missing key means 'everyone'.",
+            "properties": {
+              "category": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Category"
+              },
+              "channel": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "enum": [
+                        "eshop",
+                        "store",
+                        "app",
+                        "phone"
+                      ],
+                      "title": "Channel",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Channel"
+              },
+              "city": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "City"
+              },
+              "segment": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Segment"
+              },
+              "supplier": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Supplier"
+              }
+            },
+            "title": "Target",
+            "type": "object"
+          },
+          "type": {
+            "enum": [
+              "viral_spike",
+              "seasonal_peak",
+              "data_outage"
+            ],
+            "title": "DecoyType",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "date",
+          "size"
+        ],
+        "title": "Decoy",
+        "type": "object"
+      },
+      "title": "Decoys",
+      "type": "array"
+    },
+    "entities": {
+      "additionalProperties": false,
+      "properties": {
+        "customers": {
+          "additionalProperties": false,
+          "properties": {
+            "growth_per_year": {
+              "default": 0.0,
+              "maximum": 3,
+              "minimum": -0.5,
+              "title": "Growth Per Year",
+              "type": "number"
+            },
+            "n": {
+              "maximum": 200000,
+              "minimum": 500,
+              "title": "N",
+              "type": "integer"
+            },
+            "segments": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_churn_per_month": {
+                    "exclusiveMaximum": 1,
+                    "minimum": 0,
+                    "title": "Base Churn Per Month",
+                    "type": "number"
+                  },
+                  "base_orders_per_month": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 60,
+                    "title": "Base Orders Per Month",
+                    "type": "number"
+                  },
+                  "id": {
+                    "title": "Id",
+                    "type": "string"
+                  },
+                  "price_sensitivity": {
+                    "default": 1.0,
+                    "maximum": 3,
+                    "minimum": 0,
+                    "title": "Price Sensitivity",
+                    "type": "number"
+                  },
+                  "share": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 1,
+                    "title": "Share",
+                    "type": "number"
+                  },
+                  "subscription": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null,
+                    "title": "Subscription"
+                  }
+                },
+                "required": [
+                  "id",
+                  "share",
+                  "base_orders_per_month",
+                  "base_churn_per_month"
+                ],
+                "title": "Segment",
+                "type": "object"
+              },
+              "minItems": 1,
+              "title": "Segments",
+              "type": "array"
+            }
+          },
+          "required": [
+            "n",
+            "segments"
+          ],
+          "title": "Customers",
+          "type": "object"
+        },
+        "employees": {
+          "additionalProperties": false,
+          "default": {
+            "support_agents": 2,
+            "tickets_per_agent_day": 25.0
+          },
+          "properties": {
+            "support_agents": {
+              "default": 2,
+              "maximum": 1000,
+              "minimum": 0,
+              "title": "Support Agents",
+              "type": "integer"
+            },
+            "tickets_per_agent_day": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 500,
+              "title": "Tickets Per Agent Day",
+              "type": "number"
+            }
+          },
+          "title": "Employees",
+          "type": "object"
+        },
+        "products": {
+          "additionalProperties": false,
+          "properties": {
+            "categories": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "title": "Id",
+                    "type": "string"
+                  },
+                  "n_skus": {
+                    "maximum": 2000,
+                    "minimum": 1,
+                    "title": "N Skus",
+                    "type": "integer"
+                  },
+                  "price_max": {
+                    "exclusiveMinimum": 0,
+                    "title": "Price Max",
+                    "type": "number"
+                  },
+                  "price_min": {
+                    "exclusiveMinimum": 0,
+                    "title": "Price Min",
+                    "type": "number"
+                  },
+                  "supplier": {
+                    "title": "Supplier",
+                    "type": "string"
+                  },
+                  "zipf_s": {
+                    "default": 1.1,
+                    "maximum": 1.4,
+                    "minimum": 0.8,
+                    "title": "Zipf S",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "n_skus",
+                  "price_min",
+                  "price_max",
+                  "supplier"
+                ],
+                "title": "Category",
+                "type": "object"
+              },
+              "minItems": 1,
+              "title": "Categories",
+              "type": "array"
+            }
+          },
+          "required": [
+            "categories"
+          ],
+          "title": "Products",
+          "type": "object"
+        },
+        "stores": {
+          "additionalProperties": false,
+          "default": {
+            "per_city_with_store": 1
+          },
+          "properties": {
+            "per_city_with_store": {
+              "default": 1,
+              "maximum": 50,
+              "minimum": 0,
+              "title": "Per City With Store",
+              "type": "integer"
+            }
+          },
+          "title": "Stores",
+          "type": "object"
+        },
+        "suppliers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "lead_time_days": {
+                "maximum": 365,
+                "minimum": 0,
+                "title": "Lead Time Days",
+                "type": "integer"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "reliability": {
+                "default": 0.97,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Reliability",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "lead_time_days"
+            ],
+            "title": "Supplier",
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Suppliers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "customers",
+        "products",
+        "suppliers"
+      ],
+      "title": "Entities",
+      "type": "object"
+    },
+    "events": {
+      "default": [],
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "caused_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Caused By"
+          },
+          "effects": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "decay_halflife_days": {
+                  "anyOf": [
+                    {
+                      "maximum": 365,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Decay Halflife Days"
+                },
+                "duration_days": {
+                  "anyOf": [
+                    {
+                      "maximum": 1095,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Duration Days"
+                },
+                "lag_days": {
+                  "default": 0,
+                  "maximum": 120,
+                  "minimum": 0,
+                  "title": "Lag Days",
+                  "type": "integer"
+                },
+                "metric": {
+                  "enum": [
+                    "purchase_rate",
+                    "churn_hazard",
+                    "acquisition_rate",
+                    "basket_size",
+                    "ticket_rate",
+                    "rating_mean",
+                    "return_rate",
+                    "payment_failure_rate",
+                    "delivery_days"
+                  ],
+                  "title": "Metric",
+                  "type": "string"
+                },
+                "ramp_days": {
+                  "default": 0,
+                  "maximum": 60,
+                  "minimum": 0,
+                  "title": "Ramp Days",
+                  "type": "integer"
+                },
+                "size": {
+                  "maximum": 10,
+                  "minimum": -1,
+                  "title": "Size",
+                  "type": "number"
+                },
+                "size_stated": {
+                  "default": false,
+                  "title": "Size Stated",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "metric",
+                "size"
+              ],
+              "title": "Effect",
+              "type": "object"
+            },
+            "minItems": 1,
+            "title": "Effects",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "narrative_cs": {
+            "default": "",
+            "title": "Narrative Cs",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": false,
+            "default": {
+              "budget_czk": null,
+              "churn_pct": null,
+              "churn_window_days": null,
+              "delivery_delay_days": null,
+              "lead_time_multiplier": null,
+              "price_change_pct": null
+            },
+            "properties": {
+              "budget_czk": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Budget Czk"
+              },
+              "churn_pct": {
+                "anyOf": [
+                  {
+                    "exclusiveMaximum": 100,
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Churn Pct"
+              },
+              "churn_window_days": {
+                "anyOf": [
+                  {
+                    "maximum": 365,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Churn Window Days"
+              },
+              "delivery_delay_days": {
+                "anyOf": [
+                  {
+                    "maximum": 60,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Delivery Delay Days"
+              },
+              "lead_time_multiplier": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Lead Time Multiplier"
+              },
+              "price_change_pct": {
+                "anyOf": [
+                  {
+                    "maximum": 300,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Price Change Pct"
+              }
+            },
+            "title": "Params",
+            "type": "object"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "default": {
+              "category": null,
+              "channel": null,
+              "city": null,
+              "segment": null,
+              "supplier": null
+            },
+            "description": "Who/what an event hits. An empty list or missing key means 'everyone'.",
+            "properties": {
+              "category": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Category"
+              },
+              "channel": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "enum": [
+                        "eshop",
+                        "store",
+                        "app",
+                        "phone"
+                      ],
+                      "title": "Channel",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Channel"
+              },
+              "city": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "City"
+              },
+              "segment": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Segment"
+              },
+              "supplier": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Supplier"
+              }
+            },
+            "title": "Target",
+            "type": "object"
+          },
+          "type": {
+            "enum": [
+              "price_change",
+              "churn_shock",
+              "competitor_entry",
+              "campaign",
+              "supplier_delay",
+              "stockout",
+              "courier_change",
+              "service_outage",
+              "quality_issue",
+              "staff_shortage",
+              "viral_spike"
+            ],
+            "title": "EventType",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "start",
+          "effects"
+        ],
+        "title": "Event",
+        "type": "object"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "default": "CZK",
+          "enum": [
+            "CZK",
+            "EUR"
+          ],
+          "title": "Currency",
+          "type": "string"
+        },
+        "days": {
+          "maximum": 1095,
+          "minimum": 90,
+          "title": "Days",
+          "type": "integer"
+        },
+        "difficulty": {
+          "default": "medium",
+          "enum": [
+            "easy",
+            "medium",
+            "hard"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "locale": {
+          "default": "cs_CZ",
+          "title": "Locale",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "start": {
+          "format": "date",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seed",
+        "start",
+        "days"
+      ],
+      "title": "Meta",
+      "type": "object"
+    },
+    "noise": {
+      "additionalProperties": false,
+      "default": {
+        "messiness": "none"
+      },
+      "properties": {
+        "messiness": {
+          "default": "none",
+          "enum": [
+            "none",
+            "light",
+            "medium",
+            "heavy"
+          ],
+          "title": "Messiness",
+          "type": "string"
+        }
+      },
+      "title": "Noise",
+      "type": "object"
+    },
+    "version": {
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "meta",
+    "company",
+    "entities"
+  ],
+  "title": "StorySpec",
+  "type": "object"
+}

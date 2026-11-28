@@ -34,6 +34,7 @@ import ruptures as rpt
 from scipy.stats import norm
 from statsmodels.tsa.seasonal import STL
 
+from s2d import rustk
 from .kpis import CLOGLOG_KPIS, FLIP_KPIS, INVERSE_KPIS, METRIC, POOLED_KPIS, RATIO_KPIS, SMEAR_DAYS, KPISet
 
 # ---------------------------------------------------------------- global parameters
@@ -128,13 +129,22 @@ class Prepared:
     clean: np.ndarray | None = None  # s with spike days replaced by trend + seasonal
 
 
+def _stl(v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(trend, seasonal) of the robust weekly STL; the Rust kernel when built and the series is finite."""
+    if rustk.LIB is not None and np.isfinite(v).all():
+        return rustk.stl(v, 7, robust=True)
+    res = STL(v, period=7, robust=True).fit()
+    return np.asarray(res.trend), np.asarray(res.seasonal)
+
+
 def prepare(s: pd.Series, smear: int = 0) -> Prepared | None:
     v = s.to_numpy(dtype=float)
     if len(v) < 4 * WINDOW or np.nanstd(v) == 0:
         return None
-    res = STL(v, period=7, robust=True).fit()
-    x = res.trend + res.resid
-    r = res.resid
+    trend, seasonal = _stl(v)
+    resid = v - seasonal - trend
+    x = trend + resid
+    r = resid
     # Noise scale of x itself. The STL residual is too small for this: the trend
     # soaks up the slow part of the noise. First differences see all of it and are
     # robust to level shifts: sd = 1.4826 * MAD(diff) / sqrt(2). A rolling KPI
@@ -151,9 +161,9 @@ def prepare(s: pd.Series, smear: int = 0) -> Prepared | None:
     spike = np.abs(rz) > SPIKE_Z
     # break search and levels ignore spike days: a store closure on a holiday is
     # one zero day, not the location of a level shift
-    x = np.where(spike, res.trend, x)
+    x = np.where(spike, trend, x)
     z = (x - np.median(x)) / scale
-    clean = np.where(spike, res.trend + res.seasonal, v)
+    clean = np.where(spike, trend + seasonal, v)
     return Prepared(s, x, z, rz, scale, clean)
 
 
@@ -169,6 +179,8 @@ def breakpoints(z: np.ndarray) -> list[int]:
     """PELT breaks that Binseg confirms within +-CONFIRM_DAYS."""
     n = len(z)
     pen = PEN_FACTOR * math.log(n)
+    if rustk.LIB is not None and np.isfinite(z).all():  # NaN/inf: ruptures' own error, as before
+        return rustk.breakpoints(z, MIN_SIZE, pen, CONFIRM_DAYS)
     sig = z.reshape(-1, 1)
     pelt = rpt.Pelt(model="l2", min_size=MIN_SIZE).fit(sig).predict(pen=pen)[:-1]
     if not pelt:

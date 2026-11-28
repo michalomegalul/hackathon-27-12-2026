@@ -1,0 +1,8 @@
+[package]
+name = "s2d-kernels"
+edition.workspace = true
+version.workspace = true
+description = "Hot numeric kernels of the detective (PELT, Binseg, STL), called from Python through a C ABI"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
