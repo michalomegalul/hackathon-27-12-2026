@@ -12,7 +12,7 @@ import '../story/story.css'
 const nf = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 })
 const int = new Intl.NumberFormat('en-GB')
 
-const COLOR = { cpu: '#73bf69', mem: '#8ab8ff', customers: '#f2cc0c', gpu: '#c8a7ff' }
+const COLOR = { cpu: '#ffffff', mem: '#a6a6a6', customers: '#d9d9d9', gpu: '#8c8c8c' }
 const TEXT = '#e5e7eb'
 const GRID = 'rgba(255,255,255,0.14)'
 

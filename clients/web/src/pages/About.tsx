@@ -108,7 +108,7 @@ function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; su
   return (
     <div className="grid content-between gap-1 border-l-2 border-line pl-3 py-1">
       <div className="text-[11px] tracking-wide text-muted uppercase">{label}</div>
-      <div className={`text-2xl font-semibold tabular-nums ${tone === 'good' ? 'text-[#73bf69]' : tone === 'warn' ? 'text-[#f2cc0c]' : 'text-slate-100'}`}>
+      <div className={`text-2xl font-semibold tabular-nums ${tone === 'good' ? 'text-[#ffffff]' : tone === 'warn' ? 'text-[#d9d9d9]' : 'text-slate-100'}`}>
         {value}
       </div>
       {sub && <div className="truncate text-[11px] text-slate-500">{sub}</div>}
@@ -130,7 +130,7 @@ function Timeline({ t }: { t: Stats['timeline'] }) {
           <div
             key={h.hour}
             title={`${dateTimeCs(h.hour)}: ${h.jobs} běhů${h.median_run_s ? `, medián ${duration(h.median_run_s)}` : ''}`}
-            className="min-h-px flex-1 bg-[#73bf69]/80 hover:bg-[#73bf69]"
+            className="min-h-px flex-1 bg-[#ffffff]/80 hover:bg-[#ffffff]"
             style={{ height: `${(h.jobs / max) * 100}%`, opacity: h.jobs ? 1 : 0.25 }}
           />
         ))}

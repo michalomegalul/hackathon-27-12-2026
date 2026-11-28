@@ -10,7 +10,7 @@ import { CONTROL_CS, KPI_CS, dateCs } from '../format'
 import { Alert, Spinner } from '../components/ui'
 import { dailySql, daySec, rolling } from './model'
 
-const C = { marker: '#f2cc0c', grid: '#2c3235', text: '#9fa7b3' }
+const C = { marker: '#d9d9d9', grid: '#2a2a2a', text: '#b3b3b3' }
 const DAY = 86_400
 
 const controlLabel = (v: VerificationRow) =>
@@ -46,7 +46,7 @@ function markerPlugin(start: number, label: string): uPlot.Plugin {
 
 // ---- story vs twin: one line until the event, then they split ------------------------------
 
-const T = { story: '#73bf69', twin: '#b8c0cc', control: '#8ab8ff', gap: 'rgba(115,191,105,0.16)' }
+const T = { story: '#ffffff', twin: '#808080', control: '#a6a6a6', gap: 'rgba(255,255,255,0.14)' }
 
 /** Fill between series a and b from `start` on (the effect of the story: story minus twin). */
 function gapPlugin(start: number, a: number, b: number): uPlot.Plugin {
@@ -176,7 +176,7 @@ export function KpiChart({ jobId, v, height = 200 }: { jobId: string; v: Verific
       <SplitPlot data={series.data} v={v} hasControl={series.hasControl} height={height} />
       {series.hasControl && (
         <p className="text-[11px] text-slate-500">
-          <span className="text-[#8ab8ff]">Control (blue, right axis):</span> {CONTROL_CS[v.control_mode] ?? v.control_mode}
+          <span className="text-[#a6a6a6]">Control (blue, right axis):</span> {CONTROL_CS[v.control_mode] ?? v.control_mode}
           {v.control_mode !== 'yoy' && v.control ? ` — ${v.control}` : ''}. Same SQL as the story line, run on the comparison rows.
         </p>
       )}
