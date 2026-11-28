@@ -36,6 +36,10 @@ export type JobCreated = { job_id: string; status: JobStatus; position: number }
 
 export type Summary = { story: string; twin: string }
 
+/** POST /v1/jobs/match: the fingerprint of uploaded data (run/dataFile.ts) and the runs that made them. */
+export type MatchIn = { customers: number; orders: number; sample: { customer_id: number; email: string }[] }
+export type MatchedJob = { job_id: string; title: string; created: string; story_preview: string | null }
+
 export type JobListItem = {
   job_id: string
   status: JobStatus
@@ -346,6 +350,7 @@ export const createJob = (body: NewJob) =>
 export const listJobs = (scope: 'mine' | 'all' = 'mine') => api<{ jobs: JobListItem[] }>(`/v1/jobs?scope=${scope}`)
 export const getJob = (id: string) => api<Job>(`/v1/jobs/${encodeURIComponent(id)}`)
 export const getInput = (id: string) => api<JobInput>(`/v1/jobs/${encodeURIComponent(id)}/input`)
+export const matchJobs = (body: MatchIn) => api<{ jobs: MatchedJob[] }>('/v1/jobs/match', { method: 'POST', body: JSON.stringify(body) })
 export const startDetect = (id: string) =>
   api<{ job_id: string; status: JobStatus; position: number }>(`/v1/jobs/${encodeURIComponent(id)}/detect`, { method: 'POST' })
 export const getDetect = (id: string) => api<Detect>(`/v1/jobs/${encodeURIComponent(id)}/detect`)

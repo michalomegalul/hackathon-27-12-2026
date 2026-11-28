@@ -1507,3 +1507,12 @@ on 18 cores: 21 s (A) and 16 s (B), against 17 s and 12 s before.
      prompt with its events highlighted and the detective's extra finds written under it as
      sentences: a false find with a sensible hypothesis reads like one more event of the story,
      and a student can open it and see in the chart whether the data backs it.
+146. **Rev story takes data as its input** (`POST /v1/jobs/match`, `s2d/api/match.py`). Story gets a
+     prompt, Rev story gets data: the download ZIP of a run, or its customers and orders CSVs. The
+     ZIP is not uploaded (hundreds of MB at 40k customers, nginx takes 2 MB): the browser reads
+     the two CSVs out of it and sends the row counts of customers and orders and 64 customers
+     (id, e-mail) spread over the table. A run matches when its analyst tables have the same
+     counts and every sampled customer; the orders count guards against two runs that would share
+     their customers but not their story. Data that match no run are
+     refused with a message: the Summary needs the prompt that made the data. Running the
+     detective blind on foreign data would need the whole upload and is left for later.

@@ -3,6 +3,7 @@ as spec_yaml, LLM_BACKEND=replay with an empty cache, so the narrator uses the t
 
 from __future__ import annotations
 
+import csv
 import io
 import time
 import zipfile
@@ -305,6 +306,28 @@ def test_download_zip(api):
     mtime = cached.stat().st_mtime
     assert c.get(f"/v1/jobs/{jid}/download", headers=h).content == r.content
     assert cached.stat().st_mtime == mtime  # built once
+
+
+def _fingerprint(zip_bytes: bytes, step: int = 97) -> dict:
+    """What the Rev story page sends: counts of customers and orders and spread customers,
+    read from the download ZIP's CSVs (clients/web/src/run/dataFile.ts does the same)."""
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        cust = list(csv.DictReader(io.TextIOWrapper(z.open("customers.csv"), "utf-8")))
+        with z.open("orders.csv") as f:
+            orders = sum(1 for _ in f) - 1
+    sample = [{"customer_id": int(r["customer_id"]), "email": r["email"]} for r in cust[::step]][:64]
+    return {"customers": len(cust), "orders": orders, "sample": sample}
+
+
+def test_match_finds_the_job_from_its_data(api):
+    c, h, jid = api["c"], api["h"], api["id"]
+    fp = _fingerprint(c.get(f"/v1/jobs/{jid}/download", headers=h["student"]).content)
+    assert [j["job_id"] for j in c.post("/v1/jobs/match", json=fp, headers=h["student"]).json()["jobs"]] == [jid]
+    assert c.post("/v1/jobs/match", json=fp, headers=h["other"]).json()["jobs"] == []  # not their job
+    other = {**fp, "sample": [{**fp["sample"][0], "email": "nekdo@jinde.cz"}]}
+    assert c.post("/v1/jobs/match", json=other, headers=h["student"]).json()["jobs"] == []
+    assert c.post("/v1/jobs/match", json={**fp, "orders": fp["orders"] + 1}, headers=h["student"]).json()["jobs"] == []
+    assert c.post("/v1/jobs/match", json={**fp, "sample": []}, headers=h["student"]).status_code == 422
 
 
 def test_detective(api):

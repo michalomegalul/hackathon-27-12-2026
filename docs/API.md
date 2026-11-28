@@ -188,6 +188,25 @@ default.
 `summary` is `null` until the job is done. `story_preview`: the first 120 characters of the
 story (trimmed), `null` for a `spec_yaml` job.
 
+### `POST /v1/jobs/match`: which run made these data (Rev story's input)
+
+The client reads the download ZIP (or `customers.csv` and `orders.csv`) itself and sends only a
+fingerprint: the row counts of both tables and 1 to 64 customers spread over the table.
+
+```json
+{"customers": 3000, "orders": 584132,
+ "sample": [{"customer_id": 1, "email": "jan.jezek66@centrum.cz"}, {"customer_id": 48, "email": "..."}]}
+```
+
+```json
+{"jobs": [{"job_id": "20261128-102222-7f0fda", "title": "Pražírna Zrnko", "created": "2026-11-28T10:22:22",
+           "story_preview": null}]}
+```
+
+A finished job matches when its analyst tables have the same counts and every sampled customer.
+Only jobs this user may see are searched; the same spec and seed give the same data, so several
+can match (newest first). `[]` when none does. 422 for an empty or a longer sample.
+
 ### `GET /v1/jobs/{id}/input`: the prompt as sent
 
 Any status, same visibility as the job.

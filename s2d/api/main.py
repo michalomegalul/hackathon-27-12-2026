@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from s2d.sim import pg
 
 from . import bundle, pipeline, sandbox, store, sysmon
+from . import match as rev_match
 from .auth import User, current_user, staff_user
 from .worker import worker
 
@@ -64,6 +65,20 @@ class JobIn(BaseModel):
 
 World = Literal["story", "twin"]
 ANALYST_DB = {"story": "analyst.duckdb", "twin": "analyst_twin.duckdb"}
+
+
+class MatchCustomer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    customer_id: int
+    email: Annotated[str, Field(max_length=320)]
+
+
+class MatchIn(BaseModel):
+    """Rev story's fingerprint of uploaded data (the browser reads the ZIP, see s2d/api/match.py)."""
+    model_config = ConfigDict(extra="forbid")
+    customers: Annotated[int, Field(ge=1)]
+    orders: Annotated[int, Field(ge=0)]
+    sample: Annotated[list[MatchCustomer], Field(min_length=1, max_length=rev_match.SAMPLE_MAX)]
 
 
 class QueryIn(BaseModel):
@@ -312,6 +327,15 @@ def list_jobs(user: User = Depends(current_user), scope: Literal["mine", "all"] 
                     "elapsed_s": _elapsed(st), "summary": res["summary"] if res else None,
                     "story_preview": _story_preview(st)})
     return {"jobs": out}
+
+
+@app.post("/v1/jobs/match")
+def match_jobs(body: MatchIn, user: User = Depends(current_user)):
+    """Which finished jobs (that this user may see) made these data: Rev story's input."""
+    seen = [st for st in store.all_jobs() if _visible(st, user)]
+    hits = rev_match.find(seen, body.customers, body.orders, [(c.customer_id, c.email) for c in body.sample])
+    return {"jobs": [{"job_id": st["job_id"], "title": st.get("title", ""), "created": store.iso(st["created"]),
+                      "story_preview": _story_preview(st)} for st in hits]}
 
 
 @app.get("/v1/jobs/{job_id}")

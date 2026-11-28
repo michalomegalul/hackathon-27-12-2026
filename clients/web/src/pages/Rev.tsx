@@ -1,14 +1,17 @@
-// Rev story "/rev" and "/rev/:id": data → story. Pick a finished database (or attach a .yaml spec,
-// which runs as a job first), the detective starts by itself (useRun), and Summary sets the
+// Rev story "/rev" and "/rev/:id": data → story. Its input is the data: drop the download ZIP of a
+// run (or its CSVs), the browser fingerprints it and the API finds the run that made it (run/
+// dataFile.ts, POST /v1/jobs/match); demos and earlier runs can be opened directly. On /rev/:id
+// the detective starts by itself (useRun), and Summary sets the
 // detective's story against the original prompt (RevSummary). Same run view as Story, in the
 // order it happens here (REV_ORDER): data, detective, score, then the prompt and the summary.
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
-import { jobsOptions, type JobListItem } from '../api'
+import { jobsOptions, matchJobs, type JobListItem, type MatchedJob } from '../api'
 import { RunView } from '../run/RunView'
 import { Sections } from '../run/sections'
 import { REV_ORDER, useRun } from '../run/useRun'
+import { fingerprint } from '../run/dataFile'
 import { recallSent, useResend, useSend } from '../run/useSend'
 import { isDemo, matchesQuery } from '../run/jobs'
 import { forgetLast, useRememberLast } from '../run/lastRun'
@@ -41,14 +44,116 @@ function Pick({ j, onPick }: { j: JobListItem; onPick: () => void }) {
   )
 }
 
-/** The database picker: finished runs (demos pinned on top), search, or a .yaml spec to run first. */
+type Drop =
+  | { phase: 'idle' }
+  | { phase: 'reading'; msg: string }
+  | { phase: 'matched'; jobs: MatchedJob[] }
+  | { phase: 'error'; msg: string }
+
+/** Rev story's input: drop the data. The browser reads the ZIP itself (run/dataFile.ts) and asks
+ *  the API which run made these data; one match opens it, several are listed, none is said. */
+function DropData() {
+  const navigate = useNavigate()
+  const file = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  const [st, setSt] = useState<Drop>({ phase: 'idle' })
+  const busy = st.phase === 'reading'
+
+  async function take(list: FileList | null) {
+    const files = [...(list ?? [])]
+    if (!files.length || busy) return
+    try {
+      setSt({ phase: 'reading', msg: 'Reading the data…' })
+      const fp = await fingerprint(files, (msg) => setSt({ phase: 'reading', msg }))
+      setSt({ phase: 'reading', msg: 'Looking for the run that made these data…' })
+      const { jobs } = await matchJobs(fp)
+      if (jobs.length === 1) return void navigate(`/rev/${jobs[0].job_id}`)
+      setSt({ phase: 'matched', jobs })
+    } catch (e) {
+      setSt({ phase: 'error', msg: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  return (
+    <div className="grid gap-3">
+      <button
+        type="button"
+        onClick={() => file.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setOver(false)
+          void take(e.dataTransfer.files)
+        }}
+        disabled={busy}
+        className={`grid min-h-40 place-items-center border border-dashed px-4 py-8 text-center transition-colors ${
+          over ? 'border-accent bg-accent/[0.06]' : 'border-line hover:border-slate-500 hover:bg-white/[0.02]'
+        }`}
+      >
+        {busy ? (
+          <span className="text-sm text-slate-300">
+            <Spinner /> {st.msg}
+          </span>
+        ) : (
+          <span className="grid gap-1">
+            <span className="font-medium">Drop the data here</span>
+            <span className="text-sm text-muted">the ZIP you downloaded from a run, or its customers.csv and orders.csv · or click to choose</span>
+          </span>
+        )}
+      </button>
+      <input
+        ref={file}
+        type="file"
+        multiple
+        accept=".zip,.csv,application/zip,text/csv"
+        className="hidden"
+        onChange={(e) => {
+          const files = e.target.files
+          void take(files).finally(() => (e.target.value = ''))
+        }}
+      />
+      <p className="text-[11px] text-slate-500">The file stays in your browser: it only counts the customers and orders and sends a sample of customers to find the run.</p>
+      {st.phase === 'error' && <Alert>{st.msg}</Alert>}
+      {st.phase === 'matched' &&
+        (st.jobs.length === 0 ? (
+          <Alert>
+            These data were not made here, or by a run you cannot see. Rev story compares the detective's story with the prompt that made the data, so it
+            needs a run of this site.
+          </Alert>
+        ) : (
+          <div className="grid gap-1.5">
+            <h2 className="text-xs text-muted">{st.jobs.length} runs made exactly these data (the same spec and seed); pick one</h2>
+            <ul className="grid gap-1.5 md:grid-cols-2">
+              {st.jobs.map((j) => (
+                <li key={j.job_id}>
+                  <button
+                    onClick={() => void navigate(`/rev/${j.job_id}`)}
+                    className="grid w-full gap-0.5 border-b border-line px-1 py-2 text-left hover:bg-white/[0.03]"
+                  >
+                    <span className="truncate font-medium">{j.title || 'Untitled'}</span>
+                    <span className="truncate text-xs text-muted">
+                      {j.story_preview ?? 'ready-made spec'} · {dateTimeCs(j.created)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+    </div>
+  )
+}
+
+/** Story takes a prompt, Rev story takes data: the drop zone first, the demos as a quick start,
+ *  earlier runs folded under them. */
 function Picker() {
   const { data, error, isPending } = useQuery(jobsOptions('all'))
   const [q, setQ] = useState('')
   const navigate = useNavigate()
-  const send = useSend('/rev')
-  const file = useRef<HTMLInputElement>(null)
-  const [fileErr, setFileErr] = useState<string | null>(null)
   const jobs = useMemo(
     () =>
       (data?.jobs ?? [])
@@ -56,68 +161,23 @@ function Picker() {
         .sort((a, b) => Number(isDemo(b)) - Number(isDemo(a)) || b.created.localeCompare(a.created)),
     [data, q],
   )
-  const demos = jobs.filter(isDemo)
+  const demos = (data?.jobs ?? []).filter((j) => j.status === 'done' && isDemo(j))
   const rest = jobs.filter((j) => !isDemo(j))
 
   return (
-    <div className="grid gap-4 border-t border-line pt-5">
+    <div className="grid gap-5 border-t border-line pt-5">
       <div>
         <h1 className="text-lg font-semibold">Rev story: data to story</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
-          Pick a finished database. The detective searches it blind for what happened to the company, and the Summary sets its story against the original
-          prompt: what it found, what it missed and what it made up.
+          Story turns a prompt into data; Rev story goes back. Give it the data: the detective searches them blind for what happened to the company, and the
+          Summary sets its story against the prompt that made them: what it found, what it missed and what it found on top.
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by company or story…"
-          aria-label="Search databases"
-          className="min-w-0 flex-1 border border-line bg-bg px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:text-sm"
-        />
-        <button
-          onClick={() => file.current?.click()}
-          disabled={send.isPending}
-          className="inline-flex items-center gap-1.5 border border-line px-3 py-2 text-sm text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
-          title="Attach a spec (.yaml): data is generated from it first, then the detective runs"
-        >
-          {send.isPending ? (
-            <Spinner />
-          ) : (
-            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M21 11.5 12.6 19.9a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />
-            </svg>
-          )}{' '}
-          Attach .yaml
-        </button>
-        <input
-          ref={file}
-          type="file"
-          accept=".yaml,.yml,application/yaml,text/yaml"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            e.target.value = ''
-            if (!f) return
-            setFileErr(null)
-            if (!/\.ya?ml$/i.test(f.name)) return setFileErr('Attach a .yaml spec file.')
-            void f.text().then((yaml) => send.mutate({ body: { spec_yaml: yaml }, specName: f.name }))
-          }}
-        />
-      </div>
-      {(fileErr || send.error) && <Alert>{fileErr ?? send.error?.message}</Alert>}
+      <DropData />
       {error && <Alert>{error.message}</Alert>}
-      {isPending && (
-        <p className="text-sm text-muted">
-          <Spinner /> Loading databases…
-        </p>
-      )}
-      {data && jobs.length === 0 && <p className="text-sm text-muted">{q ? 'Nothing matches the search.' : 'No finished database yet.'}</p>}
       {demos.length > 0 && (
         <div className="grid gap-1.5">
-          <h2 className="text-xs text-muted">Demos</h2>
+          <h2 className="text-xs text-muted">No file at hand? Start from a demo</h2>
           <ul className="grid gap-1.5 md:grid-cols-2">
             {demos.map((j) => (
               <Pick key={j.job_id} j={j} onPick={() => void navigate(`/rev/${j.job_id}`)} />
@@ -125,16 +185,32 @@ function Picker() {
           </ul>
         </div>
       )}
-      {rest.length > 0 && (
-        <div className="grid gap-1.5">
-          <h2 className="text-xs text-muted">Other databases</h2>
-          <ul className="grid max-h-[26rem] gap-1.5 overflow-y-auto pr-1 md:grid-cols-2">
-            {rest.map((j) => (
-              <Pick key={j.job_id} j={j} onPick={() => void navigate(`/rev/${j.job_id}`)} />
-            ))}
-          </ul>
+      <details className="grid gap-2">
+        <summary className="cursor-pointer text-xs text-muted select-none hover:text-white">Or open an earlier run</summary>
+        <div className="mt-2 grid gap-2">
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by company or story…"
+            aria-label="Search databases"
+            className="min-w-0 border border-line bg-bg px-3 py-2 text-[16px] placeholder:text-slate-500 focus:border-slate-500 focus:outline-none sm:text-sm"
+          />
+          {isPending && (
+            <p className="text-sm text-muted">
+              <Spinner /> Loading databases…
+            </p>
+          )}
+          {data && rest.length === 0 && <p className="text-sm text-muted">{q ? 'Nothing matches the search.' : 'No finished database yet.'}</p>}
+          {rest.length > 0 && (
+            <ul className="grid max-h-[26rem] gap-1.5 overflow-y-auto pr-1 md:grid-cols-2">
+              {rest.map((j) => (
+                <Pick key={j.job_id} j={j} onPick={() => void navigate(`/rev/${j.job_id}`)} />
+              ))}
+            </ul>
+          )}
         </div>
-      )}
+      </details>
     </div>
   )
 }
