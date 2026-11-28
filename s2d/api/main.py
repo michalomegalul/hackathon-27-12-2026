@@ -421,7 +421,13 @@ def get_detect(job_id: str, user: User = Depends(current_user)):
     if not d:
         raise HTTPException(404, "detective not run")
     res = store.read_json(store.job_dir(job_id) / "detect_result.json") if d["status"] == "done" else None
+    if res and user.staff and "matching" not in res:
+        try:
+            res = pipeline.refresh_matching(job_id, res)
+        except Exception:  # an old run without its tables: the page pairs the finds itself
+            pass
     return {"job_id": job_id, "status": d["status"], "position": _queue_eta("detect", job_id)[0],
             "elapsed_s": _elapsed(d), "error": d.get("error"),
             "events": res["events"] if res else None, "narrative": res["narrative"] if res else None,
-            "score": res["score"] if res and user.staff else None}
+            "score": res["score"] if res and user.staff else None,
+            "matching": res.get("matching") if res and user.staff else None}

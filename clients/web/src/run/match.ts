@@ -2,7 +2,7 @@
 // s2d/score.py (slots, pair_score, the optimal assignment, consequence_of) so the arrows Rev
 // story draws are the pairs behind the P/R/F1 the API reports. The API sends only the score,
 // not the pairs, so the page computes them again from /detect and /answer-key.
-import type { Decoy, DetectEvent, PlantedEvent } from '../api'
+import type { Decoy, DetectEvent, DetectMatching, PlantedEvent } from '../api'
 
 const MATCH = 0.5
 const TAU: Record<string, number> = { shift: 7, spike: 2, stockout: 2 }
@@ -131,6 +131,8 @@ export type Matching = {
   falseFinds: { found: DetectEvent; decoy: string | null }[]
   /** finds that follow from a matched planted event (neither a hit nor a false alarm) */
   consequences: { found: DetectEvent; of: string }[]
+  /** finds the no-story twin has too (a routine stock-out, a courier's bad week): not the story */
+  background: { found: DetectEvent; twinDate: string }[]
   precision: number
   recall: number
   f1: number
@@ -163,5 +165,42 @@ export function matchEvents(found: DetectEvent[], plantedAll: PlantedEvent[], de
   const precision = found.length ? tp / found.length : 0
   const recall = planted.length ? tp / planted.length : 0
   const f1 = precision + recall ? (2 * precision * recall) / (precision + recall) : 0
-  return { pairs, missed: planted.filter((t) => !hitT.has(t.event_id)), falseFinds, consequences, precision, recall, f1 }
+  return { pairs, missed: planted.filter((t) => !hitT.has(t.event_id)), falseFinds, consequences, background: [], precision, recall, f1 }
+}
+
+/**
+ * The server's pairing (s2d/score.py via GET /detect `matching`), which knows what the page
+ * cannot: the observed stock-out of a supply event and the twin's own finds. Null when it
+ * names a find or event the page does not have, so the caller falls back to matchEvents.
+ */
+export function fromServer(found: DetectEvent[], plantedAll: PlantedEvent[], sm: DetectMatching): Matching | null {
+  const f = new Map(found.map((e) => [e.id, e]))
+  const t = new Map(plantedAll.map((e) => [e.event_id, e]))
+  const pairs: Pair[] = []
+  for (const p of sm.pairs) {
+    const fe = f.get(p.found_id)
+    const te = t.get(p.event_id)
+    if (!fe || !te) return null
+    pairs.push({
+      found: fe,
+      planted: te,
+      score: p.score,
+      slots: { gate: true, timing: p.timing, deltaDays: p.delta_days, segment: p.segment, magnitude: p.magnitude },
+    })
+  }
+  const pick = <T extends { found_id: string }>(xs: T[]) => xs.filter((x) => f.has(x.found_id))
+  const planted = plantedAll.filter((x) => x.simulated)
+  const tp = pairs.length
+  const precision = found.length ? tp / found.length : 0
+  const recall = planted.length ? tp / planted.length : 0
+  return {
+    pairs,
+    missed: sm.missed.map((id) => t.get(id)).filter((x): x is PlantedEvent => !!x),
+    falseFinds: pick(sm.false_finds).map((x) => ({ found: f.get(x.found_id)!, decoy: x.decoy })),
+    consequences: pick(sm.consequences).map((x) => ({ found: f.get(x.found_id)!, of: x.of })),
+    background: pick(sm.background).map((x) => ({ found: f.get(x.found_id)!, twinDate: x.twin_start_date })),
+    precision,
+    recall,
+    f1: precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
+  }
 }

@@ -148,8 +148,19 @@ export type DetectScore = {
   precision: number
   recall: number
   f1: number
+  /** precision and F1 when consequences and finds the twin has too are left out */
+  precision_cons?: number
+  f1_cons?: number
   twin_false_events_per_year: number | null
   placebo_p: number | null
+}
+/** s2d/score.py's pairing of finds and planted events (teacher and admin only). */
+export type DetectMatching = {
+  pairs: { found_id: string; event_id: string; score: number; timing: number; delta_days: number; segment: number; magnitude: number }[]
+  missed: string[]
+  false_finds: { found_id: string; decoy: string | null }[]
+  consequences: { found_id: string; of: string }[]
+  background: { found_id: string; twin_id: string; twin_start_date: string }[]
 }
 export type Detect = {
   job_id: string
@@ -160,6 +171,7 @@ export type Detect = {
   events: DetectEvent[] | null
   narrative: { text: string; source: string } | null
   score: DetectScore | null
+  matching?: DetectMatching | null
 }
 
 /** GET /answer-key row: an event the story planted (the hidden truth; teacher and admin). */

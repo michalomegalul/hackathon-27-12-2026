@@ -1196,3 +1196,244 @@ the top of `s2d/detective/scan.py`.
      - **Server:** CT 106 (`hack`, the API's container) went from 4 cores / 6 GB to
        8 cores / 12 GB (`pct set 106 --cores 8 --memory 12288 --swap 1024`, live). Three
        seeds at 100k need about 7–8 GB.
+130. **Scorer: supply events, the twin's own finds, the server's pairing** (`s2d/score.py`,
+     `s2d/api/pipeline.py`, Rev story). Every Rev story run scored P/R/F1 = 0, and most of its
+     "false finds" were real things in the data, not hallucinations. Measured on example A,
+     seed 42, 40k customers, medium, before → after: 1 → 2 of 5 matched, 22 → 10 false
+     finds (+9 consequences, +3 background), F1 with consequences 0.07 → 0.24; date-shuffle
+     placebo p 0.05 → 0.02 (placebo F1 mean 0.007), so the scorer did not get easier to fool.
+     - **Supply events** (`supplier_delay`, `stockout`) are emergent: the key's metric
+       (ticket_rate) and lag are the story's guess, the data shows an empty shelf. The scorer
+       reads `observed_start`, the first day in [start, start + lag + 60] with a product of the
+       target at zero stock (`inventory_daily`), and a detective stock-out matches the event
+       at that date (tau 2), segment against the target with the supplier's categories added
+       (`supplier=S_ETH` → `category=etiopie`), no magnitude slot. The placebo moves
+       `observed_start` with the shuffled start. A stock-out on the key's lag date that is not
+       the observed date does not match.
+     - **An outage's consequences:** within the usual window, tickets of the mechanism's topic
+       (`vyprodáno`, `zpoždění`: verify.py's TICKET_TOPIC) and any purchase find sharing the
+       target in either direction (the restock rebound), or another category going up
+       (customers switch), are consequences of the matched supply event.
+     - **Background:** an unmatched find that the no-story twin also reports (same metric and
+       direction, ±7 days, overlapping segment) is listed as `background`, not as a false find:
+       routine stock-outs and a courier's bad week happen in both worlds. A decoy stays a false
+       find. Strict precision (TP / reported) is unchanged; `precision_cons` leaves out
+       consequences and background.
+     - **The web no longer re-implements the pairing.** `run_detect` stores score.py's
+       `matching` (pairs, missed, false finds, consequences, background) in detect_result.json
+       and GET /detect returns it to staff; a result saved before this is re-scored once on its
+       first staff read. Rev story uses it and falls back to `match.ts` only without it (a
+       student, who sees no key).
+     - Detector changes that came after it are in decision 131.
+131. **Detective: observed signals, outages as one event, no ratio spikes; scorer aliases**
+     (`s2d/detective/scan.py`, `kpis.py`, `s2d/score.py`). Only reporting changed in scan.py:
+     `did`, `did_effects`, `placebo_z`, `robust_sd`, `WINDOW`, `MIN_AFTER` (what verify.py and
+     calibrate.py import) are untouched, and their tests pass unchanged.
+     - **Subscribers' churn is observed:** a `cancellations` KPI from `subscriptions.cancelled_at`
+       (dims with one value among subscribers dropped: segment is everyone there), and
+       subscribers are left out of `churn_onsets`. An empty shelf stops a subscriber's orders,
+       which the order-gap guess read as churn weeks before E4 (decision 60).
+     - **Price test = the verifier's test:** raw daily counts, windows [T, T+28) vs [T−28, T),
+       and its own bar `PRICE_Z` = 3.0 with the response against the price. It is one test per
+       dated price change the data shows, not a search, and a no-story twin has no price changes,
+       so it cannot add twin false events. Before: despiked, holiday-masked, a week skipped,
+       Z_REPORT: E1 at z 2.89 where the verifier had 3.80.
+     - **Stock-outs:** overlapping empty runs of one category are one event (first day, last
+       day, "k z n SKU"); one SKU out while its category still sells is `routine`, not reported
+       (`STOCKOUT_MIN_SKUS` = 2). Orders of a category moving from RAMP_MAX days before to
+       MERGE_DAYS after a reported stock-out of it are `explained_by_stockout` (the drop into it,
+       blips, the restock rebound); price tests are exempt.
+     - **No spikes on ratio KPIs** (late_rate, rating_mean): a share of ~170 parcels a day swings
+       by itself and the MAD z ignores the daily count; no story event is a ratio spike (a courier
+       switch is a shift, still scanned). This removed the Brno "+556 % late" of January 2025 that
+       every run had.
+     - **`control_moved`:** a reported count shift whose own series moved the other way (up
+       against the rest while it fell) is all control and is not reported. A ratio rule
+       (|raw| ≪ |DiD|) was looked at and not used: raw changes carry seasonality.
+     - **Scorer:** a supply event's observed onset is the first day with ≥ 2 of its products out
+       (the detective's rule, not the first single SKU); a `courier_change` on cities also matches
+       under `courier=X`, X the courier whose share of those cities grew most in the 28 days from
+       start (`alias_pairs`, segment slot = the better Jaccard).
+     - **Measured** (40k customers A, 30k B, 20k SportMax; strict P/R → matched of key, false finds,
+       strict F1; placebo p of the new scorer ≤ 0.04 except SportMax):
+
+       | run | before (decision 130's code base) | after |
+       |---|---|---|
+       | A seed 42 medium | 1/5, 22 FP, F1 0.07 | 2/5, 5 FP, F1 0.29 |
+       | A seed 7 medium | 2/5, 12 FP, F1 0.21 | 3/5, 4 FP, F1 0.50 |
+       | A seed 42 easy | – | 3/5, 5 FP, F1 0.40 |
+       | B seed 42 (hard) | 0/5, 11 FP, F1 0 | 1/5, 8 FP, F1 0.11 |
+       | SportMax seed 42 | 0/1, 3 FP, F1 0 | 0/1, 3 FP, F1 0 |
+
+       Twin false events, A: 3.27 → 1.09 a year (decision 57's target 0.98); B 2.44, SportMax 1.5.
+     - **Still out of reach:** calibration aims at the verifier (target d 3.5 medium, 5 easy, realism
+       caps, stated sizes fixed), the blind scan reports from z 5.25: E5 (Brno stores, stated
+       −20 %, verifier z 2.4) and student churn E2 at medium stay below it, and B's courier and
+       rating noise is the largest share of its false finds. Bigger effects only for Rev story
+       would need a calibration target of its own, which changes calibrate.py; easy is the
+       honest lever today.
+132. **Year-over-year check in the detective; substitution back after an outage** (`scan.last_year`,
+     `score.consequence_of`). A reported shift whose DiD on the same days 364 days earlier has the
+     same sign, at least half the size and a CI excluding 0 is `seasonal`: the segment's own season,
+     which the control (the other segments) does not share. The no-story twin is not used for this:
+     the detective is blind, and story minus twin is the answer. Measured on the five runs of 131 it
+     changes nothing: the simulator's seasonality is common to all segments, so the DiD already
+     removes it, and none of the remaining false finds happened a year before (e.g. accessories in
+     June 2026 −27 %, June 2025 +1 %). It stays for real data, where seasons differ by segment;
+     it needs a year of history, so events in the first year are not checked. In the scorer, any
+     other category moving during a matched outage's window is a consequence (customers switch
+     away and back once the shelf is full): A easy 5 → 3 false finds, F1 with consequences 0.55.
+
+## Detective, round 5: anchors, pooled ratios, clean controls (2026-11-28)
+
+Measured on Example A (40k customers, medium, seeds 42, 7, 1, 2, 3, 4) and Example B (30k, hard,
+seeds 42, 7, 1), each with its no-story twin; scan output, no LLM. Every change is measured on the
+same 9 story runs and 9 twins, cumulatively in the order below. F1 is the strict F1 (TP over all
+reported); "twin" is false finds per twin run (670 days ≈ 1.8 years, so the 1-a-year budget is
+~1.8 per run).
+
+| step | TP / run | false / run | F1 | F1 with consequences | twin / run |
+|---|---|---|---|---|---|
+| before (decision 132) | 1.56 | 5.89 | 0.214 | 0.255 | 3.67 |
+| merge keeps segments apart (133) | 1.78 | 6.89 | 0.216 | 0.272 | 3.78 |
+| + anchored family, churn against the new rate (133) | 2.00 | 7.00 | 0.232 | 0.297 | 3.78 |
+| + pooled ratio KPIs (134) | 2.11 | 5.56 | 0.260 | 0.331 | 3.78 |
+| + stock-outs, substitution, clean controls (135) | 2.11 | 4.22 | 0.345 | 0.372 | 2.33 |
+| + max-T bar per level (136) | 2.11 | 3.89 | 0.345 | 0.378 | 2.33 |
+| + city × channel cells without a parent (137) | **2.22** | **3.89** | **0.360** | **0.394** | **2.33** |
+
+Ablations of the final state: without the anchored family F1 0.265 (TP 1.67), without pooled
+ratios F1 0.307 (6.2 false / run); the twin rate is the same in both (2.33 and 2.44). A alone ends
+at F1 0.40 (2.33 TP, 3.2 false, twin 2.7), B at 0.27 (2 TP, 5.3 false, twin 1.7). Runtime alone
+on 18 cores: 21 s (A) and 16 s (B), against 17 s and 12 s before.
+
+133. **The anchored family: pre-registered tests at dates from treatment tables** (`scan.anchor_catalogue`,
+     `anchored_candidates`, `family_test`, `absorb_into_anchored`, `kpis.rate_steps`).
+     - **Why:** the step 0 diagnostic (oracle-located z = the detective's own DiD and placebo z on the
+       right series at the right date) showed that most misses are not a lack of power. E2's student
+       churn had oracle z ≥ 5.7 in 4 of 6 A seeds and E4's Brno churn ≥ 5.8 in 5 of 6, but the scan
+       dated E2 at the price change, 5–6 weeks early, and merged E4 away.
+     - **Merge bug first:** `merge` grouped candidates by metric, direction and time only, so Brno
+       subscribers' churn and regular customers' churn in the same week were one event, and E4 lost
+       to the larger one. Now a group needs overlapping segments (a shared key=value, or one is
+       everyone). Alone: E4 found in one more seed, and the false finds the merge used to hide show up
+       (+1 a run); the rules below remove them.
+     - **Catalogue:** before any outcome is tested, the scan lists the anchors: every price change
+       date in `product_prices` (categories, median %), and every courier switch, where a courier's
+       share of a city's deliveries (by order day) moves by ≥ 20 pp (14 days after against 28 before).
+       Switches within 3 days are one anchor. The list is in `detective.json` as `anchors`, the
+       pre-registration. Example B: 2026-02-02 (Levná Doprava in Olomouc and Ostrava) and its switch
+       back on 2026-06-02; Example A: 2026-03-01 (coffee +15 %). Nothing in the catalogue is read
+       from an outcome KPI; twins have no anchors.
+     - **Families:** price → (1) orders of the repriced categories at lag 0, the existing price test
+       (`PRICE_Z`, decision 131), then (2) churn (`churn_onsets`) of every customer segment at lags
+       0..56 days, one-sided (dearer → more churn). Courier → (1) late share and rating of its cities
+       at lag 0, then (2) churn of its cities at lags 0..56, two-sided. The statistic is the family's
+       largest z (the DiD z at every date, `_z_by_date`); its p is the share of placebo dates whose
+       largest z is as large, the dates being every day more than 84 days before or 168 days after
+       every anchor (after an anchor its effect may also end, and the mirror shows in the other
+       segments; with a 84-day exclusion the null held that end and p stayed at 0.3 for z 7).
+     - **Alpha:** `ANCHOR_ALPHA` = 0.18 expected false anchored finds a run: 0.1 of the 1-a-year
+       budget over a 1.8-year run. Each anchor gets 0.18 / #anchors, split in half between its two
+       families; when the first family is confirmed, the second gets the whole (Bonferroni with the
+       alpha passed on). A: churn is tested at 0.09 or 0.18; B: each family at 0.045 or 0.09.
+     - **Dating:** a 7-day lag grid (14/28/42 as first planned) dates a churn up to 7 days off, and
+       the scorer gives no credit at 7 days. Churn dates are estimates (last order + mean gap), which
+       smear a step evenly, and a ramp fit then starts ~2–3 weeks early. So the onset is the peak of
+       the family's z over daily lags, averaged over 3 weeks (`ANCHOR_DATE_SMOOTH`): 4 of 6 A seeds
+       within 6 days of E2's 04-12 (2 of 6 with single days). In B the churn is found every time but
+       dated 12–21 days before the key's lag 35: bad-delivery churn starts at the switch itself.
+     - A reported churn rise that the scan dated between the anchor and the anchored date is the same
+       event (`merged` into the anchored one): the scan's ramp fit started at the price change.
+     - **Churn against the new rate (miss b):** at each price anchor every customer segment's orders
+       are compared with the other segments; if the DiD's CI excludes 0, that segment's customers
+       whose last order is after the anchor have both gaps divided by the rate ratio, so 3 × gap is
+       measured against how often they buy now (`churn_table(steps=...)`). It is a measurement, not a
+       finding, so it needs no placebo bar (segment seasonality keeps the placebo z of a −10 % step at
+       1–2). On all 6 A seeds it flattens the false rise at the price change (z at 03-01 from 2.0–2.9
+       to 0.8–2.1) and keeps or raises the true peak (4.1→4.5, 8.0→8.3, 6.2→6.7, 6.5→6.2, 9.3→9.5,
+       5.7→6.2). Measuring each customer's last 3 gaps instead was mixed (worse on seed 7) and is not
+       used.
+     - **`lag_search`** applied |t| ≥ 3 to the best of all (anchor, lag) pairs it tried. Its bar is now
+       Bonferroni over them, never below 3 (`LAG_ALPHA` 0.05).
+     - **Not done:** the orders test of a price anchor keeps its fixed z ≥ 3. Its empirical one-sided
+       placebo p at E1's effect (−4 to −6 %) is 0.12–0.17, because the coffee series has outages and
+       Christmas in it; so z ≥ 3 already sits at about alpha 0.1 per anchor, and a calibrated p at
+       0.09 would lose E1 in the two seeds that find it. E1 is a power problem (verifier z 2.0–3.3).
+134. **Ratio KPIs from pooled counts** (`kpis._add_ratio` parts, `scan.pooled_test`, `pooled_effects`,
+     `overdispersion`; new KPI `low_rating`).
+     - **Why:** B's late-delivery finds had z of 40–150. Levná Doprava only delivers from February to
+       June; its daily mean was interpolated flat over the rest of the year, so the placebo spread was
+       almost 0. Daily means of a few hundred parcels also weigh a 3-parcel day like a 300-parcel day.
+     - **Now:** for `late_rate`, `rating_mean` and `low_rating` (share of 1–2 star reviews) the parts
+       are kept: daily sum and count, 0 on a day without events. The DiD is the pooled log-odds ratio of
+       the 28-day sums (share KPIs) or the pooled mean difference (ratings), segment against its
+       complement (or siblings). Each of the 4 windows needs ≥ 10 events and ≥ 10 non-events
+       (`POOLED_MIN`), otherwise the candidate is not tested. The noise is the larger of the placebo
+       spread (valid windows only) and the binomial se scaled by φ, the Pearson χ²/df of a
+       quasi-binomial GLM on 4-week blocks and day of week (never below 1). z = |DiD − placebo median| /
+       noise, CI = DiD ± 1.96 noise; the size is reported in percentage points. The interpolated mean
+       is still what PELT looks for breaks on.
+     - The everyone-level series of these KPIs is no longer scanned (it has no control); its segments
+       are. The control of a city is now the other cities, not everyone including the city.
+     - **Effect:** B false finds 11.0 → 6.7 a run, one more E1 row matched; A unchanged. A first version
+       had collinear day-of-week and block dummies and gave φ ≈ 10¹⁷; the test
+       `test_overdispersion_is_one_for_binomial_days_and_more_for_batches` caught it, and the
+       measurements above are after the fix (same totals).
+135. **Stock-outs, substitution and clean controls** (`explained_by_stockout`, `substitution`,
+     `contaminated_control`, merge window for rolling KPIs).
+     - **Routine and December stock-outs explain their category** (`STOCKOUT_SHARE` = 0.10): a
+       one-SKU stock-out whose SKU sold ≥ 10 % of its category in the 28 days before, and a stock-out
+       the calendar explains, now explain that category's shifts and spikes as reported ones did. The
+       Christmas rush empties all 8 kolumbie SKUs in mid-December on every seed and twin; those
+       stock-outs were `explained_by_calendar`, so the category's −15 % stayed a find. "Sold out"
+       tickets (`STOCKOUT_TOPICS`) during such a stock-out are the empty shelf too.
+     - **Substitution:** a rise in category X that starts from 35 days before to 14 days after a
+       stock-out or a reported drop of another category Y, and gains no more orders a day than Y loses
+       over the same windows, is `substitution`.
+     - **Clean control:** for each reported shift, the donors of its control (other values of its
+       dimension, or sibling pairs) with a reported or merged shift of the same metric whose onset lies
+       from 150 days before the before-window to the end of the after-window are taken out, and the DiD
+       is run again (counts: rest minus those series; pooled ratios: minus their parts). If it no longer
+       passes, or no clean control is left, the shift is `contaminated_control`. Both estimates are in
+       the evidence. A: regular customers' "churn +150 %" every June was the end of E2's student wave
+       in its control (churn_onsets excludes subscribers, so the control is almost all students).
+     - **Rolling KPIs merge further:** a repeat-rate candidate is dated at the end of its 30-day
+       window, so it merges with a churn candidate up to 14 + 30 days apart (E4's repeat-rate twin 20
+       days after its cancellations).
+     - **Effect:** false finds 5.6 → 4.2 a run, twin 3.8 → 2.3, F1 0.26 → 0.345.
+136. **Reporting bar per tree level from this dataset's max-T** (`maxt_bars`, `MAXT_K` = 1.85,
+     `MAXT_FLOOR` = 4.5). Replaces the fixed `Z_REPORT` = 5.25 for shifts (spikes keep theirs).
+     - For each level (0 and 1 together; pairs), every testable series' DiD z at every 7th date; at
+       each date the largest |z| over the level is what chance gives when nothing happens there. The
+       plan was the upper quantile of those maxima (Westfall–Young). On a story run that quantile is
+       the story itself: A seed 42's 90th percentile is 19.3 where its twin's is 4.6. A step-down
+       (mask what exceeds the bar, recompute) collapses to z ≈ 2 on story and twin alike, since each
+       round removes the tail it measures. The **median** of the maxima is stable: 2.79 vs 2.82
+       (A level 1, story vs twin), 3.35 vs 3.47 (B), 3.11 vs 3.03 (A pairs). The bar is MAXT_K × that
+       median, computed on every dataset, so no twin is needed at runtime.
+     - MAXT_K set on the 9 twins: 1.85 gives A bars 5.0–5.5 for levels 0/1 (about the old 5.25) and
+       5.8–6.2 for pairs, B 6.0–6.6 and 5.5–5.8 (more series, heavier tails): B false finds 4.2 → 3.9
+       a run, F1 0.345 (= before), twin 2.33. **k = 1.6** (A 4.3–4.8): no TP gained, false 5.0 a run,
+       twin 4.1, F1 0.315: the misses are not just below the bar, so the bar was not lowered.
+     - A level with few series has a small maximum (2.9 on the synthetic test world), hence the floor.
+137. **City × channel order cells are scanned without a parent** (`PAIRS_GATED` = False). A store-only
+     change is ~1/3 of its city and ~1/10 of its channel, so the parent never reaches Z_DRILL and the
+     pair was never tested (E5, oracle z 3.5–7.5 in A). These cells (orders only) are now always
+     scanned, against the pairs' bar (~6). Every pair without the gate was tried first: E5 found in
+     seed 2, but +0.7 false a run and twin 2.3 → 3.4 (new-customer, repeat-rate and category pairs at
+     z 5.6–8.3), F1 unchanged. City × channel orders alone: E5 found in seed 2, no new false find,
+     F1 0.345 → 0.360. Other pairs stay under the gate (decision 57).
+138. **Where this leaves the stop rule** (not met).
+     - Twins: 2.33 false a run (target ≤ 2). Of the 21: 14 are spikes (6 of them the viral-spike
+       decoy, planted in both worlds on purpose; the rest 3–5-day blips of a category, a ticket topic
+       or new customers), 7 are shifts at z 5.3–7.3 (new customers or orders of one segment or city).
+       Spikes keep their own fixed rule (decision 44); they are the next lever for the twin rate.
+     - Misses with oracle z ≥ 4 and no anchor: E5 in 3 seeds (oracle 5.6–6.3; the scan finds no break
+       there, or z 5.8 below the pair bar 6.05); E4 in 3 seeds (oracle 5.8–13), all dating: seed 1's
+       everyone-level cancellations candidate (9 days off) wins its merge group over the right-dated
+       one on z, seed 3 is reported 6 days off (score below 0.5), seed 42 has no candidate near the
+       date. So the scan is not yet at its information limit; the next step is dating, not thresholds.
+     - Anchored misses: E1 (verifier z 2.0–3.3, power), E2 in seeds 1 and 4 (dated 7 days early; p
+       0.15 in seed 4), B's E2 dated 2–3 weeks before the key's lag. B's E3 (campaign on geek × mobily)
+       has oracle z ≤ 1 on the detective's KPIs and is not reachable.

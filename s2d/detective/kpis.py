@@ -30,13 +30,21 @@ METRIC = {
     "revenue": "purchase_rate",
     "new_customers": "acquisition_rate",
     "churn_onsets": "churn_hazard",
+    "cancellations": "churn_hazard",
     "repeat_rate": "churn_hazard",
     "late_rate": "delivery_days",
     "rating_mean": "rating_mean",
+    "low_rating": "rating_mean",
     "tickets": "ticket_rate",
 }
 # KPIs that are a ratio, not a count. Their segment value is not additive.
-RATIO_KPIS = {"late_rate", "rating_mean", "repeat_rate"}
+RATIO_KPIS = {"late_rate", "rating_mean", "low_rating", "repeat_rate"}
+# Ratio KPIs whose DiD is computed from pooled window sums of numerator and denominator
+# (scan.pooled_test, DECISIONS 134): a share of events (log-odds) or a mean of values.
+POOLED_KPIS = {"late_rate": "share", "low_rating": "share", "rating_mean": "mean"}
+# KPIs that move the opposite way to their metric without a transform: more 1-2 star reviews
+# is a lower rating
+FLIP_KPIS = {"low_rating"}
 # KPIs that move the opposite way to their metric: fewer repeat buyers = more churn.
 INVERSE_KPIS = {"repeat_rate"}
 # Rolling KPIs: one day's event moves them for this many days.
@@ -181,12 +189,50 @@ def _acquisition(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str
         _add_counts(ks, "new_customers", first, dims)
 
 
-def churn_table(con, cust_cols: set | None = None) -> pd.DataFrame:
+def rate_steps(ks: KPISet, rng: np.random.Generator | None = None) -> list[tuple[str, pd.Timestamp, float]]:
+    """Customer segments whose purchase rate stepped at a price change (DECISIONS 133).
+
+    The dates come from product_prices only (a treatment table). At each date, the orders
+    of every customer segment are compared with the other segments (scan.did, windows
+    [T-28, T) and [T, T+28)). A step is kept when the DiD's 95 % CI excludes 0. It is not a
+    finding, only the rate a customer is measured against, so it needs no placebo bar: segment
+    seasonality puts its placebo z at 1-2 even for a -10 % step. Returns (segment value, date,
+    rate ratio)."""
+    pc = ks.events.get("price_changes")
+    if pc is None or pc.empty:
+        return []
+    from . import scan  # scan imports this module
+    rng = rng or np.random.default_rng(0)
+    out = []
+    for day in sorted(pd.to_datetime(pc["valid_from"]).unique()):
+        day = pd.Timestamp(day)
+        for (kpi, seg), s in ks.series.items():
+            if kpi != "orders" or not seg.startswith("segment=") or ";" in seg:
+                continue
+            rest = scan._rest(ks, kpi, seg, s)
+            t0 = int(s.index.get_indexer([day])[0])
+            w = scan._windows(len(s), t0, t0) if t0 >= 0 else None
+            if rest is None or w is None:
+                continue
+            sv, rv = s.to_numpy(float), rest.reindex(s.index).to_numpy(float)
+            point, ci, _ = scan.did(sv, rv, *w, rng)
+            if not ci[0] <= 0 <= ci[1] and point > -0.9:
+                out.append((seg.split("=", 1)[1], day, 1 + point))
+    return out
+
+
+def churn_table(con, cust_cols: set | None = None,
+                steps: list[tuple[str, pd.Timestamp, float]] | None = None) -> pd.DataFrame:
     """One row per customer: last order, median gap, churned flag and onset date.
 
     Churned = no order for max(60, 3 x median gap) days before the end of the data.
     The onset is the last order plus the customer's mean gap: with memoryless
     ordering, the expected time from the last order to the churn day is one mean gap.
+
+    `steps` (see rate_steps): a customer of a segment whose purchase rate stepped by the
+    ratio r at a price change, and whose last order is after it, is measured against the
+    new rate: both gaps are divided by r. A student who now buys every 22 days instead of
+    every 20 is not idle for longer than usual after 61 days (DECISIONS 133).
     """
     cust_cols = cust_cols if cust_cols is not None else tables(con).get("customers", set())
     seg_col = "c.segment" if "segment" in cust_cols else "NULL"
@@ -204,10 +250,14 @@ def churn_table(con, cust_cols: set | None = None) -> pd.DataFrame:
     df["last_order"] = pd.to_datetime(df["last_order"])
     gap = pd.to_numeric(df["median_gap"], errors="coerce")
     gap = gap.fillna(gap.median() if gap.notna().any() else 30.0)
+    mean_gap = pd.to_numeric(df["mean_gap"], errors="coerce").fillna(gap)
+    for value, day, ratio in steps or []:
+        new = (df["segment"] == value) & (df["last_order"] >= day)
+        gap = gap.where(~new, gap / ratio)
+        mean_gap = mean_gap.where(~new, mean_gap / ratio)
     df["median_gap"] = gap
     df["threshold"] = np.maximum(CHURN_MIN_DAYS, CHURN_GAP_FACTOR * gap)
     df["churned"] = (end - df["last_order"]).dt.days > df["threshold"]
-    mean_gap = pd.to_numeric(df["mean_gap"], errors="coerce").fillna(gap)
     df["date"] = df["last_order"] + pd.to_timedelta(mean_gap.round(), unit="D")
     df.loc[~df["churned"], "date"] = pd.NaT
     df.attrs["end"] = end
@@ -215,7 +265,12 @@ def churn_table(con, cust_cols: set | None = None) -> pd.DataFrame:
 
 
 def _churn(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str) -> None:
-    ct = churn_table(con, cust_cols)
+    steps = rate_steps(ks)
+    ks.events["rate_steps"] = pd.DataFrame(steps, columns=["segment", "date", "ratio"])
+    for value, day, ratio in steps:
+        ks.notes.append(f"churn: segment {value} buys {ratio - 1:+.0%} from the price change on {day.date()}; "
+                        f"its gaps after it are measured against the new rate")
+    ct = churn_table(con, cust_cols, steps)
     # Right edge: a customer whose last order is closer to the end than their
     # threshold cannot be called churned yet, so the last `threshold` days are
     # biased low. Count only customers with threshold <= CHURN_EDGE_DAYS and cut
@@ -229,11 +284,37 @@ def _churn(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str) -> N
     # their last order before the data starts and is invisible. Drop the first
     # CHURN_EDGE_DAYS too.
     start = ks.dates[0] + pd.Timedelta(days=cut)
-    ev = ct[ct["churned"] & regular][["date", "city", "segment", "channel"]]
+    subscribers = _cancellations(ks, con, dims, pref_col)
+    # a subscriber's churn is observed (cancelled_at), so it is not guessed from order gaps:
+    # an empty shelf stops a subscriber's orders too, and the guess would read it as churn
+    ev = ct[ct["churned"] & regular & ~ct["customer_id"].isin(subscribers)][["date", "city", "segment", "channel"]]
     ev = ev[(ev["date"] <= ks.valid_until["churn_onsets"]) & (ev["date"] >= start)]
     ks.valid_from["churn_onsets"] = start
     if len(ev) >= MIN_EVENTS:
         _add_counts(ks, "churn_onsets", ev, dims)
+
+
+def _cancellations(ks: KPISet, con, dims: list[str], pref_col: str) -> set:
+    """Subscriptions cancelled per day (`subscriptions.cancelled_at`): churn of subscribers,
+    observed instead of inferred (DECISIONS 60, 131). Returns the subscribers' customer ids."""
+    have = tables(con)
+    sub = have.get("subscriptions", set())
+    if not {"customer_id", "cancelled_at"} <= sub:
+        return set()
+    cust = have.get("customers", set())
+    seg = "c.segment" if "segment" in cust else "NULL"
+    pref = pref_col if "preferred_channel" in cust else "NULL"
+    df = con.execute(f"""
+        SELECT s.customer_id, s.cancelled_at AS date, c.city, {seg} AS segment, {pref} AS channel
+        FROM subscriptions s LEFT JOIN customers c USING (customer_id)""").df()
+    df["date"] = pd.to_datetime(df["date"])
+    ev = df.dropna(subset=["date"])
+    # a dim with one value among subscribers (segment: all are 'predplatitel') is everyone
+    # again, with an empty control
+    dims = [d for d in dims if ev[d].nunique() > 1]
+    if len(ev) >= MIN_EVENTS:
+        _add_counts(ks, "cancellations", ev[["date", *dims]], dims)
+    return set(df["customer_id"])
 
 
 def _repeat(ks: KPISet, con, cust_cols: set, dims: list[str], pref_col: str) -> None:
@@ -300,6 +381,12 @@ def _later_tables(ks: KPISet, con, have: dict[str, set[str]]) -> None:
                                  FROM deliveries d JOIN orders o USING (order_id)""").df()
             ev["date"] = pd.to_datetime(ev["date"])
             _add_ratio(ks, "late_rate", ev, ["city", "channel"] + (["courier"] if courier else []), "late")
+            if courier:
+                # who delivers where, by order day: the courier assignment is a treatment
+                # table, read for the anchor catalogue (scan.anchor_catalogue)
+                ks.events["courier_assign"] = con.execute(
+                    "SELECT o.order_date AS date, o.city, d.courier, count(*) AS n "
+                    "FROM deliveries d JOIN orders o USING (order_id) GROUP BY ALL").df()
     r = have.get("reviews")
     if r and "rating" in r and (dc := date_col(r, "review_date", "created_date", "date")):
         join = "JOIN orders o USING (order_id)" if "order_id" in r else ""
@@ -308,6 +395,9 @@ def _later_tables(ks: KPISet, con, have: dict[str, set[str]]) -> None:
                          f"FROM reviews r {join}").df()
         ev["date"] = pd.to_datetime(ev["date"])
         _add_ratio(ks, "rating_mean", ev, dims, "rating")
+        # the share of 1-2 star reviews: a count of bad reviews out of all, so the DiD is a
+        # binomial one (pooled log-odds) instead of a mean of a 1-5 scale
+        _add_ratio(ks, "low_rating", ev.assign(low=(ev["rating"] <= 2).astype(float)), dims, "low")
     t = have.get("tickets")
     if t and (dc := date_col(t, "created_date", "ticket_date", "date", "opened_at")):
         topic = "t.topic" if "topic" in t else "NULL"
@@ -318,7 +408,9 @@ def _later_tables(ks: KPISet, con, have: dict[str, set[str]]) -> None:
 
 def _add_ratio(ks: KPISet, kpi: str, ev: pd.DataFrame, dims: list[str], value: str) -> None:
     """Daily mean of `value`, overall and per dim value. Days without events are
-    filled from the neighbours, so a quiet day is not a zero rating."""
+    filled from the neighbours, so a quiet day is not a zero rating; that series is only
+    for finding breaks. The tests use the parts: daily sum of `value` and number of events,
+    0 on a day without events (DECISIONS 134)."""
     ks.events[kpi] = ev
     ks.dims[kpi] = dims
     for keys in [()] + [(x,) for x in dims]:
@@ -327,5 +419,8 @@ def _add_ratio(ks: KPISet, kpi: str, ev: pd.DataFrame, dims: list[str], value: s
             if len(g) < MIN_EVENTS:
                 continue
             vals = vals if isinstance(vals, tuple) else (vals,)
+            seg = seg_text(keys, vals) if keys else ""
+            daily = g.groupby("date")[value].agg(["sum", "count"]).reindex(ks.dates, fill_value=0)
+            ks.parts[(kpi, seg)] = (daily["sum"].astype(float), daily["count"].astype(float))
             s = g.groupby("date")[value].mean().reindex(ks.dates).interpolate(limit_direction="both")
-            ks.series[(kpi, seg_text(keys, vals) if keys else "")] = s
+            ks.series[(kpi, seg)] = s
