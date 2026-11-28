@@ -5,7 +5,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { REPLAY_STATE, useDemoRun, type DemoKey } from '../run/demos'
-import { BRIEF_EXAMPLE, FAST_TEST_SPEC, NAHAPRAVDA_EXAMPLE } from '../examples'
+import { BRIEF_EXAMPLE, NAHAPRAVDA_EXAMPLE, ZRNKO_EXAMPLE } from '../examples'
 import type { Draft } from '../run/useSend'
 
 // Pre-generated runs are found in the job list (run/demos.ts); an id here overrides the lookup.
@@ -55,7 +55,7 @@ const SCENARIOS: Scenario[] = [
       'At most 3 years of data and a fixed list of event types and metrics.',
     ],
     run: 'coffee',
-    draft: { spec: { name: 'examples/a.yaml', yaml: FAST_TEST_SPEC } },
+    draft: { text: `${ZRNKO_EXAMPLE.company}\n\n${ZRNKO_EXAMPLE.story}` },
   },
   {
     n: '3',

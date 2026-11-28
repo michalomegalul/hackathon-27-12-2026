@@ -4,7 +4,7 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { promptProblem, splitPrompt, type Submit } from './prompt'
-import { REPLAY_STATE, useDemoRun } from './demos'
+import { REPLAY_STATE, useDemoPrompt, useDemoRun } from './demos'
 import type { Draft } from './useSend'
 import { BRIEF_EXAMPLE, FAST_TEST_SPEC } from '../examples'
 import { Spinner } from '../components/ui'
@@ -33,6 +33,7 @@ export function Composer({
   const [problem, setProblem] = useState<string | null>(null)
   const navigate = useNavigate()
   const briefRun = useDemoRun('brief')
+  const demoRunFor = useDemoPrompt()
   const file = useRef<HTMLInputElement>(null)
   const area = useRef<HTMLTextAreaElement>(null)
 
@@ -42,6 +43,9 @@ export function Composer({
     const bad = spec ? null : promptProblem(text)
     if (bad) return setProblem(bad)
     setProblem(null)
+    // a demo prompt opens its finished run, replayed, so nobody waits for the model
+    const done = spec ? null : demoRunFor(text)
+    if (done) return void navigate(`/run/${done}`, { state: REPLAY_STATE })
     const s: Submit = spec ? { body: { spec_yaml: spec.yaml }, specName: spec.name } : { body: splitPrompt(text) }
     onSubmit(s).then(
       () => {

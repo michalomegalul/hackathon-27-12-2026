@@ -1,0 +1,15 @@
+title: Pražírna Zrnko
+# The prompt behind examples/a.yaml (the same six events, written as a story). The Demo's
+# scenario 2: typed or pasted into Story, it opens the finished run and replays it.
+company: >
+  Pražírna Zrnko s.r.o. je pražírna výběrové kávy. Prodává přes e-shop s předplatným
+  a ve 4 vlastních kavárnách v Praze, Brně, Ostravě a Plzni. Má asi 40 000 zákazníků:
+  studenty, předplatitele a běžné zákazníky. Kávu dováží z Etiopie, Kolumbie
+  a Brazílie, příslušenství od českého dodavatele.
+story: >
+  Data od ledna 2025 do konce října 2026. 1. 3. 2026 zdražíme kávu o 15 %. Prodeje kávy
+  mírně klesnou a studenti začnou zhruba po 6 týdnech odcházet. Začátkem května se zpozdí
+  dodávka z Etiopie, etiopská zrna se vyprodají a přijdou stížnosti. Brněnští předplatitelé
+  pak částečně odejdou. V září otevře v Brně konkurenční kavárna a prodeje v brněnské
+  kavárně klesnou o pětinu. Pozor na falešné stopy: virální video o mlýncích v říjnu 2025
+  a Black Friday.

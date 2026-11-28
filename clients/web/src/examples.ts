@@ -1,6 +1,7 @@
 // Example inputs from the repo's examples/ folder, bundled as text with Vite's ?raw.
 import briefYaml from '../../../examples/stories/brief.yaml?raw'
 import specA from '../../../examples/a.yaml?raw'
+import zrnkoYaml from '../../../examples/stories/zrnko.yaml?raw'
 import nahapravdaYaml from '../../../examples/stories/nahapravda.yaml?raw'
 
 /** The hand-written spec for the fast test (no AI): POST {spec_yaml}. */
@@ -36,4 +37,10 @@ export const BRIEF_EXAMPLE = {
 export const NAHAPRAVDA_EXAMPLE = {
   company: topLevelText(nahapravdaYaml, 'company'),
   story: topLevelText(nahapravdaYaml, 'story'),
+}
+
+/** examples/stories/zrnko.yaml: demo scenario 2, the prompt behind examples/a.yaml. */
+export const ZRNKO_EXAMPLE = {
+  company: topLevelText(zrnkoYaml, 'company'),
+  story: topLevelText(zrnkoYaml, 'story'),
 }
