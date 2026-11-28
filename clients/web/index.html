@@ -5,7 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon-spiral.svg?v=2" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Story2Data</title>
-    <meta name="theme-color" content="#1b1d24" />
+    <script>
+      // Before first paint: the saved choice, else the system setting. The header button changes it.
+      try {
+        var t = localStorage.getItem('theme')
+        if (t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)) {
+          document.documentElement.className = 'light'
+        }
+      } catch (e) {}
+    </script>
+    <meta name="theme-color" content="#000000" />
   </head>
   <body>
     <div id="root"></div>

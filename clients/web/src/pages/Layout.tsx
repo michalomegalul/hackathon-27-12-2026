@@ -67,6 +67,31 @@ function QueueChip() {
   )
 }
 
+/** Light / dark background switch for the whole app: the `light` class on <html>, remembered in localStorage. */
+function ThemeButton() {
+  const [light, setLight] = useState(() => document.documentElement.classList.contains('light'))
+  const flip = () => {
+    const next = !light
+    document.documentElement.className = next ? 'light' : 'dark'
+    try {
+      localStorage.setItem('theme', next ? 'light' : 'dark')
+    } catch {
+      /* private mode: the choice just isn't remembered */
+    }
+    setLight(next)
+  }
+  return (
+    <button
+      onClick={flip}
+      aria-label={light ? 'Switch to dark mode' : 'Switch to light mode'}
+      title={light ? 'Dark mode' : 'Light mode'}
+      className="shrink-0 border border-line px-2.5 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-white sm:text-sm"
+    >
+      {light ? 'Dark' : 'Light'}
+    </button>
+  )
+}
+
 /** Shown while the API can't be reached; retries every active query (and by itself when the browser comes back online). */
 function NetBanner() {
   const down = useSyncExternalStore(subscribeNet, getNetDown)
@@ -169,6 +194,7 @@ function Shell({ children }: { children: ReactNode }) {
           <span className="ml-auto" />
           <ActiveRun />
           <QueueChip />
+          <ThemeButton />
           <Link to="/about" aria-current={pathname.startsWith('/about') ? 'page' : undefined} className={navCls({ isActive: pathname.startsWith('/about') })}>
             About
           </Link>

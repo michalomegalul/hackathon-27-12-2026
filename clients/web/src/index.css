@@ -1,17 +1,128 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: oklch(0.16 0.01 260);
-  --color-panel: oklch(0.21 0.012 260);
-  --color-line: oklch(0.3 0.012 260);
-  --color-muted: oklch(0.68 0.015 260);
-  --color-accent: oklch(0.73 0.12 240);
+  --color-bg: oklch(0 0 0);
+  --color-panel: oklch(0.15 0 0);
+  --color-line: oklch(0.32 0 0);
+  --color-muted: oklch(0.7 0 0);
+  --color-accent: oklch(1 0 0);
+  /* black and white: every coloured Tailwind hue the app uses is a grey of the same lightness */
+  --color-slate-50: oklch(0.985 0 0);
+  --color-slate-100: oklch(0.97 0 0);
+  --color-slate-200: oklch(0.922 0 0);
+  --color-slate-300: oklch(0.87 0 0);
+  --color-slate-400: oklch(0.708 0 0);
+  --color-slate-500: oklch(0.556 0 0);
+  --color-slate-600: oklch(0.444 0 0);
+  --color-slate-700: oklch(0.371 0 0);
+  --color-slate-800: oklch(0.269 0 0);
+  --color-slate-900: oklch(0.205 0 0);
+  --color-slate-950: oklch(0.145 0 0);
+  --color-rose-50: oklch(0.985 0 0);
+  --color-rose-100: oklch(0.97 0 0);
+  --color-rose-200: oklch(0.922 0 0);
+  --color-rose-300: oklch(0.87 0 0);
+  --color-rose-400: oklch(0.708 0 0);
+  --color-rose-500: oklch(0.556 0 0);
+  --color-rose-600: oklch(0.444 0 0);
+  --color-rose-700: oklch(0.371 0 0);
+  --color-rose-800: oklch(0.269 0 0);
+  --color-rose-900: oklch(0.205 0 0);
+  --color-rose-950: oklch(0.145 0 0);
+  --color-amber-50: oklch(0.985 0 0);
+  --color-amber-100: oklch(0.97 0 0);
+  --color-amber-200: oklch(0.922 0 0);
+  --color-amber-300: oklch(0.87 0 0);
+  --color-amber-400: oklch(0.708 0 0);
+  --color-amber-500: oklch(0.556 0 0);
+  --color-amber-600: oklch(0.444 0 0);
+  --color-amber-700: oklch(0.371 0 0);
+  --color-amber-800: oklch(0.269 0 0);
+  --color-amber-900: oklch(0.205 0 0);
+  --color-amber-950: oklch(0.145 0 0);
+  --color-emerald-50: oklch(0.985 0 0);
+  --color-emerald-100: oklch(0.97 0 0);
+  --color-emerald-200: oklch(0.922 0 0);
+  --color-emerald-300: oklch(0.87 0 0);
+  --color-emerald-400: oklch(0.708 0 0);
+  --color-emerald-500: oklch(0.556 0 0);
+  --color-emerald-600: oklch(0.444 0 0);
+  --color-emerald-700: oklch(0.371 0 0);
+  --color-emerald-800: oklch(0.269 0 0);
+  --color-emerald-900: oklch(0.205 0 0);
+  --color-emerald-950: oklch(0.145 0 0);
+  --color-sky-50: oklch(0.985 0 0);
+  --color-sky-100: oklch(0.97 0 0);
+  --color-sky-200: oklch(0.922 0 0);
+  --color-sky-300: oklch(0.87 0 0);
+  --color-sky-400: oklch(0.708 0 0);
+  --color-sky-500: oklch(0.556 0 0);
+  --color-sky-600: oklch(0.444 0 0);
+  --color-sky-700: oklch(0.371 0 0);
+  --color-sky-800: oklch(0.269 0 0);
+  --color-sky-900: oklch(0.205 0 0);
+  --color-sky-950: oklch(0.145 0 0);
+  --color-violet-50: oklch(0.985 0 0);
+  --color-violet-100: oklch(0.97 0 0);
+  --color-violet-200: oklch(0.922 0 0);
+  --color-violet-300: oklch(0.87 0 0);
+  --color-violet-400: oklch(0.708 0 0);
+  --color-violet-500: oklch(0.556 0 0);
+  --color-violet-600: oklch(0.444 0 0);
+  --color-violet-700: oklch(0.371 0 0);
+  --color-violet-800: oklch(0.269 0 0);
+  --color-violet-900: oklch(0.205 0 0);
+  --color-violet-950: oklch(0.145 0 0);
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 html {
   color-scheme: dark;
 }
+
+/* Light mode: only <html class="light"> changes. Page and panels go white, the slate text scale flips,
+   white overlays (bg-white/10, text-white) become black ones, and the pale accent text colours get darker shades. */
+html.light {
+  color-scheme: light;
+  --color-bg: oklch(1 0 0);
+  --color-panel: oklch(0.97 0.003 260);
+  --color-line: oklch(0.87 0.005 260);
+  --color-muted: oklch(0.45 0.015 260);
+  --color-accent: oklch(0.5 0.15 240);
+  --color-white: oklch(0.13 0.01 260);
+  --color-slate-50: oklch(0.129 0.02 260);
+  --color-slate-100: oklch(0.208 0.02 260);
+  --color-slate-200: oklch(0.279 0.02 260);
+  --color-slate-300: oklch(0.372 0.02 260);
+  --color-slate-400: oklch(0.446 0.02 260);
+  --color-slate-500: oklch(0.554 0.02 260);
+  --color-slate-600: oklch(0.704 0.02 260);
+  --color-slate-700: oklch(0.869 0.02 260);
+  --color-slate-800: oklch(0.929 0.02 260);
+  --color-slate-900: oklch(0.968 0.02 260);
+  --color-slate-950: oklch(0.984 0.02 260);
+  --color-rose-100: var(--color-rose-900);
+  --color-rose-200: var(--color-rose-800);
+  --color-rose-300: var(--color-rose-700);
+  --color-rose-400: var(--color-rose-600);
+  --color-amber-100: var(--color-amber-900);
+  --color-amber-200: var(--color-amber-800);
+  --color-amber-300: var(--color-amber-700);
+  --color-amber-400: var(--color-amber-600);
+  --color-emerald-100: var(--color-emerald-900);
+  --color-emerald-200: var(--color-emerald-800);
+  --color-emerald-300: var(--color-emerald-700);
+  --color-emerald-400: var(--color-emerald-600);
+  --color-sky-100: var(--color-sky-900);
+  --color-sky-200: var(--color-sky-800);
+  --color-sky-300: var(--color-sky-700);
+  --color-sky-400: var(--color-sky-600);
+  --color-violet-100: var(--color-violet-900);
+  --color-violet-200: var(--color-violet-800);
+  --color-violet-300: var(--color-violet-700);
+  --color-violet-400: var(--color-violet-600);
+}
+
 body {
   @apply min-h-dvh bg-bg text-slate-100 antialiased;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
