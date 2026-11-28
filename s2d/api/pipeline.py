@@ -243,12 +243,47 @@ def run_detect(state: dict) -> None:
     out = {
         "events": [{k: e.get(k) for k in cols} for e in res["events"]],
         "narrative": {"text": narr.get("narrative_cs", ""), "source": narr.get("source", "")},
-        "score": {"precision": card["score"]["precision"], "recall": card["score"]["recall"],
-                  "f1": card["score"]["f1"],
-                  "twin_false_events_per_year": card.get("twin", {}).get("false_events_per_year"),
-                  "placebo_p": card["placebo"]["p_value"]},
+        "score": _score_summary(card["score"], card.get("twin", {}).get("false_events_per_year"),
+                                card["placebo"]["p_value"]),
+        "matching": matching(card["score"]),
     }
     store.write_json(jd / "detect_result.json", json.loads(json.dumps(out, default=str)))
+
+
+def _score_summary(sc: dict, twin_per_year, placebo_p) -> dict:
+    return {"precision": sc["precision"], "recall": sc["recall"], "f1": sc["f1"],
+            "precision_cons": sc["precision_cons"], "f1_cons": sc["f1_cons"],
+            "twin_false_events_per_year": twin_per_year, "placebo_p": placebo_p}
+
+
+def matching(sc: dict) -> dict:
+    """Which find is which planted event, as s2d/score.py decided it (the web draws these)."""
+    return {
+        "pairs": [{"found_id": m["pred_id"], "event_id": m["event_id"], "score": m["score"],
+                   "timing": m["timing"], "delta_days": m["delta_days"], "segment": m["segment"],
+                   "magnitude": m["magnitude"]} for m in sc["matches"]],
+        "missed": list(sc["missed"]),
+        "false_finds": [{"found_id": f["pred_id"], "decoy": f["decoy"]} for f in sc["false_positives"]],
+        "consequences": [{"found_id": c["pred_id"], "of": c["of"]} for c in sc["consequences"]],
+        "background": [{"found_id": b["pred_id"], "twin_id": b["twin_id"], "twin_start_date": b["twin_start_date"]}
+                       for b in sc.get("background", [])],
+    }
+
+
+def refresh_matching(job_id: str, res: dict) -> dict:
+    """A detective result saved before `matching` existed: score its events again with the
+    current scorer (no placebo, it is kept from the run) and save the result once."""
+    from s2d import detective, score
+
+    run = store.job_dir(job_id) / "run"
+    twin_path = run / "twin" / "detective.json"
+    twin_events = detective.load(twin_path)["events"] if twin_path.exists() else None
+    sc = score.score(res["events"], score.load_truth(run), twin_events)
+    old = res.get("score") or {}
+    res = {**res, "score": _score_summary(sc, old.get("twin_false_events_per_year"), old.get("placebo_p")),
+           "matching": matching(sc)}
+    store.write_json(store.job_dir(job_id) / "detect_result.json", json.loads(json.dumps(res, default=str)))
+    return res
 
 
 def result_path(job_id: str) -> Path:

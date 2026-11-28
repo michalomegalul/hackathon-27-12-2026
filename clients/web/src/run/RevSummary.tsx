@@ -11,7 +11,7 @@ import { createScope, createTimeline, onScroll, stagger, svg, utils } from 'anim
 import { answerKeyOptions, isStatus, type DetectEvent, type JobInput, type PlantedEvent, type VerificationRow } from '../api'
 import { Badge } from '../components/ui'
 import { KIND_CS, METRIC_CS, dateCs, num, signed } from '../format'
-import { matchEvents, type Matching } from './match'
+import { fromServer, matchEvents, type Matching } from './match'
 import type { Run } from './useRun'
 
 function useMedia(q: string) {
@@ -102,11 +102,14 @@ function FoundCard({ e, m, hover, setHover }: { e: DetectEvent; m: Matching; hov
   const pair = m.pairs.find((p) => p.found.id === e.id)
   const cons = m.consequences.find((c) => c.found.id === e.id)
   const ff = m.falseFinds.find((f) => f.found.id === e.id)
+  const bg = m.background.find((b) => b.found.id === e.id)
   const tag: Tag = pair
     ? { text: `= ${pair.planted.event_id}`, t: 'green' }
     : cons
       ? { text: `consequence of ${cons.of}`, t: 'gray' }
-      : { text: ff?.decoy ? `false find (decoy)` : 'false find', t: 'red' }
+      : bg
+        ? { text: 'also without the story', t: 'gray' }
+        : { text: ff?.decoy ? `false find (decoy)` : 'false find', t: 'red' }
   return (
     <Card
       side="found"
@@ -282,6 +285,11 @@ function Verdict({ m, nFound, server }: { m: Matching; nFound: number; server: R
             , <b className="tabular-nums">{m.consequences.length}</b> {m.consequences.length === 1 ? 'consequence' : 'consequences'}
           </>
         )}
+        {m.background.length > 0 && (
+          <>
+            , <b className="tabular-nums">{m.background.length}</b> also in the world without the story
+          </>
+        )}
         .
       </p>
       <p className="text-xs text-muted">
@@ -290,7 +298,8 @@ function Verdict({ m, nFound, server }: { m: Matching; nFound: number; server: R
         {s && (
           <>
             {' '}
-            (precision {num(s.precision, 2)}, recall {num(s.recall, 2)}, F1 {num(s.f1, 2)})
+            (precision {num(s.precision, 2)}, recall {num(s.recall, 2)}, F1 {num(s.f1, 2)}
+            {s.f1_cons !== undefined && <>; without consequences and twin finds: precision {num(s.precision_cons ?? 0, 2)}, F1 {num(s.f1_cons, 2)}</>})
           </>
         )}
         .
@@ -309,7 +318,14 @@ export default function RevSummary({ run }: { run: Run }) {
     [key.data, forbidden, run.result],
   )
   const found = useMemo(() => d.events ?? [], [d.events])
-  const m = useMemo(() => (planted ? matchEvents(found, planted, key.data?.decoys ?? []) : null), [found, planted, key.data])
+  // the server's pairing when it has one (it sees the stock levels and the twin), else the port
+  const m = useMemo(
+    () =>
+      planted
+        ? ((key.data && d.matching ? fromServer(found, planted, d.matching) : null) ?? matchEvents(found, planted, key.data?.decoys ?? []))
+        : null,
+    [found, planted, key.data, d.matching],
+  )
   const [hover, setHover] = useState<string | null>(null)
   const [root, setRoot] = useState<HTMLDivElement | null>(null)
   const wide = useMedia('(min-width: 1024px)')
@@ -323,12 +339,16 @@ export default function RevSummary({ run }: { run: Run }) {
   const foundSorted = [...found].sort((a, b) => rank(a) - rank(b))
   // stock-outs of single SKUs that are no planted event: folded into one line instead of a wall of "false find"
   const isLooseStockout = (e: DetectEvent) =>
-    e.kind === 'stockout' && !m!.pairs.some((p) => p.found.id === e.id) && !m!.consequences.some((c) => c.found.id === e.id)
+    e.kind === 'stockout' &&
+    !m!.pairs.some((p) => p.found.id === e.id) &&
+    !m!.consequences.some((c) => c.found.id === e.id) &&
+    !m!.background.some((b) => b.found.id === e.id)
   const looseStockouts = foundSorted.filter(isLooseStockout)
   function rank(e: DetectEvent) {
     const p = m!.pairs.find((x) => x.found.id === e.id)
     if (p) return order.get(p.planted.event_id) ?? 0
-    return m!.consequences.some((c) => c.found.id === e.id) ? 1000 : 2000
+    if (m!.consequences.some((c) => c.found.id === e.id)) return 1000
+    return m!.background.some((b) => b.found.id === e.id) ? 1500 : 2000
   }
 
   return (

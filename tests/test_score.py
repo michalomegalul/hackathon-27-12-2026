@@ -118,3 +118,40 @@ def test_a_story_without_events_scores_without_error(tmp_path):
     assert truth["scored"].empty and truth["key"]["simulated"].dtype == bool
     out = score.score([], truth)
     assert out["excluded"] == [] and out["n_true"] == 0
+
+
+def _supply_truth():
+    t = _truth()
+    key = t["key"].copy()
+    key["simulated"] = True
+    key["mechanism"] = ["curve", "curve", "emergent"]
+    key["observed_start"] = [pd.NaT, pd.NaT, pd.Timestamp("2026-05-21")]
+    key["supply_pairs"] = [score.seg_pairs(s) for s in key["segment"]]
+    key.at[2, "supply_pairs"] = {"supplier=S_ETH", "category=etiopie"}
+    return {**t, "key": key, "scored": key.reset_index(drop=True)}
+
+
+def test_supply_event_matches_its_observed_stockout():
+    ev = [_ev("C1", "purchase_rate", "category=etiopie;supplier=S_ETH", "2026-05-21", "down", -100.0, kind="stockout"),
+          _ev("C2", "ticket_rate", "topic=vyprodáno", "2026-05-22", "up", 400.0),
+          _ev("C3", "purchase_rate", "category=etiopie", "2026-06-15", "up", 300.0)]
+    s = score.score(ev, _supply_truth())
+    assert [(m["event_id"], m["pred_id"]) for m in s["matches"]] == [("E3", "C1")]
+    # tickets about the empty shelf and the restock rebound belong to the outage
+    assert {c["pred_id"] for c in s["consequences"]} == {"C2", "C3"} and s["n_fp"] == 0
+
+
+def test_stockout_on_the_lag_guess_but_not_the_observed_date_does_not_match():
+    ev = [_ev("C1", "purchase_rate", "category=etiopie;supplier=S_ETH", "2026-05-14", "down", -100.0, kind="stockout")]
+    assert score.score(ev, _supply_truth())["tp"] == 0
+
+
+def test_a_find_the_twin_has_too_is_background_not_a_false_find():
+    ev = [_ev("C1", "delivery_days", "city=Brno", "2025-01-08", "up", 500.0, kind="spike"),
+          _ev("C2", "purchase_rate", "", "2025-10-14", "up", 40.0, kind="spike")]   # the decoy
+    twin = [_ev("T1", "delivery_days", "city=Brno", "2025-01-09", "up", 480.0, kind="spike"),
+            _ev("T2", "purchase_rate", "", "2025-10-14", "up", 40.0, kind="spike")]
+    s = score.score(ev, _truth(), twin)
+    assert [b["pred_id"] for b in s["background"]] == ["C1"]
+    assert [(f["pred_id"], f["decoy"]) for f in s["false_positives"]] == [("C2", "viral_spike")]
+    assert s["precision"] == 0.0 and s["n_fp"] == 1

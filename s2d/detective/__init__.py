@@ -37,6 +37,8 @@ def run(run_dir: str | Path, *, narrate: bool = True, on_status=None) -> dict:
         "kpis": sorted({k for k, _ in ks.series}),
         "n_series": len(ks.series),
         "scan_stats": stats,
+        # the anchored family's pre-registration: dates from treatment tables only (DECISIONS 137)
+        "anchors": stats.get("anchors", []),
         "notes": ks.notes,
         "candidates": rows,
         "events": reported,

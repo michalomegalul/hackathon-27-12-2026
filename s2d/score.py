@@ -43,18 +43,11 @@ ADVERSE_UP = {"purchase_rate": False, "acquisition_rate": False, "rating_mean": 
 TIME_GATE = True
 
 
-def load_truth(run_dir: str | Path) -> dict:
-    db = Path(run_dir) / "story.duckdb"
-    with duckdb.connect(str(db), read_only=True) as con:
-        key = con.execute("SELECT * FROM _truth.answer_key").df()
-        decoys = con.execute("SELECT * FROM _truth.decoys").df()
-        lo, hi = con.execute("SELECT min(order_date), max(order_date) FROM main.orders").fetchone()
-    key["start_date"] = pd.to_datetime(key["start_date"])
-    # an empty key reads `simulated` as object, and key[~col] is then a column selection
-    key["simulated"] = key["simulated"].astype(bool)
-    decoys["date"] = pd.to_datetime(decoys["date"])
-    return {"key": key, "scored": key[key["simulated"]].reset_index(drop=True), "decoys": decoys,
-            "start": pd.Timestamp(lo), "end": pd.Timestamp(hi)}
+SUPPLY_TYPES = ("supplier_delay", "stockout")
+# the ticket topic each emergent mechanism writes (the same table as s2d/verify.py TICKET_TOPIC)
+TICKET_TOPIC = {"supplier_delay": "vyprodáno", "stockout": "vyprodáno", "courier_change": "zpoždění"}
+STOCKOUT_MIN_SKUS = 2   # several shelves empty together (as s2d/detective/scan.py)
+BACKGROUND_DAYS = 7     # a find within this many days of the same find on the twin is background
 
 
 def seg_pairs(seg) -> set[str]:
@@ -67,21 +60,149 @@ def seg_pairs(seg) -> set[str]:
     return out
 
 
+def _seg_dict(seg) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for p in sorted(seg_pairs(seg)):
+        k, v = p.split("=", 1)
+        out.setdefault(k, []).append(v)
+    return out
+
+
+def _supply_truth(con, key: pd.DataFrame) -> None:
+    """Supply events (supplier_delay, stockout) show in the data as stock running out, not as a
+    curve with a known lag: the lag in the key is the story's guess. For each such row add
+    `observed_start`, the first day in [start, start + lag + CONSEQUENCE_DAYS] on which a product
+    of its target has no stock, and `supply_pairs`, the target with a supplier expanded into its
+    categories ('supplier=S_ETH' -> also 'category=etiopie'), which is how the detective names it."""
+    key["observed_start"] = pd.NaT
+    key["supply_pairs"] = [seg_pairs(s) for s in key["segment"]]
+    if key.empty:
+        return
+    try:
+        prod = con.execute("SELECT product_id, category, supplier_id FROM main.products").df()
+        inv = con.execute("SELECT date, product_id FROM main.inventory_daily WHERE stock_units <= 0").df()
+    except duckdb.Error:
+        return
+    inv["date"] = pd.to_datetime(inv["date"])
+    for i, t in key.iterrows():
+        if t["type"] not in SUPPLY_TYPES:
+            continue
+        seg = _seg_dict(t["segment"])
+        p = prod
+        if "supplier" in seg:
+            p = p[p["supplier_id"].isin(seg["supplier"])]
+        if "category" in seg:
+            p = p[p["category"].isin(seg["category"])]
+        if p.empty or not ({"supplier", "category"} & seg.keys()):
+            continue
+        key.at[i, "supply_pairs"] = seg_pairs(t["segment"]) | {f"category={c}" for c in p["category"].unique()} \
+            | {f"supplier={s}" for s in p["supplier_id"].unique()}
+        lo = t["start_date"]
+        hi = lo + pd.Timedelta(days=int(t["lag_days"] or 0) + CONSEQUENCE_DAYS)
+        out = inv[inv["product_id"].isin(p["product_id"]) & (inv["date"] >= lo) & (inv["date"] <= hi)]
+        # the first day several shelves are empty together: one SKU out is routine restocking,
+        # which the detective does not report either (scan.STOCKOUT_MIN_SKUS)
+        need = min(STOCKOUT_MIN_SKUS, len(p))
+        per_day = out.groupby("date")["product_id"].nunique()
+        days = per_day[per_day >= need].index
+        if len(days):
+            key.at[i, "observed_start"] = days.min()
+
+
+def _courier_truth(con, key: pd.DataFrame) -> None:
+    """A courier_change targets cities, but the data names the courier: add `alias_pairs`
+    {courier=X}, X the courier whose share of the target cities' deliveries grew most in the 28
+    days from start against the 28 before (the courier the company switched to)."""
+    key["alias_pairs"] = [set() for _ in range(len(key))]
+    rows = [i for i, t in key.iterrows() if t["type"] == "courier_change" and "city" in _seg_dict(t["segment"])]
+    if not rows:
+        return
+    try:
+        d = con.execute("""SELECT o.order_date AS date, o.city, d.courier
+                           FROM main.deliveries d JOIN main.orders o USING (order_id)""").df()
+    except duckdb.Error:
+        return
+    d["date"] = pd.to_datetime(d["date"])
+    for i in rows:
+        t = key.loc[i]
+        g = d[d["city"].isin(_seg_dict(t["segment"])["city"])]
+        s0 = t["start_date"]
+        before = g[(g["date"] >= s0 - pd.Timedelta(days=28)) & (g["date"] < s0)]["courier"].value_counts(normalize=True)
+        after = g[(g["date"] >= s0) & (g["date"] < s0 + pd.Timedelta(days=28))]["courier"].value_counts(normalize=True)
+        if after.empty:
+            continue
+        gain = after.sub(before, fill_value=0)
+        if gain.max() > 0.2:
+            key.at[i, "alias_pairs"] = {f"courier={gain.idxmax()}"}
+
+
+def load_truth(run_dir: str | Path) -> dict:
+    db = Path(run_dir) / "story.duckdb"
+    with duckdb.connect(str(db), read_only=True) as con:
+        key = con.execute("SELECT * FROM _truth.answer_key").df()
+        decoys = con.execute("SELECT * FROM _truth.decoys").df()
+        lo, hi = con.execute("SELECT min(order_date), max(order_date) FROM main.orders").fetchone()
+        key["start_date"] = pd.to_datetime(key["start_date"])
+        _supply_truth(con, key)
+        _courier_truth(con, key)
+    # an empty key reads `simulated` as object, and key[~col] is then a column selection
+    key["simulated"] = key["simulated"].astype(bool)
+    decoys["date"] = pd.to_datetime(decoys["date"])
+    return {"key": key, "scored": key[key["simulated"]].reset_index(drop=True), "decoys": decoys,
+            "start": pd.Timestamp(lo), "end": pd.Timestamp(hi)}
+
+
+def _true_pairs(true: pd.Series) -> set[str]:
+    """The event's target as key=value pairs (a supply event's supplier with its categories)."""
+    sp = true.get("supply_pairs") if hasattr(true, "get") else None
+    return set(sp) if isinstance(sp, set) else seg_pairs(true["segment"])
+
+
+def _alias(true: pd.Series) -> set[str]:
+    al = true.get("alias_pairs") if hasattr(true, "get") else None
+    return set(al) if isinstance(al, set) else set()
+
+
+def _family_pairs(true: pd.Series) -> set[str]:
+    """For consequences: the target plus the ticket topic its mechanism writes (an empty
+    shelf -> 'vyprodáno', a late courier -> 'zpoždění'), as s2d/verify.py tests them."""
+    out = _true_pairs(true) | _alias(true)
+    topic = TICKET_TOPIC.get(true.get("type") if hasattr(true, "get") else None)
+    if topic and true.get("mechanism") == "emergent":
+        out.add(f"topic={topic}")
+    return out
+
+
+def _observed(true: pd.Series):
+    o = true.get("observed_start") if hasattr(true, "get") else None
+    return None if o is None or pd.isna(o) else pd.Timestamp(o)
+
+
 def slots(pred: dict, true: pd.Series) -> dict:
-    """Per-slot scores for one pair, before the gate."""
-    t_true = true["start_date"] + pd.Timedelta(days=int(true["lag_days"] or 0))
+    """Per-slot scores for one pair, before the gate.
+
+    A supply event (supplier_delay, stockout) also matches the detective's stock-out of its
+    products: dated at the observed first stock-out, segment against the target with its
+    categories, no magnitude (the key's size is for another metric)."""
+    obs = _observed(true)
+    as_stockout = obs is not None and pred.get("kind") == "stockout"
+    t_true = obs if as_stockout else true["start_date"] + pd.Timedelta(days=int(true["lag_days"] or 0))
     delta = (pd.Timestamp(pred["start_date"]) - t_true).days
     tau = TAU.get(pred.get("kind", "shift"), 7)
-    a, b = seg_pairs(pred["segment"]), seg_pairs(true["segment"])
+    a, b = seg_pairs(pred["segment"]), _true_pairs(true)
     jac = 1.0 if not a and not b else len(a & b) / len(a | b)
+    alias = _alias(true)
+    if alias and a:  # the same target under another name (the new courier for its cities)
+        jac = max(jac, len(a & alias) / len(a | alias))
     p, t = abs(pred["magnitude_pct"] or 0), abs(true["magnitude_pct"] or 0)
-    mag = max(0.0, 1 - abs(math.log(p / t)) / math.log(2)) if p > 0 and t > 0 else 0.0
+    mag = max(0.0, 1 - abs(math.log(p / t)) / math.log(2)) if p > 0 and t > 0 and not as_stockout else 0.0
     true_lag = int(true["lag_days"] or 0)
     pred_lag = pred.get("lag_days")
     lag_ok = (pred_lag is not None and not (isinstance(pred_lag, float) and math.isnan(pred_lag))
               and abs(int(pred_lag) - true_lag) <= LAG_TOLERANCE) if true_lag else not pred_lag
+    gate = as_stockout or (pred["metric"] == true["metric"] and pred["direction"] == true["direction"])
     return {
-        "gate": float(pred["metric"] == true["metric"] and pred["direction"] == true["direction"]),
+        "gate": float(gate),
         "timing": max(0.0, 1 - abs(delta) / tau), "delta_days": delta,
         "segment": jac, "magnitude": mag, "lag": float(bool(lag_ok)),
     }
@@ -109,14 +230,38 @@ def consequence_of(e: dict, true: pd.Series) -> bool:
     lag = int(true["lag_days"] or 0)
     if not start <= day <= start + pd.Timedelta(days=lag + CONSEQUENCE_DAYS):
         return False
-    a, b = seg_pairs(e["segment"]), seg_pairs(true["segment"])
+    a, b = seg_pairs(e["segment"]), _family_pairs(true)
     bad = lambda metric, direction: (direction == "up") == ADVERSE_UP.get(metric, False)  # noqa: E731
     if (not a or not b or a & b) and bad(e["metric"], e["direction"]) == bad(true["metric"], true["direction"]):
         return True
+    if true.get("type") in SUPPLY_TYPES and e["metric"] in ("purchase_rate", "ticket_rate"):
+        # an outage has a whole cycle: the shelf empties, tickets come, then the restock brings
+        # orders back up and tickets down; and customers switch to other categories meanwhile,
+        # and back once the shelf is full again
+        if a & b or "category" in _dims(a) & _dims(b):
+            return True
     return bool(_dims(a) & _dims(b)) and not a & b and e["metric"] == true["metric"] and e["direction"] != true["direction"]
 
 
-def score(events: list[dict], truth: dict) -> dict:
+def background_of(e: dict, twin_events: list[dict]) -> dict | None:
+    """The twin's find that `e` repeats, if any: same metric and direction, within
+    BACKGROUND_DAYS, segments equal or overlapping (or both everyone). The twin has no story,
+    so such a find is how the company runs anyway (a routine stock-out, a courier's bad week),
+    not a hallucination and not the story."""
+    a = seg_pairs(e["segment"])
+    day = pd.Timestamp(e["start_date"])
+    for w in twin_events:
+        if w["metric"] != e["metric"] or w["direction"] != e["direction"]:
+            continue
+        if abs((pd.Timestamp(w["start_date"]) - day).days) > BACKGROUND_DAYS:
+            continue
+        b = seg_pairs(w["segment"])
+        if a == b or a & b:
+            return w
+    return None
+
+
+def score(events: list[dict], truth: dict, twin_events: list[dict] | None = None) -> dict:
     key = truth["scored"]
     n_p, n_t = len(events), len(key)
     pairs = [[slots(e, key.iloc[j]) for j in range(n_t)] for e in events]
@@ -145,7 +290,7 @@ def score(events: list[dict], truth: dict) -> dict:
                        **{k: (round(v, 3) if isinstance(v, float) else v) for k, v in sl.items()},
                        "caused_by_ok": cb})
     matched_p = {i for i, _ in matches}
-    fps, cons = [], []
+    fps, cons, background = [], [], []
     for i, e in enumerate(events):
         if i in matched_p:
             continue
@@ -156,11 +301,19 @@ def score(events: list[dict], truth: dict) -> dict:
             continue
         day = pd.Timestamp(e["start_date"])
         near = truth["decoys"][(truth["decoys"]["date"] - day).abs() <= pd.Timedelta(days=3)]
+        decoy = near.iloc[0]["type"] if len(near) else None
+        tw = background_of(e, twin_events) if twin_events and decoy is None else None
+        if tw is not None:  # a decoy stays a false find: it is planted in both worlds on purpose
+            background.append({"pred_id": e["id"], "metric": e["metric"], "segment": e["segment"],
+                               "start_date": e["start_date"], "direction": e["direction"],
+                               "twin_id": tw["id"], "twin_start_date": tw["start_date"]})
+            continue
         fps.append({"pred_id": e["id"], "metric": e["metric"], "segment": e["segment"],
-                    "start_date": e["start_date"], "decoy": near.iloc[0]["type"] if len(near) else None})
+                    "start_date": e["start_date"], "decoy": decoy})
     matched_t = {j for _, j in matches}
     misses = [key.iloc[j]["event_id"] for j in range(n_t) if j not in matched_t]
-    # with consequences: a consequence is neither a TP nor an FP, precision = TP / (TP + FP)
+    # with consequences: a consequence (or a find the twin has too) is neither a TP nor an FP,
+    # precision = TP / (TP + FP)
     p_c = tp / (tp + len(fps)) if tp + len(fps) else 0.0
     f1_c = 2 * p_c * recall / (p_c + recall) if p_c + recall else 0.0
     slot_mean = {k: round(float(np.mean([d[k] for d in detail])), 3) if detail else None
@@ -168,18 +321,19 @@ def score(events: list[dict], truth: dict) -> dict:
     return {"precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3),
             "precision_cons": round(p_c, 3), "f1_cons": round(f1_c, 3), "n_fp": len(fps),
             "tp": tp, "n_pred": n_p, "n_true": n_t, "matches": detail, "false_positives": fps,
-            "consequences": cons,
+            "consequences": cons, "background": background,
             "missed": misses, "slots": slot_mean,
             "caused_by_bonus": {"hit": cb_hit, "possible": cb_possible},
             "excluded": truth["key"][~truth["key"]["simulated"]]["event_id"].tolist(),
             "score_matrix": s.round(3).tolist()}
 
 
-def placebo(events: list[dict], truth: dict, n: int = 200, seed: int = 0) -> dict:
+def placebo(events: list[dict], truth: dict, n: int = 200, seed: int = 0,
+            twin_events: list[dict] | None = None) -> dict:
     """Shuffle the answer-key dates n times. How often does a random key score as
     well as the real one? p = (1 + #(F1_placebo >= F1_real)) / (1 + n)."""
     rng = np.random.default_rng(seed)
-    sc = score(events, truth)
+    sc = score(events, truth, twin_events)
     real, real_c = sc["f1"], sc["f1_cons"]
     days = (truth["end"] - truth["start"]).days
     f1s, f1s_c = [], []
@@ -188,9 +342,12 @@ def placebo(events: list[dict], truth: dict, n: int = 200, seed: int = 0) -> dic
         k = truth["scored"].copy()
         lag = k["lag_days"].fillna(0).astype(int).to_numpy()
         offs = rng.integers(0, np.maximum(days - lag, 1))
-        k["start_date"] = truth["start"] + pd.to_timedelta(offs, unit="D")
+        new = truth["start"] + pd.to_timedelta(offs, unit="D")
+        if "observed_start" in k:  # the observed stock-out moves with its event
+            k["observed_start"] = new + (pd.to_datetime(k["observed_start"]) - k["start_date"]).to_numpy()
+        k["start_date"] = new
         fake["scored"] = k
-        ps = score(events, fake)
+        ps = score(events, fake, twin_events)
         f1s.append(ps["f1"])
         f1s_c.append(ps["f1_cons"])
     f1s, f1s_c = np.array(f1s), np.array(f1s_c)
@@ -218,13 +375,16 @@ def scorecard(run_dir: str | Path, twin_dir: str | Path | None = None, *, narrat
     run_dir = Path(run_dir)
     det = _detect(run_dir, narrate)
     truth = load_truth(run_dir)
-    card = {"run_dir": str(run_dir), "score": score(det["events"], truth),
-            "answer_key": truth["key"].assign(start_date=truth["key"]["start_date"].dt.date.astype(str))
-                                      .to_dict("records"),
+    twin = _detect(Path(twin_dir), narrate) if twin_dir else None
+    tw_events = twin["events"] if twin else None
+    key = truth["key"].drop(columns=["supply_pairs", "alias_pairs"]).assign(
+        start_date=truth["key"]["start_date"].dt.date.astype(str),
+        observed_start=truth["key"]["observed_start"].map(lambda d: None if pd.isna(d) else str(d.date())))
+    card = {"run_dir": str(run_dir), "score": score(det["events"], truth, tw_events),
+            "answer_key": key.to_dict("records"),
             "events": det["events"], "timing": det["timing"]}
-    card["placebo"] = placebo(det["events"], truth, n_placebo)
-    if twin_dir:
-        twin = _detect(Path(twin_dir), narrate)
+    card["placebo"] = placebo(det["events"], truth, n_placebo, twin_events=tw_events)
+    if twin:
         card["twin"] = {"n_events": len(twin["events"]), "days": twin["days"],
                         "false_events_per_year": twin_rate(twin["events"], twin["days"]),
                         "events": twin["events"]}
@@ -323,6 +483,9 @@ def _print_card(card: dict) -> None:
     for fp in s["false_positives"]:
         print(f"  false positive {fp['pred_id']} {fp['metric']} {fp['segment'] or 'everyone'} {fp['start_date']}"
               + (f"  (decoy: {fp['decoy']})" if fp["decoy"] else ""))
+    for b in s.get("background", []):
+        print(f"  background {b['pred_id']} {b['metric']} {b['direction']} {b['segment'] or 'everyone'} "
+              f"{b['start_date']}  (twin {b['twin_id']} {b['twin_start_date']})")
     for c in s["consequences"]:
         print(f"  důsledek {c['pred_id']} {c['metric']} {c['direction']} {c['segment'] or 'everyone'} "
               f"{c['start_date']}  (of {c['of']})")
