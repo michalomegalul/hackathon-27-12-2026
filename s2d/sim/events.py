@@ -29,8 +29,9 @@ def size_scale(spec: StorySpec, eff: Effect) -> float:
     (effect.size_stated, DECISIONS 90), DIFFICULTY_SCALE otherwise."""
     return 1.0 if eff.size_stated else DIFFICULTY_SCALE[spec.meta.difficulty]
 
-# Metrics the day loop applies as multiplier curves.
-IMPLEMENTED_METRICS = {Metric.purchase_rate, Metric.churn_hazard, Metric.acquisition_rate}
+# Metrics the day loop applies as multiplier curves. ticket_rate scales the chance that an
+# order gets a support ticket (s2d/sim/service.py `_new_tickets`).
+IMPLEMENTED_METRICS = {Metric.purchase_rate, Metric.churn_hazard, Metric.acquisition_rate, Metric.ticket_rate}
 # Effect sizes in absolute units (report: "or absolute for rating/delivery_days").
 ABSOLUTE_METRICS = {Metric.delivery_days, Metric.rating_mean}
 # Metrics that follow from the service rules (s2d/sim/service.py) once an event changes

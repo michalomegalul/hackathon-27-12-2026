@@ -1221,3 +1221,15 @@ the top of `s2d/detective/scan.py`.
      sold for 12 of 932 days, then nothing, and its −20 % event was "not testable: the KPI
      has no days". Now a shipment arrives at least one day after it is ordered. A lead
      time of 1 or more is unchanged, so no existing world changes.
+133. **`ticket_rate` is simulated** (`s2d/sim/events.py IMPLEMENTED_METRICS`,
+     `s2d/sim/service.py _new_tickets`). It was the effect a quality issue gets from "the
+     database is under load" (Nahá pravda E2, +200 % tickets for 60 days), and the event was
+     skipped as "not simulated yet". Now the chance that an order gets a baseline support
+     ticket is multiplied by `1 + size · curve[day]` for the customers the effect targets
+     (capped at 1). The uniform draws are the same as without the event, so the twin stays
+     paired: before the event story and twin have the same tickets (test
+     `test_ticket_rate_event_raises_tickets_and_pairs_with_the_twin`: 440 against 147 tickets in
+     the 30-day window of a +200 % event on 6 000 customers, identical before it). Events whose
+     ticket effect is emergent (courier change, supplier delay, stock-out) are unchanged. The
+     verifier already tests the `tickets` KPI as a daily count difference (year over year for
+     an event with no group to compare with).

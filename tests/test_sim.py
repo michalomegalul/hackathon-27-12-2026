@@ -243,3 +243,21 @@ def test_unsupported_effect_skips_only_itself():
     assert [e.metric for e in story.effects if not e.is_decoy] == [Metric.purchase_rate]
     assert unsupported_reason(spec, ev) is None and "rating_mean" in unsupported_reason(spec, ev, ev.effects[0])
     assert any("rating_mean" in s for s in story.skipped)
+
+
+def test_ticket_rate_event_raises_tickets_and_pairs_with_the_twin():
+    """A ticket_rate effect (a quality issue, Nahá pravda E2) multiplies the tickets per order
+    in its window; before it the story and the twin are the same rows."""
+    from s2d.spec import EventType, Metric, Target
+    spec = small_spec(6000)
+    start = pd.Timestamp(spec.events[0].start)
+    spec.events = [Event(id="Q", type=EventType.quality_issue, start=spec.events[0].start, target=Target(),
+                         effects=[Effect(metric=Metric.ticket_rate, size=2.0, ramp_days=1, duration_days=30)])]
+
+    def opened(world):
+        return pd.to_datetime(world.tables["tickets"]["opened_at"]).dt.normalize()
+
+    story, twin = opened(simulate(spec)), opened(simulate(without_story(spec)))
+    window = lambda s: ((s >= start) & (s < start + pd.Timedelta(days=30))).sum()
+    assert (story < start).sum() == (twin < start).sum()   # paired: nothing before the event differs
+    assert window(story) > 2 * window(twin)

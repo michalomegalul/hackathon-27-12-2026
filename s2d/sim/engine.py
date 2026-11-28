@@ -100,7 +100,8 @@ def run_day_loop(spec: StorySpec, cal: Calendar, story: CompiledStory, pop: Popu
     buy_effects = _prepare_effects(spec, story, pop, cat, Metric.purchase_rate)
     holiday_factor = _holiday_factor(spec, pop, cal)
     chan_is_store = np.array([c.channel == Channel.store for c in spec.company.channels])
-    svc = Service(spec, cal, pop.n, pop.city, streams)
+    svc = Service(spec, cal, pop.n, pop.city, streams,
+                  ticket_effects=_prepare_effects(spec, story, pop, cat, Metric.ticket_rate))
     plans = build_plans(spec, pop.segment, pop.base_rate, pop.signup_day, streams["subscriptions"])
     adhoc = np.where(plans.is_sub, 1 - SCHEDULED_SHARE, 1.0)  # subscribers: the rest is on schedule
     chans = [c.channel for c in spec.company.channels]

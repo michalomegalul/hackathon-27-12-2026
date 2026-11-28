@@ -144,8 +144,9 @@ class Service:
     """Per-customer service state plus the rows of deliveries, tickets and reviews."""
 
     def __init__(self, spec: StorySpec, cal: Calendar, n_customers: int, city: np.ndarray,
-                 rngs: dict[str, np.random.Generator]):
+                 rngs: dict[str, np.random.Generator], ticket_effects: list | None = None):
         self.spec, self.cal = spec, cal
+        self.ticket_effects = ticket_effects or []  # story effects on the ticket rate (engine._ActiveEffect)
         self.city = city
         self.plan = courier_plan(spec, cal)
         self.rng_d, self.rng_t, self.rng_r = rngs["deliveries"], rngs["tickets"], rngs["reviews"]
@@ -277,7 +278,12 @@ class Service:
         base = self.spec.baseline.ticket_rate_per_order
         p_late = np.minimum(TICKET_PER_LATE_DAY * delay, TICKET_LATE_MAX)
         late_t = rng.random(len(o)) < p_late
-        base_t = ~late_t & (rng.random(len(o)) < base)
+        # a ticket_rate event multiplies the chance of a ticket per order; the same uniform draws
+        # as without it, so the twin stays paired
+        mult = np.ones(len(o))
+        for e in self.ticket_effects:
+            mult *= 1 + e.size * e.curve[np.minimum(day, n_days - 1)] * e.customers[c]
+        base_t = ~late_t & (rng.random(len(o)) < np.minimum(base * np.maximum(mult, 0), 1.0))
         # A late parcel: the customer writes the day after the promised date (or a bit later).
         lday = promised[late_t] + rng.geometric(0.6, late_t.sum())
         bday = day[base_t] + rng.geometric(0.5, base_t.sum()) - 1
