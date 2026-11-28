@@ -25,6 +25,7 @@ dependencies = [
 dev = [
     "pytest==9.2.0",
     "matplotlib==3.11.2",
+    "pytest-xdist==3.8.0",
 ]
 
 [tool.uv]
@@ -33,6 +34,8 @@ package = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# the real-Ollama tests only run on request: uv run pytest -m integration -s
+addopts = "-m 'not integration'"
 markers = [
     "integration: needs the real homelab Ollama (skipped when unreachable)",
     "postgres: needs S2D_TEST_PG (skipped otherwise)",
